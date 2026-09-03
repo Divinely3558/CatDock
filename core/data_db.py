@@ -1,0 +1,458 @@
+#!/usr/bin/env python3
+"""catdock 数据库模块 (data.db)
+
+使用 SQLite 持久化存储：
+  - 认证失败计数与封禁 IP 列表
+  - 下载用户及其密码（哈希+盐）
+
+服务端（main.py / api_server.py）与 CLI 工具（bpip / user）共用本模块。
+
+数据库表结构：
+  - failed_attempts: 记录每个 IP 的认证失败累计次数（永久累计，不清零）
+  - banned_ips:      已封禁的 IP 列表（永久封禁，需手动删除）
+  - users:           下载用户列表（用户名 + 密码哈希）
+
+CLI 用法（本文件直接作为脚本运行，或通过 bpip 命令调用）：
+    python data_db.py show
+    python data_db.py add <IP地址>
+    python data_db.py del <IP地址>
+"""
+import os
+import re
+import sqlite3
+import threading
+import time
+import hmac
+import hashlib
+import secrets
+
+# 认证失败达到该次数后自动封禁
+MAX_AUTH_FAILURES = 5
+
+# 数据库文件路径：固定为容器内 config.json 同级目录
+# 服务端会通过 set_db_path() 覆盖为 CONFIG_FILE 同级，CLI 直接使用此默认路径
+DB_PATH = '/home/downloader/config/data.db'
+
+# 用户名规则：仅字母+数字、不能全数字、字母字符数不少于 4
+_USERNAME_RE = re.compile(r'^[A-Za-z0-9]+$')
+
+# pbkdf2 迭代次数
+_PBKDF2_ITERATIONS = 100000
+
+_db_lock = threading.Lock()
+_db_conn = None
+
+
+def set_db_path(path):
+    """设置数据库文件路径，并重置连接以便下次访问时使用新路径。
+
+    服务端在 load_config 中调用，确保 .db 与 config.json 同级。
+    """
+    global DB_PATH, _db_conn
+    with _db_lock:
+        DB_PATH = path
+        if _db_conn is not None:
+            try:
+                _db_conn.close()
+            except Exception:
+                pass
+            _db_conn = None
+
+
+def _get_conn():
+    """获取（懒加载）数据库连接，自动建表"""
+    global _db_conn
+    if _db_conn is None:
+        # 确保目录存在
+        db_dir = os.path.dirname(DB_PATH)
+        if db_dir and not os.path.exists(db_dir):
+            os.makedirs(db_dir, exist_ok=True)
+        # 一次性迁移：若 data.db 不存在但旧 banned_ips.db 存在，则改名复用
+        if not os.path.exists(DB_PATH):
+            old_path = os.path.join(db_dir or '.', 'banned_ips.db')
+            if os.path.exists(old_path):
+                try:
+                    os.rename(old_path, DB_PATH)
+                except OSError:
+                    pass
+        _db_conn = sqlite3.connect(DB_PATH, check_same_thread=False)
+        # DELETE 为默认日志模式：事务提交后日志自动删除，目录中只保留 .db 文件
+        # （WAL 模式会常驻生成 -wal/-shm 伴随文件，且 SQLite 强制其与 .db 同目录）
+        _db_conn.execute("PRAGMA journal_mode=DELETE")
+        _db_conn.execute("""
+            CREATE TABLE IF NOT EXISTS failed_attempts (
+                ip TEXT PRIMARY KEY,
+                count INTEGER DEFAULT 0,
+                last_attempt_time TEXT
+            )
+        """)
+        _db_conn.execute("""
+            CREATE TABLE IF NOT EXISTS banned_ips (
+                ip TEXT PRIMARY KEY,
+                banned_at TEXT,
+                reason TEXT
+            )
+        """)
+        _db_conn.execute("""
+            CREATE TABLE IF NOT EXISTS users (
+                username TEXT PRIMARY KEY,
+                password_hash TEXT NOT NULL,
+                created_at TEXT
+            )
+        """)
+        _db_conn.commit()
+    return _db_conn
+
+
+def init_db():
+    """显式初始化数据库（建表），供服务端启动时调用"""
+    with _db_lock:
+        _get_conn()
+
+
+def reconnect_db():
+    """关闭并重新打开数据库连接，确保表结构存在（数据保留）。
+
+    供 /reload 接口调用，应对 DB 文件被外部替换/移动的情况。
+    """
+    global _db_conn
+    with _db_lock:
+        if _db_conn is not None:
+            try:
+                _db_conn.close()
+            except Exception:
+                pass
+            _db_conn = None
+        _get_conn()
+
+
+def is_ip_banned(ip):
+    """检查 IP 是否已被封禁"""
+    with _db_lock:
+        conn = _get_conn()
+        cursor = conn.execute("SELECT 1 FROM banned_ips WHERE ip = ?", (ip,))
+        return cursor.fetchone() is not None
+
+
+def record_auth_failure(ip):
+    """记录一次认证失败（URL_PREFIX / AUTH_KEY 错误）。
+
+    累计达到 MAX_AUTH_FAILURES 次时自动封禁该 IP。
+    返回 True 表示本次触发了封禁，False 表示仅累计。
+    """
+    with _db_lock:
+        conn = _get_conn()
+        now = time.strftime('%Y-%m-%d %H:%M:%S')
+        cursor = conn.execute("SELECT count FROM failed_attempts WHERE ip = ?", (ip,))
+        row = cursor.fetchone()
+        if row:
+            count = row[0] + 1
+            conn.execute(
+                "UPDATE failed_attempts SET count = ?, last_attempt_time = ? WHERE ip = ?",
+                (count, now, ip),
+            )
+        else:
+            count = 1
+            conn.execute(
+                "INSERT INTO failed_attempts (ip, count, last_attempt_time) VALUES (?, ?, ?)",
+                (ip, count, now),
+            )
+        conn.commit()
+
+        if count >= MAX_AUTH_FAILURES:
+            conn.execute(
+                "INSERT OR IGNORE INTO banned_ips (ip, banned_at, reason) VALUES (?, ?, ?)",
+                (ip, now, 'auto'),
+            )
+            # 封禁后清除失败计数，避免解封后残留
+            conn.execute("DELETE FROM failed_attempts WHERE ip = ?", (ip,))
+            conn.commit()
+            return True
+        return False
+
+
+def add_banned_ip(ip):
+    """手动添加封禁 IP，原因固定为 'manual'"""
+    with _db_lock:
+        conn = _get_conn()
+        now = time.strftime('%Y-%m-%d %H:%M:%S')
+        conn.execute(
+            "INSERT OR REPLACE INTO banned_ips (ip, banned_at, reason) VALUES (?, ?, ?)",
+            (ip, now, 'manual'),
+        )
+        conn.commit()
+
+
+def remove_banned_ip(ip):
+    """手动删除（解封）IP，同时清除其失败计数"""
+    with _db_lock:
+        conn = _get_conn()
+        conn.execute("DELETE FROM banned_ips WHERE ip = ?", (ip,))
+        conn.execute("DELETE FROM failed_attempts WHERE ip = ?", (ip,))
+        conn.commit()
+
+
+def list_banned_ips():
+    """返回所有封禁 IP 列表 [(ip, banned_at, reason), ...]"""
+    with _db_lock:
+        conn = _get_conn()
+        cursor = conn.execute(
+            "SELECT ip, banned_at, reason FROM banned_ips ORDER BY banned_at DESC"
+        )
+        return cursor.fetchall()
+
+
+def get_failure_count(ip):
+    """获取指定 IP 的当前失败计数（用于调试/展示）"""
+    with _db_lock:
+        conn = _get_conn()
+        cursor = conn.execute("SELECT count FROM failed_attempts WHERE ip = ?", (ip,))
+        row = cursor.fetchone()
+        return row[0] if row else 0
+
+
+# ============ 用户管理 ============
+
+def validate_username(username):
+    """校验用户名：仅字母+数字、不能全数字、字母字符数不少于 4。
+
+    返回 (ok, reason)；ok=True 时 reason 为空。
+    """
+    if not username or not isinstance(username, str):
+        return False, "用户名不能为空"
+    if not _USERNAME_RE.match(username):
+        return False, "用户名只允许字母和数字"
+    if username.isdigit():
+        return False, "用户名不能为纯数字"
+    letter_count = sum(1 for c in username if c.isalpha())
+    if letter_count < 4:
+        return False, "用户名中字母数量不能少于 4 位"
+    return True, ""
+
+
+def _hash_password(password):
+    """生成 pbkdf2 + 随机盐 的密码哈希字符串"""
+    salt = secrets.token_hex(16)
+    dk = hashlib.pbkdf2_hmac('sha256', password.encode('utf-8'),
+                             bytes.fromhex(salt), _PBKDF2_ITERATIONS)
+    return f"pbkdf2$sha256${_PBKDF2_ITERATIONS}${salt}${dk.hex()}"
+
+
+def _verify_password(password, stored):
+    """校验密码与存储的哈希是否匹配（恒定时间比较）"""
+    try:
+        algo, hashalgo, iterations, salt, hashhex = stored.split('$')
+        if algo != 'pbkdf2':
+            return False
+        iterations = int(iterations)
+        dk = hashlib.pbkdf2_hmac(hashalgo, password.encode('utf-8'),
+                                 bytes.fromhex(salt), iterations)
+        return hmac.compare_digest(dk.hex(), hashhex)
+    except Exception:
+        return False
+
+
+def add_user(username, password):
+    """添加用户。用户名非法或已存在时抛出 ValueError。"""
+    ok, reason = validate_username(username)
+    if not ok:
+        raise ValueError(reason)
+    if not password:
+        raise ValueError("密码不能为空")
+    with _db_lock:
+        conn = _get_conn()
+        cursor = conn.execute("SELECT 1 FROM users WHERE username = ?", (username,))
+        if cursor.fetchone() is not None:
+            raise ValueError(f"用户已存在: {username}")
+        conn.execute(
+            "INSERT INTO users (username, password_hash, created_at) VALUES (?, ?, ?)",
+            (username, _hash_password(password),
+             time.strftime('%Y-%m-%d %H:%M:%S')),
+        )
+        conn.commit()
+
+
+def del_user(username):
+    """删除用户。返回 True 表示已删除；False 表示用户不存在。
+    若删除后无用户剩余，抛出 ValueError（至少保留一个用户）。
+    """
+    with _db_lock:
+        conn = _get_conn()
+        cursor = conn.execute("SELECT 1 FROM users WHERE username = ?", (username,))
+        if cursor.fetchone() is None:
+            return False
+        # 不允许删除最后一个用户，避免锁死
+        cnt_cursor = conn.execute("SELECT COUNT(*) FROM users")
+        if cnt_cursor.fetchone()[0] <= 1:
+            raise ValueError("至少保留一个用户，不能删除最后一个用户")
+        conn.execute("DELETE FROM users WHERE username = ?", (username,))
+        conn.commit()
+        return True
+
+
+def change_password(username, new_password):
+    """修改用户密码。用户不存在或新密码为空时抛出 ValueError。"""
+    if not new_password:
+        raise ValueError("密码不能为空")
+    with _db_lock:
+        conn = _get_conn()
+        cursor = conn.execute("SELECT 1 FROM users WHERE username = ?", (username,))
+        if cursor.fetchone() is None:
+            raise ValueError(f"用户不存在: {username}")
+        conn.execute(
+            "UPDATE users SET password_hash = ? WHERE username = ?",
+            (_hash_password(new_password), username),
+        )
+        conn.commit()
+
+
+def verify_user(username, password):
+    """校验用户名+密码。返回 True/False。"""
+    with _db_lock:
+        conn = _get_conn()
+        cursor = conn.execute(
+            "SELECT password_hash FROM users WHERE username = ?", (username,))
+        row = cursor.fetchone()
+        if row is None:
+            return False
+        return _verify_password(password, row[0])
+
+
+def user_exists(username):
+    """用户名是否已存在"""
+    with _db_lock:
+        conn = _get_conn()
+        cursor = conn.execute("SELECT 1 FROM users WHERE username = ?", (username,))
+        return cursor.fetchone() is not None
+
+
+def user_count():
+    """返回当前用户总数"""
+    with _db_lock:
+        conn = _get_conn()
+        cursor = conn.execute("SELECT COUNT(*) FROM users")
+        return cursor.fetchone()[0]
+
+
+def list_users():
+    """返回所有用户名列表 [(username, created_at), ...]"""
+    with _db_lock:
+        conn = _get_conn()
+        cursor = conn.execute(
+            "SELECT username, created_at FROM users ORDER BY created_at ASC")
+        return cursor.fetchall()
+
+
+# ============ CLI 子命令入口（bpip） ============
+
+def _print_usage():
+    print("用法: bpip <子命令> [参数]")
+    print("")
+    print("子命令:")
+    print("  show            显示所有被封禁的 IP 列表")
+    print("  add <IP地址>     手动添加封禁 IP")
+    print("  del <IP地址>     手动删除（解封）封禁 IP")
+    print("")
+    print("示例:")
+    print("  bpip show")
+    print("  bpip add 192.168.1.100")
+    print("  bpip del 192.168.1.100")
+
+
+def _cmd_show():
+    import sys
+    try:
+        rows = list_banned_ips()
+    except Exception as e:
+        print(f"读取封禁列表失败: {e}", file=sys.stderr)
+        print(f"数据库路径: {DB_PATH}", file=sys.stderr)
+        return 1
+
+    if not rows:
+        print("当前没有被封禁的 IP")
+        return 0
+
+    print(f"封禁 IP 列表（共 {len(rows)} 个）:")
+    print(f"{'序号':<6}{'IP 地址':<20}{'封禁时间':<22}{'封禁原因'}")
+    print("-" * 60)
+    for idx, (ip, banned_at, reason) in enumerate(rows, 1):
+        reason_display = '自动封禁' if reason == 'auto' else '手动添加'
+        print(f"{idx:<6}{ip:<20}{banned_at:<22}{reason_display}")
+    return 0
+
+
+def _cmd_add(args):
+    import sys
+    import ipaddress
+    if not args:
+        print("用法: bpip add <IP地址>", file=sys.stderr)
+        return 1
+
+    ip = args[0].strip()
+
+    try:
+        ipaddress.ip_address(ip)
+    except ValueError:
+        print(f"错误: '{ip}' 不是合法的 IP 地址", file=sys.stderr)
+        return 1
+
+    try:
+        add_banned_ip(ip)
+    except Exception as e:
+        print(f"添加封禁 IP 失败: {e}", file=sys.stderr)
+        print(f"数据库路径: {DB_PATH}", file=sys.stderr)
+        return 1
+
+    print(f"已封禁 IP: {ip}")
+    return 0
+
+
+def _cmd_del(args):
+    import sys
+    if not args:
+        print("用法: bpip del <IP地址>", file=sys.stderr)
+        return 1
+
+    ip = args[0].strip()
+
+    try:
+        if not is_ip_banned(ip):
+            print(f"IP {ip} 不在封禁列表中")
+            return 0
+        remove_banned_ip(ip)
+    except Exception as e:
+        print(f"删除封禁 IP 失败: {e}", file=sys.stderr)
+        print(f"数据库路径: {DB_PATH}", file=sys.stderr)
+        return 1
+
+    print(f"已解封 IP: {ip}")
+    return 0
+
+
+def main():
+    import sys
+    argv = sys.argv[1:]
+    if not argv:
+        _print_usage()
+        sys.exit(1)
+
+    subcmd = argv[0]
+    rest = argv[1:]
+
+    if subcmd == 'show':
+        sys.exit(_cmd_show())
+    elif subcmd == 'add':
+        sys.exit(_cmd_add(rest))
+    elif subcmd == 'del':
+        sys.exit(_cmd_del(rest))
+    elif subcmd in ('-h', '--help', 'help'):
+        _print_usage()
+        sys.exit(0)
+    else:
+        print(f"未知子命令: {subcmd}", file=sys.stderr)
+        _print_usage()
+        sys.exit(1)
+
+
+if __name__ == '__main__':
+    main()

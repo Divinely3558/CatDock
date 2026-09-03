@@ -1,0 +1,8 @@
+{
+  "port": 8080,
+  "output_format": {
+    "format": "mp4"
+  },
+  "debug": false,
+  "same_video_by_filename": false
+}

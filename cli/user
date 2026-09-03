@@ -1,0 +1,176 @@
+#!/usr/bin/env python3
+"""user - catdock 下载用户管理命令行工具
+
+实际逻辑位于 core/data_db.py（data.db 的 users 表）。
+
+用法:
+    user add <用户名>        添加用户（交互式输入密码）
+    user del <用户名>        删除用户（至少保留一个）
+    user password <用户名>   修改用户密码
+    user --help
+
+用户名规则：仅字母+数字、不能纯数字、字母数量不少于 4 位。
+密码以 pbkdf2 + 随机盐 哈希存储，不留明文。
+首次使用（data.db 无用户）仅允许 user add。
+"""
+import os
+import sys
+import getpass
+
+# 将模块所在目录加入 sys.path，以便导入 data_db 模块
+# 查找顺序：脚本同目录（容器内平铺布局）→ ../core/（仓库源码布局）
+_BASE = os.path.dirname(os.path.realpath(__file__))
+sys.path.insert(0, os.path.join(_BASE, '..', 'core'))
+sys.path.insert(0, _BASE)
+
+import data_db
+
+
+def _prompt_password(label="密码"):
+    """交互式读取并确认密码，返回明文密码或 None（取消）"""
+    try:
+        pwd = getpass.getpass(f"请输入{label}: ")
+    except (EOFError, KeyboardInterrupt):
+        print("\n已取消")
+        return None
+    if not pwd:
+        print("错误: 密码不能为空", file=sys.stderr)
+        return None
+    try:
+        pwd2 = getpass.getpass(f"请再次输入{label}: ")
+    except (EOFError, KeyboardInterrupt):
+        print("\n已取消")
+        return None
+    if pwd != pwd2:
+        print("错误: 两次输入的密码不一致", file=sys.stderr)
+        return None
+    return pwd
+
+
+def _require_users_exist():
+    """data.db 无用户时除 add 外的命令前置检查。返回 True 表示可继续。"""
+    try:
+        if data_db.user_count() == 0:
+            print("data.db 中尚无用户，请先运行: user add <用户名>", file=sys.stderr)
+            return False
+    except Exception as e:
+        print(f"读取用户列表失败: {e}", file=sys.stderr)
+        print(f"数据库路径: {data_db.DB_PATH}", file=sys.stderr)
+        return False
+    return True
+
+
+def _cmd_add(args):
+    if not args:
+        print("用法: user add <用户名>", file=sys.stderr)
+        return 1
+    username = args[0].strip()
+    # 先做格式预校验，给出友好提示
+    ok, reason = data_db.validate_username(username)
+    if not ok:
+        print(f"错误: {reason}", file=sys.stderr)
+        return 1
+    password = _prompt_password()
+    if password is None:
+        return 1
+    try:
+        data_db.add_user(username, password)
+    except ValueError as e:
+        print(f"错误: {e}", file=sys.stderr)
+        return 1
+    except Exception as e:
+        print(f"添加用户失败: {e}", file=sys.stderr)
+        print(f"数据库路径: {data_db.DB_PATH}", file=sys.stderr)
+        return 1
+    print(f"已添加用户: {username}")
+    return 0
+
+
+def _cmd_del(args):
+    if not _require_users_exist():
+        return 1
+    if not args:
+        print("用法: user del <用户名>", file=sys.stderr)
+        return 1
+    username = args[0].strip()
+    try:
+        removed = data_db.del_user(username)
+    except ValueError as e:
+        print(f"错误: {e}", file=sys.stderr)
+        return 1
+    except Exception as e:
+        print(f"删除用户失败: {e}", file=sys.stderr)
+        print(f"数据库路径: {data_db.DB_PATH}", file=sys.stderr)
+        return 1
+    if removed:
+        print(f"已删除用户: {username}")
+    else:
+        print(f"用户不存在: {username}")
+    return 0
+
+
+def _cmd_password(args):
+    if not _require_users_exist():
+        return 1
+    if not args:
+        print("用法: user password <用户名>", file=sys.stderr)
+        return 1
+    username = args[0].strip()
+    if not data_db.user_exists(username):
+        print(f"错误: 用户不存在: {username}", file=sys.stderr)
+        return 1
+    password = _prompt_password("新密码")
+    if password is None:
+        return 1
+    try:
+        data_db.change_password(username, password)
+    except ValueError as e:
+        print(f"错误: {e}", file=sys.stderr)
+        return 1
+    except Exception as e:
+        print(f"修改密码失败: {e}", file=sys.stderr)
+        print(f"数据库路径: {data_db.DB_PATH}", file=sys.stderr)
+        return 1
+    print(f"已修改用户密码: {username}")
+    return 0
+
+
+def _print_usage():
+    print("用法: user <子命令> [参数]")
+    print("")
+    print("子命令:")
+    print("  add <用户名>        添加用户（交互式输入密码）")
+    print("  del <用户名>        删除用户（至少保留一个）")
+    print("  password <用户名>   修改用户密码")
+    print("")
+    print("用户名规则: 仅字母+数字、不能纯数字、字母数量不少于 4 位")
+    print("")
+    print("示例:")
+    print("  user add alice")
+    print("  user del alice")
+    print("  user password alice")
+
+
+def main():
+    argv = sys.argv[1:]
+    if not argv or argv[0] in ('-h', '--help', 'help'):
+        _print_usage()
+        sys.exit(0 if argv else 1)
+
+    subcmd = argv[0]
+    rest = argv[1:]
+
+    if subcmd == 'add':
+        sys.exit(_cmd_add(rest))
+    elif subcmd == 'del':
+        sys.exit(_cmd_del(rest))
+    elif subcmd == 'password':
+        sys.exit(_cmd_password(rest))
+    else:
+        print(f"未知子命令: {subcmd}", file=sys.stderr)
+        _print_usage()
+        sys.exit(1)
+
+
+if __name__ == '__main__':
+    main()

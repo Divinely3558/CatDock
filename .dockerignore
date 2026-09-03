@@ -1,0 +1,51 @@
+# Git 元数据
+.git/
+.gitignore
+.gitattributes
+
+# 编辑器临时文件
+*.swp
+*.swo
+*~
+
+# 文档与许可（运行时不需要）
+README.md
+LICENSE
+
+# Python 构建产物
+__pycache__/
+*.py[oc]
+*.egg-info
+*.spec
+build/
+dist/
+
+# 虚拟环境
+.venv
+
+# 日志与运行时数据
+*.log
+Logs/
+
+# IP 封禁数据库与 SQLite 临时文件
+*.db
+*.db-wal
+*.db-shm
+
+# 任务与去重记录
+taken
+
+# 临时下载中间文件与本地产物
+temporaryfile
+downlocal
+
+# 抓取 cookie（敏感）
+cookies.txt
+
+# 敏感配置文件（含真实密码，禁止入镜像；模板 config.example.json 需保留）
+config.json
+
+# 本地部署与编辑器配置
+deploy.sh
+.markdownlint.json
+.trae

@@ -1,0 +1,1814 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <link rel="icon" href="favicon.ico" />
+    <title>CatDock 网页控制台</title>
+    <style>
+      /* ===== 亮色模式通用色 ===== */
+      :root,
+      :root[data-mode="light"] {
+        --bg: #f3f5f9;
+        --card: #ffffff;
+        --border: #e5e8ef;
+        --text: #1f2937;
+        --text-2: #6b7280;
+        --text-3: #9ca3af;
+        --code-bg: #f8fafc;
+        --input-bg: #fff;
+        --ghost-bg: #fff;
+        --ghost-hover: #f8fafc;
+        --mask: rgba(17, 24, 39, 0.45);
+        --radius: 12px;
+        --shadow:
+          0 1px 3px rgba(16, 24, 40, 0.08), 0 1px 2px rgba(16, 24, 40, 0.04);
+      }
+      /* ===== 暗色模式通用色 ===== */
+      :root[data-mode="dark"] {
+        --bg: #111827;
+        --card: #1e293b;
+        --border: #334155;
+        --text: #e2e8f0;
+        --text-2: #94a3b8;
+        --text-3: #64748b;
+        --code-bg: #0f172a;
+        --input-bg: #0f172a;
+        --ghost-bg: rgba(255, 255, 255, 0.08);
+        --ghost-hover: rgba(255, 255, 255, 0.14);
+        --mask: rgba(0, 0, 0, 0.6);
+        --shadow: 0 1px 3px rgba(0, 0, 0, 0.3), 0 1px 2px rgba(0, 0, 0, 0.2);
+      }
+
+      /* ===== 墨绿（默认）===== */
+      :root[data-palette="default"],
+      :root:not([data-palette]) {
+        --bg: #f0f7f4;
+        --card: #ffffff;
+        --border: #d1e7dc;
+        --primary-soft: #ecfdf5;
+        --code-bg: #f3f9f6;
+        --primary: #059669;
+        --primary-hover: #047857;
+        --green: #059669;
+        --green-soft: #ecfdf5;
+        --amber: #d97706;
+        --amber-soft: #fffbeb;
+        --red: #dc2626;
+        --red-soft: #fef2f2;
+      }
+      :root[data-palette="default"][data-mode="dark"],
+      :root:not([data-palette])[data-mode="dark"] {
+        --bg: #0e1f1a;
+        --card: #14302a;
+        --border: #1f4a3a;
+        --code-bg: #0a1612;
+        --input-bg: #0a1612;
+        --primary: #10b981;
+        --primary-hover: #059669;
+        --primary-soft: #064e3b;
+        --green: #10b981;
+        --green-soft: #064e3b;
+        --amber: #f59e0b;
+        --amber-soft: #78350f;
+        --red: #ef4444;
+        --red-soft: #450a0a;
+      }
+
+      /* ===== 暖橙 ===== */
+      :root[data-palette="orange"] {
+        --bg: #fbf5f0;
+        --card: #ffffff;
+        --border: #f0ddd0;
+        --primary-soft: #fff7ed;
+        --code-bg: #fdf7f3;
+        --primary: #ea580c;
+        --primary-hover: #c2410c;
+        --green: #16a34a;
+        --green-soft: #ecfdf3;
+        --amber: #ea580c;
+        --amber-soft: #fff7ed;
+        --red: #dc2626;
+        --red-soft: #fef2f2;
+      }
+      :root[data-palette="orange"][data-mode="dark"] {
+        --bg: #1a1410;
+        --card: #2a1f18;
+        --border: #3d2e22;
+        --code-bg: #14100c;
+        --input-bg: #14100c;
+        --primary: #f97316;
+        --primary-hover: #ea580c;
+        --primary-soft: #431407;
+        --green: #22c55e;
+        --green-soft: #14532d;
+        --amber: #f97316;
+        --amber-soft: #431407;
+        --red: #ef4444;
+        --red-soft: #450a0a;
+      }
+
+      /* ===== 紫罗兰 ===== */
+      :root[data-palette="violet"] {
+        --bg: #f6f3fb;
+        --card: #ffffff;
+        --border: #e0d9f0;
+        --primary-soft: #f5f3ff;
+        --code-bg: #f9f7fd;
+        --primary: #7c3aed;
+        --primary-hover: #6d28d9;
+        --green: #16a34a;
+        --green-soft: #ecfdf3;
+        --amber: #d97706;
+        --amber-soft: #fffbeb;
+        --red: #dc2626;
+        --red-soft: #fef2f2;
+      }
+      :root[data-palette="violet"][data-mode="dark"] {
+        --bg: #15102a;
+        --card: #221a3d;
+        --border: #362959;
+        --code-bg: #100b1f;
+        --input-bg: #100b1f;
+        --primary: #a78bfa;
+        --primary-hover: #8b5cf6;
+        --primary-soft: #2e1065;
+        --green: #22c55e;
+        --green-soft: #14532d;
+        --amber: #f59e0b;
+        --amber-soft: #78350f;
+        --red: #ef4444;
+        --red-soft: #450a0a;
+      }
+
+      * {
+        box-sizing: border-box;
+        margin: 0;
+        padding: 0;
+      }
+      body {
+        font-family:
+          -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC",
+          "Hiragino Sans GB", "Microsoft YaHei", sans-serif;
+        background: var(--bg);
+        color: var(--text);
+        font-size: 14px;
+        line-height: 1.6;
+        min-height: 100vh;
+      }
+
+      /* ---------- 登录页 ---------- */
+      .login-wrap {
+        min-height: 100vh;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        padding: 20px;
+      }
+      .login-card {
+        background: var(--card);
+        border: 1px solid var(--border);
+        border-radius: var(--radius);
+        box-shadow: var(--shadow);
+        width: 100%;
+        max-width: 380px;
+        padding: 32px 28px;
+      }
+      .login-logo {
+        text-align: center;
+        font-size: 30px;
+        margin-bottom: 6px;
+      }
+      .login-title {
+        text-align: center;
+        font-size: 18px;
+        font-weight: 600;
+        margin-bottom: 4px;
+      }
+      .login-sub {
+        text-align: center;
+        color: var(--text-2);
+        font-size: 12px;
+        margin-bottom: 22px;
+      }
+
+      /* ---------- 表单元素 ---------- */
+      label.field {
+        display: block;
+        margin-bottom: 14px;
+      }
+      label.field > span {
+        display: block;
+        font-size: 13px;
+        font-weight: 500;
+        color: var(--text);
+        margin-bottom: 5px;
+      }
+      label.field > span .req {
+        color: var(--red);
+        margin-left: 2px;
+      }
+      input[type="text"],
+      input[type="password"],
+      textarea,
+      select {
+        width: 100%;
+        padding: 9px 12px;
+        border: 1px solid var(--border);
+        border-radius: 10px;
+        font-size: 14px;
+        font-family: inherit;
+        color: var(--text);
+        background: var(--input-bg);
+        outline: none;
+        transition:
+          border-color 0.15s,
+          box-shadow 0.15s;
+      }
+      input:focus,
+      textarea:focus,
+      select:focus {
+        border-color: var(--primary);
+        box-shadow: 0 0 0 3px rgba(5, 150, 105, 0.14);
+      }
+      textarea {
+        resize: vertical;
+        min-height: 42px;
+      }
+      .hint {
+        font-size: 12px;
+        color: var(--text-3);
+        margin-top: 4px;
+      }
+
+      .btn {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        gap: 6px;
+        padding: 9px 16px;
+        border: 1px solid transparent;
+        border-radius: 10px;
+        font-size: 14px;
+        font-weight: 500;
+        font-family: inherit;
+        cursor: pointer;
+        transition:
+          background 0.15s,
+          border-color 0.15s,
+          color 0.15s;
+        white-space: nowrap;
+      }
+      .btn-primary {
+        background: var(--primary);
+        color: #fff;
+      }
+      .btn-primary:hover {
+        background: var(--primary-hover);
+      }
+      .btn-danger {
+        background: var(--red);
+        color: #fff;
+      }
+      .btn-danger:hover {
+        filter: brightness(1.12);
+      }
+      .btn-ghost {
+        background: var(--ghost-bg);
+        color: var(--text-2);
+        border-color: var(--border);
+      }
+      .btn-ghost:hover {
+        background: var(--ghost-hover);
+        color: var(--text);
+      }
+      .btn-block {
+        width: 100%;
+      }
+      .btn:disabled {
+        opacity: 0.6;
+        cursor: not-allowed;
+      }
+
+      .alert {
+        border-radius: 8px;
+        padding: 9px 12px;
+        font-size: 13px;
+        margin-top: 12px;
+        display: none;
+        word-break: break-all;
+      }
+      .alert-error {
+        background: var(--red-soft);
+        color: var(--red);
+        border: 1px solid #fecaca;
+      }
+      .alert-success {
+        background: var(--green-soft);
+        color: var(--green);
+        border: 1px solid #bbf7d0;
+      }
+      .alert.show {
+        display: block;
+      }
+
+      /* ---------- 主界面 ---------- */
+      .topbar {
+        background: var(--card);
+        border-bottom: 1px solid var(--border);
+        position: sticky;
+        top: 0;
+        z-index: 10;
+      }
+      .topbar-inner {
+        max-width: 1080px;
+        margin: 0 auto;
+        padding: 12px 20px;
+        display: flex;
+        align-items: center;
+        gap: 12px;
+      }
+      .brand {
+        font-size: 17px;
+        font-weight: 600;
+        cursor: pointer;
+        user-select: none;
+      }
+      .brand .logo {
+        margin-right: 4px;
+      }
+      .topbar .spacer {
+        flex: 1;
+      }
+      .health {
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+        font-size: 13px;
+        color: var(--text-2);
+      }
+      .dot {
+        width: 9px;
+        height: 9px;
+        border-radius: 50%;
+        background: var(--text-3);
+      }
+      .dot.ok {
+        background: var(--green);
+        box-shadow: 0 0 0 3px var(--green-soft);
+      }
+      .dot.bad {
+        background: var(--red);
+        box-shadow: 0 0 0 3px var(--red-soft);
+      }
+      .user-chip {
+        font-size: 13px;
+        color: var(--text-2);
+        background: var(--primary-soft);
+        color: var(--primary);
+        padding: 4px 10px;
+        border-radius: 999px;
+        font-weight: 500;
+        cursor: pointer;
+        user-select: none;
+      }
+      .user-chip::after {
+        content: "▾";
+        margin-left: 4px;
+        font-size: 10px;
+        opacity: 0.7;
+      }
+      .user-menu-wrap {
+        position: relative;
+        display: inline-flex;
+      }
+      .user-menu {
+        display: none;
+        position: absolute;
+        right: 0;
+        top: calc(100% + 8px);
+        min-width: 120px;
+        background: var(--card);
+        border: 1px solid var(--border);
+        border-radius: 10px;
+        box-shadow: var(--shadow);
+        padding: 6px;
+        z-index: 30;
+      }
+      .user-menu.show {
+        display: block;
+      }
+      /* 外观菜单左对齐：与 CatDock 标题左边缘对齐（账号菜单保持右对齐） */
+      #brandMenu {
+        left: 0;
+        right: auto;
+      }
+      .user-menu-item .btn-icon {
+        margin-right: 6px;
+      }
+      .user-menu-item {
+        display: block;
+        width: 100%;
+        text-align: left;
+        padding: 8px 12px;
+        border: none;
+        border-radius: 8px;
+        background: none;
+        font-size: 13px;
+        font-family: inherit;
+        color: var(--text-2);
+        cursor: pointer;
+        white-space: nowrap;
+      }
+      .user-menu-item:hover {
+        background: var(--ghost-bg);
+        color: var(--primary);
+      }
+
+      .container {
+        max-width: 1080px;
+        margin: 0 auto;
+        padding: 20px;
+        display: grid;
+        grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+        gap: 16px;
+        align-items: stretch;
+      }
+
+      .card {
+        background: var(--card);
+        border: 1px solid var(--border);
+        border-radius: var(--radius);
+        box-shadow: var(--shadow);
+        padding: 18px 20px;
+        display: flex;
+        flex-direction: column;
+      }
+      .card-title {
+        font-size: 15px;
+        font-weight: 600;
+        margin-bottom: 14px;
+        display: flex;
+        align-items: center;
+        gap: 8px;
+      }
+      .card-title .count {
+        font-size: 12px;
+        font-weight: 500;
+        color: var(--primary);
+        background: var(--primary-soft);
+        padding: 1px 8px;
+        border-radius: 999px;
+      }
+
+      details.adv {
+        border: 1px solid var(--border);
+        border-radius: 8px;
+        padding: 8px 12px;
+        margin-bottom: 14px;
+      }
+      details.adv summary {
+        cursor: pointer;
+        font-size: 13px;
+        color: var(--text-2);
+        user-select: none;
+      }
+      details.adv[open] summary {
+        margin-bottom: 12px;
+      }
+      details.adv label.field {
+        margin-top: 12px;
+        margin-bottom: 0;
+      }
+      details.adv label.field:first-of-type {
+        margin-top: 4px;
+      }
+
+      /* ---------- 任务列表 ---------- */
+      .task-list {
+        display: flex;
+        flex-direction: column;
+        gap: 10px;
+        flex: 1;
+        overflow-y: auto;
+      }
+      .task-item {
+        border: 1px solid var(--border);
+        border-radius: 10px;
+        padding: 12px 14px;
+        cursor: pointer;
+        transition:
+          border-color 0.15s,
+          background 0.15s;
+      }
+      .task-item:hover {
+        border-color: var(--primary);
+        background: var(--primary-soft);
+      }
+      .task-row1 {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        margin-bottom: 8px;
+      }
+      .task-name {
+        font-weight: 500;
+        flex: 1;
+        min-width: 0;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+      .task-id {
+        font-size: 11px;
+        color: var(--text-3);
+        font-family: ui-monospace, Menlo, Consolas, monospace;
+      }
+      .badge {
+        font-size: 12px;
+        font-weight: 500;
+        padding: 2px 9px;
+        border-radius: 999px;
+        white-space: nowrap;
+      }
+      .badge-running {
+        background: var(--primary-soft);
+        color: var(--primary);
+      }
+      .badge-collecting {
+        background: var(--amber-soft);
+        color: var(--amber);
+      }
+      .badge-done {
+        background: var(--green-soft);
+        color: var(--green);
+      }
+      .badge-failed {
+        background: var(--red-soft);
+        color: var(--red);
+      }
+      .badge-paused {
+        background: var(--border);
+        color: var(--text-2);
+      }
+      .task-actions {
+        display: flex;
+        gap: 4px;
+      }
+      .icon-btn {
+        border: 1px solid var(--border);
+        background: var(--ghost-bg);
+        border-radius: 8px;
+        width: 28px;
+        height: 28px;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        cursor: pointer;
+        font-size: 13px;
+        color: var(--text-2);
+        transition:
+          border-color 0.15s,
+          color 0.15s;
+      }
+      .icon-btn:hover {
+        border-color: var(--primary);
+        color: var(--primary);
+      }
+      .icon-btn.danger:hover {
+        border-color: var(--red);
+        color: var(--red);
+      }
+      .confirm-msg {
+        font-size: 13px;
+        color: var(--text-2);
+        line-height: 1.7;
+        margin: 0 0 18px;
+        word-break: break-all;
+      }
+      .confirm-actions {
+        display: flex;
+        gap: 10px;
+        justify-content: flex-end;
+      }
+      .progress {
+        height: 6px;
+        background: var(--border);
+        border-radius: 999px;
+        overflow: hidden;
+      }
+      .progress-bar {
+        height: 100%;
+        background: var(--primary);
+        border-radius: 999px;
+        transition: width 0.4s ease;
+      }
+      .task-row2 {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        font-size: 12px;
+        color: var(--text-2);
+        margin-top: 6px;
+      }
+      .task-row2 .pct {
+        min-width: 38px;
+        text-align: right;
+        font-variant-numeric: tabular-nums;
+      }
+
+      .empty {
+        text-align: center;
+        color: var(--text-3);
+        padding: 34px 10px;
+        font-size: 13px;
+        flex: 1;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+      }
+      .empty .icon {
+        font-size: 28px;
+        display: block;
+        margin-bottom: 8px;
+      }
+
+      /* ---------- 弹窗 ---------- */
+      .modal-mask {
+        position: fixed;
+        inset: 0;
+        background: var(--mask);
+        display: none;
+        align-items: center;
+        justify-content: center;
+        padding: 20px;
+        z-index: 100;
+      }
+      .modal-mask.show {
+        display: flex;
+      }
+      .modal {
+        background: var(--card);
+        border-radius: var(--radius);
+        width: 100%;
+        max-width: 560px;
+        max-height: 85vh;
+        overflow-y: auto;
+        padding: 22px 24px;
+      }
+      .modal-sm {
+        max-width: 420px;
+      }
+      .modal-head {
+        display: flex;
+        align-items: center;
+        margin-bottom: 16px;
+      }
+      .modal-head h3 {
+        font-size: 16px;
+        flex: 1;
+      }
+      .modal-close {
+        border: none;
+        background: none;
+        font-size: 20px;
+        color: var(--text-3);
+        cursor: pointer;
+        line-height: 1;
+        padding: 4px;
+      }
+      .modal-close:hover {
+        color: var(--text);
+      }
+      .detail-grid {
+        display: grid;
+        grid-template-columns: 96px 1fr;
+        gap: 8px 12px;
+        font-size: 13px;
+      }
+      .detail-grid dt {
+        color: var(--text-2);
+      }
+      .detail-grid dd {
+        word-break: break-all;
+      }
+      .detail-grid dd.mono {
+        font-family: ui-monospace, Menlo, Consolas, monospace;
+        font-size: 12px;
+      }
+      .url-list {
+        margin-top: 4px;
+        display: flex;
+        flex-direction: column;
+        gap: 6px;
+      }
+      .url-item {
+        background: var(--code-bg);
+        border: 1px solid var(--border);
+        border-radius: 6px;
+        padding: 6px 10px;
+        font-family: ui-monospace, Menlo, Consolas, monospace;
+        font-size: 12px;
+        word-break: break-all;
+      }
+      .login-foot {
+        text-align: center;
+        font-size: 12px;
+        color: var(--text-3);
+        margin-top: 16px;
+      }
+      .theme-btns-login {
+        position: fixed;
+        top: 16px;
+        right: 16px;
+        z-index: 50;
+        display: flex;
+        gap: 6px;
+      }
+      .theme-btns-login .btn {
+        padding: 6px 10px;
+        font-size: 16px;
+      }
+
+      /* ---------- 服务信息卡片 ---------- */
+      .info-grid {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 6px 24px;
+        margin-bottom: 16px;
+      }
+      .info-item {
+        display: flex;
+        align-items: center;
+        gap: 6px;
+        font-size: 13px;
+      }
+      .info-item .icon {
+        font-size: 15px;
+        flex-shrink: 0;
+      }
+      .info-item .label {
+        color: var(--text-2);
+      }
+      .info-item .val {
+        font-weight: 500;
+      }
+      .info-item .val.on {
+        color: var(--green);
+      }
+      .info-item .val.off {
+        color: var(--text-3);
+      }
+      .info-section {
+        border-top: 1px solid var(--border);
+        padding-top: 12px;
+        margin-top: 4px;
+      }
+      .info-section-title {
+        font-size: 13px;
+        font-weight: 600;
+        color: var(--text);
+        margin-bottom: 8px;
+        text-align: center;
+        letter-spacing: 1px;
+      }
+      .info-code {
+        background: var(--code-bg);
+        border: 1px solid var(--border);
+        border-radius: 8px;
+        padding: 10px 14px;
+        font-family: ui-monospace, Menlo, Consolas, monospace;
+        font-size: 12px;
+        line-height: 1.7;
+        overflow-x: auto;
+        white-space: pre;
+        color: var(--text);
+      }
+      .info-endpoints {
+        display: flex;
+        flex-direction: column;
+        gap: 4px;
+        font-size: 12px;
+      }
+      .info-endpoint {
+        display: flex;
+        gap: 10px;
+        align-items: center;
+      }
+      .info-endpoint .method {
+        font-family: ui-monospace, Menlo, Consolas, monospace;
+        font-weight: 600;
+        color: var(--primary);
+        min-width: 42px;
+      }
+      .info-endpoint .path {
+        font-family: ui-monospace, Menlo, Consolas, monospace;
+        color: var(--text);
+      }
+      .info-endpoint .desc {
+        color: var(--text-2);
+      }
+
+      /* ================= 响应式适配（移动端） ================= */
+      @media (max-width: 860px) {
+        .container {
+          grid-template-columns: minmax(0, 1fr);
+        }
+        /* 触控目标加大 */
+        .btn {
+          padding: 11px 16px;
+        }
+        /* iOS：输入框 >= 16px 防聚焦自动放大页面 */
+        input[type="text"],
+        input[type="password"],
+        textarea,
+        select {
+          font-size: 16px;
+        }
+      }
+      @media (max-width: 600px) {
+        /* 顶栏单行：brand + 健康状态（仅圆点）靠左，用户名靠右，与 PC 分布一致 */
+        .topbar-inner {
+          padding: 10px 12px;
+          gap: 6px;
+        }
+        .brand {
+          font-size: 16px;
+        }
+        #healthText {
+          display: none;
+        }
+        .user-chip {
+          max-width: 90px;
+          overflow: hidden;
+          text-overflow: ellipsis;
+          white-space: nowrap;
+        }
+        /* 任务操作按钮加大触控区 */
+        .icon-btn {
+          width: 34px;
+          height: 34px;
+          font-size: 15px;
+        }
+      }
+      @media (max-width: 480px) {
+        .container {
+          padding: 12px;
+          gap: 12px;
+        }
+        .card {
+          padding: 14px;
+        }
+        .login-wrap {
+          padding: 14px;
+        }
+        .login-card {
+          padding: 26px 20px;
+        }
+        .info-grid {
+          grid-template-columns: minmax(0, 1fr);
+          gap: 6px 0;
+        }
+        .detail-grid {
+          grid-template-columns: 76px minmax(0, 1fr);
+        }
+        /* 长命令自动换行，避免横向溢出 */
+        .info-code {
+          white-space: pre-wrap;
+          word-break: break-all;
+        }
+        .modal-mask {
+          padding: 10px;
+          align-items: flex-end;
+        }
+        .modal {
+          padding: 16px;
+          max-height: 88vh;
+        }
+        .task-row2 {
+          flex-wrap: wrap;
+        }
+        details.adv summary {
+          padding: 4px 0;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <!-- ================= 登录视图 ================= -->
+    <div class="login-wrap" id="loginView">
+      <div class="theme-btns-login">
+        <button class="btn btn-ghost" id="paletteBtnLogin" title="切换主题色">
+          🎨
+        </button>
+        <button class="btn btn-ghost" id="modeBtnLogin" title="切换亮色/暗色">
+          🌙
+        </button>
+      </div>
+      <div class="login-card">
+        <div class="login-logo">🐱</div>
+        <div class="login-title">CatDock 网页控制台</div>
+        <div class="login-sub">m3u8 视频下载服务 · 请登录后使用</div>
+
+        <form id="loginForm" autocomplete="off">
+          <label class="field">
+            <span>认证密钥 (AUTH_KEY)<i class="req">*</i></span>
+            <input
+              type="password"
+              id="loginKey"
+              placeholder="docker-compose 中配置的 AUTH_KEY"
+              required
+            />
+          </label>
+          <label class="field">
+            <span>用户名<i class="req">*</i></span>
+            <input
+              type="text"
+              id="loginUser"
+              placeholder="容器内 user add 创建的用户名"
+              autocomplete="username"
+              required
+            />
+          </label>
+          <label class="field">
+            <span>密码<i class="req">*</i></span>
+            <input
+              type="password"
+              id="loginPwd"
+              placeholder="用户密码"
+              autocomplete="current-password"
+              required
+            />
+          </label>
+          <button type="submit" class="btn btn-primary btn-block" id="loginBtn">
+            登 录
+          </button>
+          <div class="alert alert-error" id="loginAlert"></div>
+        </form>
+        <div class="login-foot">
+          凭证仅保存在当前浏览器 (localStorage)，不会上传到任何第三方
+        </div>
+      </div>
+    </div>
+
+    <!-- ================= 主视图 ================= -->
+    <div id="appView" style="display: none">
+      <div class="topbar">
+        <div class="topbar-inner">
+          <span class="user-menu-wrap">
+            <span class="brand" id="brandBtn" title="外观菜单"
+              ><span class="logo">🐱</span>CatDock</span
+            >
+            <div class="user-menu" id="brandMenu">
+              <button class="user-menu-item" id="paletteBtn" title="切换主题色">
+                <span class="btn-icon">🎨</span>主题色
+              </button>
+              <button class="user-menu-item" id="modeBtn" title="切换亮色/暗色">
+                <span class="btn-icon">🌙</span>亮暗切换
+              </button>
+            </div>
+          </span>
+          <span class="health">
+            <span class="dot" id="healthDot"></span
+            ><span id="healthText">检测中…</span>
+          </span>
+          <span class="spacer"></span>
+          <span class="user-menu-wrap">
+            <span class="user-chip" id="userChip" title="账号菜单"></span>
+            <div class="user-menu" id="userMenu">
+              <button class="user-menu-item" id="menuLogout">注销</button>
+              <button class="user-menu-item" id="menuReload">重载配置</button>
+            </div>
+          </span>
+          <span class="topbar-break" aria-hidden="true"></span>
+        </div>
+      </div>
+
+      <div class="container">
+        <!-- 提交任务 -->
+        <div class="card">
+          <div class="card-title">➕ 新建下载任务</div>
+          <form id="dlForm" autocomplete="off">
+            <label class="field">
+              <span>视频 URL<i class="req">*</i></span>
+              <textarea
+                id="fUrl"
+                rows="2"
+                placeholder="粘贴 m3u8 / 直链视频地址"
+                required
+              ></textarea>
+            </label>
+            <label class="field">
+              <span>保存文件名</span>
+              <input
+                type="text"
+                id="fName"
+                placeholder="选填，如：我的视频（不含扩展名）"
+              />
+              <div class="hint">留空时服务端自动命名 download_任务ID</div>
+            </label>
+            <label class="field">
+              <span>输出格式</span>
+              <select id="fFormat">
+                <option value="mp4">MP4</option>
+                <option value="mkv">MKV</option>
+              </select>
+              <div class="hint">
+                选择最终视频的封装格式（猫抓插件使用 config.json
+                中的全局设置，网页可逐任务指定）
+              </div>
+            </label>
+            <details class="adv">
+              <summary>高级选项（Referer / Cookie / UA，一般无需填写）</summary>
+              <label class="field">
+                <span>Referer</span>
+                <input type="text" id="fReferer" placeholder="选填" />
+              </label>
+              <label class="field">
+                <span>Cookie</span>
+                <input type="text" id="fCookie" placeholder="选填" />
+              </label>
+              <label class="field">
+                <span>User-Agent</span>
+                <input type="text" id="fUa" placeholder="选填" />
+              </label>
+            </details>
+            <button type="submit" class="btn btn-primary btn-block" id="dlBtn">
+              ⬇ 添加下载任务
+            </button>
+            <div class="alert" id="dlAlert"></div>
+          </form>
+        </div>
+
+        <!-- 任务列表 -->
+        <div class="card">
+          <div class="card-title">
+            📋 进行中的任务 <span class="count" id="taskCount">0</span>
+          </div>
+          <div class="task-list" id="taskList"></div>
+          <div class="empty" id="emptyState">
+            <span class="icon">📭</span>
+            暂无进行中的任务<br />
+            <span style="font-size: 12px"
+              >任务完成（成功/失败）后会自动移出列表</span
+            >
+          </div>
+        </div>
+
+        <!-- 服务信息 -->
+        <div class="card" style="grid-column: 1 / -1" id="infoCard">
+          <div class="card-title">ℹ️ 服务信息</div>
+          <div id="infoBody">
+            <div class="empty"><span class="icon">⏳</span>加载中…</div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ================= 任务详情弹窗 ================= -->
+    <div class="modal-mask" id="modalMask">
+      <div class="modal">
+        <div class="modal-head">
+          <h3>任务详情</h3>
+          <button class="modal-close" id="modalClose">✕</button>
+        </div>
+        <dl class="detail-grid" id="modalBody"></dl>
+      </div>
+    </div>
+
+    <!-- ================= 操作确认弹窗 ================= -->
+    <div class="modal-mask" id="confirmMask">
+      <div class="modal modal-sm">
+        <div class="modal-head">
+          <h3 id="confirmTitle">确认操作</h3>
+          <button class="modal-close" id="confirmClose">✕</button>
+        </div>
+        <p class="confirm-msg" id="confirmMsg"></p>
+        <div class="confirm-actions">
+          <button class="btn" id="confirmCancel">取消</button>
+          <button class="btn" id="confirmOk">确认</button>
+        </div>
+      </div>
+    </div>
+
+    <script>
+      (function () {
+        "use strict";
+
+        // 页面由服务端托管在 /{prefix}/ 下，相对路径自动适配 URL 前缀
+        var BASE = location.pathname.replace(/[^/]*$/, "");
+        var LS = {
+          key: "catdock_key",
+          user: "catdock_user",
+          pwd: "catdock_pwd",
+          fmt: "catdock_fmt",
+          palette: "catdock_palette",
+          mode: "catdock_mode",
+        };
+
+        var creds = { key: "", user: "", pwd: "" };
+        var pollTimer = null,
+          healthTimer = null;
+
+        var $ = function (id) {
+          return document.getElementById(id);
+        };
+
+        // ---------- 主题 & 亮暗切换 ----------
+        var PALETTES = [
+          { id: "default", icon: "🟢", name: "墨绿" },
+          { id: "orange", icon: "🟠", name: "暖橙" },
+          { id: "violet", icon: "🟣", name: "紫罗兰" },
+        ];
+        function getPaletteIdx() {
+          var saved = localStorage.getItem(LS.palette);
+          for (var i = 0; i < PALETTES.length; i++)
+            if (PALETTES[i].id === saved) return i;
+          return 0;
+        }
+        function getMode() {
+          var saved = localStorage.getItem(LS.mode);
+          if (saved === "light" || saved === "dark") return saved;
+          return window.matchMedia("(prefers-color-scheme: dark)").matches
+            ? "dark"
+            : "light";
+        }
+        function applyPalette() {
+          var idx = getPaletteIdx();
+          var p = PALETTES[idx];
+          document.documentElement.setAttribute("data-palette", p.id);
+          ["paletteBtn", "paletteBtnLogin"].forEach(function (id) {
+            var b = $(id);
+            if (!b) return;
+            var icon = b.querySelector(".btn-icon");
+            if (icon) icon.textContent = p.icon;
+            else b.textContent = p.icon;
+          });
+        }
+        function applyMode() {
+          var m = getMode();
+          document.documentElement.setAttribute("data-mode", m);
+          ["modeBtn", "modeBtnLogin"].forEach(function (id) {
+            var b = $(id);
+            if (!b) return;
+            var icon = b.querySelector(".btn-icon");
+            var emoji = m === "dark" ? "☀️" : "🌙";
+            if (icon) icon.textContent = emoji;
+            else b.textContent = emoji;
+          });
+        }
+        function togglePalette() {
+          var idx = getPaletteIdx();
+          localStorage.setItem(
+            LS.palette,
+            PALETTES[(idx + 1) % PALETTES.length].id,
+          );
+          applyPalette();
+        }
+        function toggleMode() {
+          var m = getMode();
+          localStorage.setItem(LS.mode, m === "dark" ? "light" : "dark");
+          applyMode();
+        }
+        applyPalette();
+        applyMode();
+        ["paletteBtn", "paletteBtnLogin"].forEach(function (id) {
+          $(id) && $(id).addEventListener("click", togglePalette);
+        });
+        ["modeBtn", "modeBtnLogin"].forEach(function (id) {
+          $(id) && $(id).addEventListener("click", toggleMode);
+        });
+
+        function esc(s) {
+          return String(s == null ? "" : s).replace(/[&<>"']/g, function (c) {
+            return {
+              "&": "&amp;",
+              "<": "&lt;",
+              ">": "&gt;",
+              '"': "&quot;",
+              "'": "&#39;",
+            }[c];
+          });
+        }
+
+        function showAlert(el, msg, ok) {
+          el.textContent = msg;
+          el.className = "alert show " + (ok ? "alert-success" : "alert-error");
+        }
+        function hideAlert(el) {
+          el.className = "alert";
+        }
+
+        // ---------- API 封装 ----------
+        function apiGet(path, withAuth) {
+          var url = BASE + path;
+          if (withAuth) {
+            url +=
+              (url.indexOf("?") >= 0 ? "&" : "?") +
+              "key=" +
+              encodeURIComponent(creds.key) +
+              "&user=" +
+              encodeURIComponent(creds.user) +
+              "&password=" +
+              encodeURIComponent(creds.pwd);
+          }
+          return fetch(url, { method: "GET" }).then(handleResp);
+        }
+
+        function apiPost(path, body) {
+          body.key = creds.key;
+          body.user = creds.user;
+          body.password = creds.pwd;
+          return fetch(BASE + path, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(body),
+          }).then(handleResp);
+        }
+
+        function handleResp(resp) {
+          return resp
+            .json()
+            .catch(function () {
+              throw new Error("服务器响应格式错误");
+            })
+            .then(function (data) {
+              if (resp.status === 403) {
+                // 凭证失效：回到登录页
+                backToLogin(data.message || "认证失败，请重新登录");
+                throw new Error(data.message || "认证失败");
+              }
+              if (!resp.ok || data.success === false) {
+                throw new Error(
+                  data.message || "请求失败 (HTTP " + resp.status + ")",
+                );
+              }
+              return data;
+            });
+        }
+
+        // ---------- 登录 / 退出 ----------
+        function loadCreds() {
+          creds.key = localStorage.getItem(LS.key) || "";
+          creds.user = localStorage.getItem(LS.user) || "";
+          creds.pwd = localStorage.getItem(LS.pwd) || "";
+          if (creds.key) $("loginKey").value = creds.key;
+          if (creds.user) $("loginUser").value = creds.user;
+          if (creds.pwd) $("loginPwd").value = creds.pwd;
+          // 恢复上次选择的输出格式
+          var savedFmt = localStorage.getItem(LS.fmt);
+          if (savedFmt === "mp4" || savedFmt === "mkv")
+            $("fFormat").value = savedFmt;
+        }
+
+        function tryLogin(saved) {
+          return apiGet("tasks", true)
+            .then(function () {
+              $("loginView").style.display = "none";
+              $("appView").style.display = "";
+              $("userChip").textContent = "👤 " + creds.user;
+              hideAlert($("loginAlert"));
+              startPolling();
+              refreshTasks();
+            })
+            .catch(function (e) {
+              if (saved) backToLogin("");
+              else
+                showAlert(
+                  $("loginAlert"),
+                  /成功|ok/.test(e.message) ? "" : e.message,
+                  false,
+                );
+            });
+        }
+
+        function backToLogin(msg) {
+          stopPolling();
+          $("appView").style.display = "none";
+          $("loginView").style.display = "";
+          if (msg) showAlert($("loginAlert"), msg, false);
+        }
+
+        $("loginForm").addEventListener("submit", function (e) {
+          e.preventDefault();
+          creds.key = $("loginKey").value.trim();
+          creds.user = $("loginUser").value.trim();
+          creds.pwd = $("loginPwd").value;
+          if (!creds.key || !creds.user || !creds.pwd) {
+            showAlert($("loginAlert"), "请填写完整的认证信息", false);
+            return;
+          }
+          var btn = $("loginBtn");
+          btn.disabled = true;
+          btn.textContent = "登录中…";
+          localStorage.setItem(LS.key, creds.key);
+          localStorage.setItem(LS.user, creds.user);
+          localStorage.setItem(LS.pwd, creds.pwd);
+          tryLogin(false).finally(function () {
+            btn.disabled = false;
+            btn.textContent = "登 录";
+          });
+        });
+
+        // ---------- 用户菜单（注销 / 重载配置） ----------
+        function closeUserMenu() {
+          $("userMenu").classList.remove("show");
+        }
+        function closeBrandMenu() {
+          $("brandMenu").classList.remove("show");
+        }
+        $("userChip").addEventListener("click", function (e) {
+          e.stopPropagation();
+          closeBrandMenu();
+          $("userMenu").classList.toggle("show");
+        });
+        $("brandBtn").addEventListener("click", function (e) {
+          e.stopPropagation();
+          closeUserMenu();
+          $("brandMenu").classList.toggle("show");
+        });
+        document.addEventListener("click", function (e) {
+          if (!e.target.closest(".user-menu-wrap")) {
+            closeUserMenu();
+            closeBrandMenu();
+          }
+        });
+
+        $("menuLogout").addEventListener("click", function () {
+          closeUserMenu();
+          localStorage.removeItem(LS.key);
+          localStorage.removeItem(LS.user);
+          localStorage.removeItem(LS.pwd);
+          creds = { key: "", user: "", pwd: "" };
+          $("loginPwd").value = "";
+          backToLogin("");
+        });
+
+        // ---------- 提交下载 ----------
+        $("dlForm").addEventListener("submit", function (e) {
+          e.preventDefault();
+          var body = { url: $("fUrl").value.trim() };
+          if (!body.url) {
+            showAlert($("dlAlert"), "URL 不能为空", false);
+            return;
+          }
+          var name = $("fName").value.trim();
+          var referer = $("fReferer").value.trim();
+          var cookie = $("fCookie").value.trim();
+          var ua = $("fUa").value.trim();
+          var fmt = $("fFormat").value;
+          if (name) body.saveName = name;
+          if (referer) body.referer = referer;
+          if (cookie) body.cookie = cookie;
+          if (ua) body.userAgent = ua;
+          if (fmt) {
+            body.format = fmt;
+            localStorage.setItem(LS.fmt, fmt);
+          }
+
+          var btn = $("dlBtn");
+          btn.disabled = true;
+          btn.textContent = "提交中…";
+          hideAlert($("dlAlert"));
+          apiPost("download", body)
+            .then(function (data) {
+              var msg = data.message || "下载任务已添加";
+              if (data.blocked) {
+                showAlert($("dlAlert"), "🚫 " + msg, false);
+              } else {
+                showAlert(
+                  $("dlAlert"),
+                  "✅ " +
+                    msg +
+                    (data.taskId ? "（任务 ID: " + data.taskId + "）" : ""),
+                  true,
+                );
+                $("fUrl").value = "";
+                refreshTasks();
+              }
+            })
+            .catch(function (err) {
+              showAlert($("dlAlert"), "❌ " + err.message, false);
+            })
+            .finally(function () {
+              btn.disabled = false;
+              btn.textContent = "⬇ 添加下载任务";
+            });
+        });
+
+        // ---------- 任务列表 ----------
+        var STATUS_MAP = {
+          collecting: ["收集中", "badge-collecting"],
+          running: ["下载中", "badge-running"],
+          paused: ["已暂停", "badge-paused"],
+          done: ["已完成", "badge-done"],
+          failed: ["失败", "badge-failed"],
+        };
+
+        function taskActionButtons(t) {
+          var id = esc(t.id);
+          var btns = "";
+          if (t.status === "paused") {
+            btns +=
+              '<button class="icon-btn" data-act="resume" data-id="' +
+              id +
+              '" title="继续下载">▶</button>';
+          } else {
+            btns +=
+              '<button class="icon-btn" data-act="pause" data-id="' +
+              id +
+              '" title="暂停下载">⏸</button>';
+          }
+          btns +=
+            '<button class="icon-btn danger" data-act="delete" data-id="' +
+            id +
+            '" title="删除任务及文件">🗑</button>';
+          return '<span class="task-actions">' + btns + "</span>";
+        }
+
+        function refreshTasks() {
+          return apiGet("tasks", true)
+            .then(function (data) {
+              var tasks = data.data || [];
+              $("taskCount").textContent = tasks.length;
+              $("emptyState").style.display = tasks.length ? "none" : "";
+              var list = $("taskList");
+              list.innerHTML = tasks
+                .map(function (t) {
+                  var st = STATUS_MAP[t.status] || [t.status, "badge-running"];
+                  var pct = Math.max(0, Math.min(100, Number(t.progress) || 0));
+                  return (
+                    '<div class="task-item" data-id="' +
+                    esc(t.id) +
+                    '">' +
+                    '<div class="task-row1">' +
+                    '<span class="task-name" title="' +
+                    esc(t.save_name || "") +
+                    '">' +
+                    esc(t.save_name || "(未命名)") +
+                    "</span>" +
+                    '<span class="badge ' +
+                    st[1] +
+                    '">' +
+                    st[0] +
+                    "</span>" +
+                    "</div>" +
+                    '<div class="progress"><div class="progress-bar" style="width:' +
+                    pct +
+                    '%"></div></div>' +
+                    '<div class="task-row2">' +
+                    '<span class="task-id">ID: ' +
+                    esc(t.id) +
+                    "</span>" +
+                    (t.user ? "<span>👤 " + esc(t.user) + "</span>" : "") +
+                    '<span style="flex:1"></span>' +
+                    '<span class="pct">' +
+                    pct +
+                    "%</span>" +
+                    taskActionButtons(t) +
+                    "</div>" +
+                    "</div>"
+                  );
+                })
+                .join("");
+            })
+            .catch(function () {
+              /* 403 已在 handleResp 处理；网络错误静默，等健康检查 */
+            });
+        }
+
+        $("taskList").addEventListener("click", function (e) {
+          var btn = e.target.closest(".icon-btn");
+          if (btn) {
+            e.stopPropagation();
+            handleTaskAction(
+              btn.getAttribute("data-act"),
+              btn.getAttribute("data-id"),
+            );
+            return;
+          }
+          var item = e.target.closest(".task-item");
+          if (item) showDetail(item.getAttribute("data-id"));
+        });
+
+        // ---------- 任务操作（暂停 / 继续 / 删除） ----------
+        function handleTaskAction(act, id) {
+          if (!id) return;
+          if (act === "pause") {
+            taskActionRequest("task/pause", id); // 暂停可逆，直接执行；仅删除弹确认框
+          } else if (act === "resume") {
+            taskActionRequest("task/resume", id);
+          } else if (act === "delete") {
+            showConfirm(
+              "删除任务",
+              "确定要删除该任务吗？<br><b>已下载的文件和临时文件将被一并删除，此操作不可恢复。</b>",
+              true,
+              function () {
+                taskActionRequest("task/delete", id);
+              },
+            );
+          }
+        }
+
+        function taskActionRequest(path, id) {
+          apiPost(path, { taskId: id })
+            .then(function () {
+              refreshTasks(); // 状态徽标变化即是操作反馈，成功无需弹窗
+            })
+            .catch(function (err) {
+              alert("操作失败：" + err.message);
+            });
+        }
+
+        function showConfirm(title, msgHtml, danger, onOk) {
+          $("confirmTitle").textContent = title;
+          $("confirmMsg").innerHTML = msgHtml;
+          $("confirmOk").className =
+            "btn " + (danger ? "btn-danger" : "btn-primary");
+          confirmOkHandler = onOk;
+          $("confirmMask").classList.add("show");
+        }
+
+        var confirmOkHandler = null;
+        function closeConfirm() {
+          $("confirmMask").classList.remove("show");
+          confirmOkHandler = null;
+        }
+        $("confirmOk").addEventListener("click", function () {
+          var handler = confirmOkHandler;
+          closeConfirm();
+          if (handler) handler();
+        });
+        $("confirmCancel").addEventListener("click", closeConfirm);
+        $("confirmClose").addEventListener("click", closeConfirm);
+        $("confirmMask").addEventListener("click", function (e) {
+          if (e.target === $("confirmMask")) closeConfirm();
+        });
+
+        function showDetail(id) {
+          apiGet("tasks/" + encodeURIComponent(id), true)
+            .then(function (data) {
+              var t = data.data || {};
+              var st = STATUS_MAP[t.status] || [t.status, "badge-running"];
+              var urls =
+                t.urls && t.urls.length ? t.urls : t.url ? [t.url] : [];
+              var rows = [
+                ["任务 ID", esc(t.id), true],
+                ["文件名", esc(t.save_name || "(未命名)"), false],
+                [
+                  "状态",
+                  '<span class="badge ' + st[1] + '">' + st[0] + "</span>",
+                  false,
+                ],
+                ["进度", (Number(t.progress) || 0) + "%", false],
+                ["所属用户", esc(t.user || "-"), false],
+                ["重试次数", String(t._retry_count || 0), false],
+                ["链接数", String(urls.length), false],
+              ];
+              var html = rows
+                .map(function (r) {
+                  return (
+                    "<dt>" +
+                    r[0] +
+                    "</dt><dd" +
+                    (r[2] ? ' class="mono"' : "") +
+                    ">" +
+                    r[1] +
+                    "</dd>"
+                  );
+                })
+                .join("");
+              html +=
+                '<dt>全部链接</dt><dd><div class="url-list">' +
+                urls
+                  .map(function (u) {
+                    return '<div class="url-item">' + esc(u) + "</div>";
+                  })
+                  .join("") +
+                "</div></dd>";
+              $("modalBody").innerHTML = html;
+              $("modalMask").classList.add("show");
+            })
+            .catch(function (err) {
+              alert("获取任务详情失败：" + err.message);
+            });
+        }
+
+        $("modalClose").addEventListener("click", function () {
+          $("modalMask").classList.remove("show");
+        });
+        $("modalMask").addEventListener("click", function (e) {
+          if (e.target === $("modalMask"))
+            $("modalMask").classList.remove("show");
+        });
+
+        // ---------- 重载配置 ----------
+        $("menuReload").addEventListener("click", function () {
+          closeUserMenu();
+          if (
+            !confirm(
+              "确定要重新加载服务器配置吗？\n（config.json / filter_rules.json 的修改将立即生效；AUTH_KEY 与 URL 前缀不受影响）",
+            )
+          )
+            return;
+          apiPost("reload", {})
+            .then(function (data) {
+              alert("✅ " + (data.message || "配置已重新加载"));
+              loadConfigInfo();
+            })
+            .catch(function (err) {
+              alert("❌ " + err.message);
+            });
+        });
+
+        // ---------- 健康检查 ----------
+        function checkHealth() {
+          fetch(BASE + "health", { method: "GET" })
+            .then(function (r) {
+              return r.json();
+            })
+            .then(function (data) {
+              var t = data.success ? "服务正常" : "服务异常";
+              $("healthDot").className = "dot " + (data.success ? "ok" : "bad");
+              $("healthText").textContent = t;
+              $("healthDot").parentNode.setAttribute("title", t);
+            })
+            .catch(function () {
+              $("healthDot").className = "dot bad";
+              $("healthText").textContent = "连接失败";
+              $("healthDot").parentNode.setAttribute("title", "连接失败");
+            });
+        }
+
+        // ---------- 服务信息 ----------
+        function loadConfigInfo() {
+          apiGet("config", true)
+            .then(function (data) {
+              var c = data.data || {};
+              var on = function (v) {
+                return v ? "on" : "off";
+              };
+              var yn = function (v) {
+                return v ? "启用" : "禁用";
+              };
+              var chk = function (v) {
+                return v ? "✓" : "✗";
+              };
+
+              // 配置概览
+              var items = [
+                ["📡", "API 端口", c.api_port],
+                ["📤", "输出格式", c.output_format],
+                ["🔗", "URL 前缀", c.url_prefix || "(无)"],
+                [
+                  "🛡️",
+                  "SSRF 防护",
+                  yn(c.ssrf_protection),
+                  on(c.ssrf_protection),
+                ],
+                ["📊", "最大并发", c.max_concurrent_tasks],
+                [
+                  "🎬",
+                  "同视频模式",
+                  yn(c.same_video_mode),
+                  on(c.same_video_mode),
+                ],
+                [
+                  "📋",
+                  "规则",
+                  "拦截关键字" +
+                    chk(c.keywords_enabled) +
+                    "(" +
+                    c.ad_keyword_count +
+                    ") 文件名过滤" +
+                    chk(c.filename_filter_enabled) +
+                    " 去重" +
+                    chk(c.filename_dedup_enabled),
+                ],
+                [
+                  "👥",
+                  "用户",
+                  c.user_count > 0 ? c.user_count + " 个" : "未创建",
+                  c.user_count > 0 ? "" : "off",
+                ],
+              ];
+              var html =
+                '<div class="info-grid">' +
+                items
+                  .map(function (it) {
+                    return (
+                      '<div class="info-item"><span class="icon">' +
+                      it[0] +
+                      "</span>" +
+                      '<span class="label">' +
+                      it[1] +
+                      ":</span>" +
+                      '<span class="val ' +
+                      (it[3] || "") +
+                      '">' +
+                      esc(it[2]) +
+                      "</span></div>"
+                    );
+                  })
+                  .join("") +
+                "</div>";
+
+              // 猫抓插件配置
+              var prefix = c.url_prefix || "";
+              var sendUrl =
+                "http://你的容器IP:" + c.api_port + "/" + prefix + "/download";
+              html += '<div class="info-section">';
+              html += '<div class="info-section-title">— 猫抓插件配置 —</div>';
+              html +=
+                '<div style="margin-bottom:8px;font-size:12px;color:var(--text-2);">发送地址：</div>';
+              html += '<div class="info-code">' + esc(sendUrl) + "</div>";
+              html +=
+                '<div style="margin:10px 0 6px;font-size:12px;color:var(--text-2);">请求体：</div>';
+              html +=
+                '<div class="info-code">' +
+                esc(
+                  [
+                    "{",
+                    '  "url": "${url}",',
+                    '  "saveName": "${title}",',
+                    '  "referer": "${referer}",',
+                    '  "cookie": "${cookie}",',
+                    '  "userAgent": "${userAgent}",',
+                    '  "key": "' +
+                      (c.auth_key_masked || "<你的AUTH_KEY>") +
+                      '",',
+                    '  "user": "<你的user>",',
+                    '  "password": "<你的password>"',
+                    "}",
+                  ].join("\n"),
+                ) +
+                "</div>";
+              html += "</div>";
+
+              // API 接口
+              html += '<div class="info-section">';
+              html += '<div class="info-section-title">— API 接口 —</div>';
+              var p = prefix ? "/" + prefix : "";
+              var eps = [
+                ["POST", p + "/download", "添加任务"],
+                ["POST", p + "/reload", "重载配置"],
+              ];
+              html +=
+                '<div class="info-endpoints">' +
+                eps
+                  .map(function (e) {
+                    return (
+                      '<div class="info-endpoint"><span class="method">' +
+                      e[0] +
+                      '</span><span class="path">' +
+                      e[1] +
+                      '</span><span class="desc">' +
+                      e[2] +
+                      "</span></div>"
+                    );
+                  })
+                  .join("") +
+                "</div>";
+              html += "</div>";
+
+              $("infoBody").innerHTML = html;
+            })
+            .catch(function () {
+              $("infoBody").innerHTML =
+                '<div class="empty"><span class="icon">⚠️</span>配置信息加载失败</div>';
+            });
+        }
+
+        // ---------- 轮询（页面隐藏时暂停，节省限流配额） ----------
+        function startPolling() {
+          stopPolling();
+          loadConfigInfo();
+          pollTimer = setInterval(function () {
+            if (!document.hidden) refreshTasks();
+          }, 3000);
+          healthTimer = setInterval(function () {
+            if (!document.hidden) checkHealth();
+          }, 10000);
+          checkHealth();
+        }
+        function stopPolling() {
+          if (pollTimer) {
+            clearInterval(pollTimer);
+            pollTimer = null;
+          }
+          if (healthTimer) {
+            clearInterval(healthTimer);
+            healthTimer = null;
+          }
+        }
+
+        // ---------- 启动 ----------
+        loadCreds();
+        if (creds.key && creds.user && creds.pwd) {
+          tryLogin(true);
+        }
+      })();
+    </script>
+  </body>
+</html>

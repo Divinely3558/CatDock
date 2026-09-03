@@ -1,0 +1,35 @@
+services:
+  catdock:
+    container_name: catdock
+    build: .
+    volumes:
+      - /youdir:/home/downloader/temp
+      - /youdir/downloads:/home/downloader/downloads
+      - /youdir/config:/home/downloader/config
+    ports:
+      - 5000:8080
+    image: ghcr.nju.edu.cn/divinely3558/catdock
+    restart: always
+    dns:
+      - 223.5.5.5
+      - 223.6.6.6
+      - 114.114.114.114
+      - 119.29.29.29
+    environment:
+      - AUTH_KEY=I2LLmyqQP9C8pU
+      - URL_PREFIX=qj52lajx
+      # SSRF防护: true=拦截内网地址(公网部署推荐), false=允许内网地址(纯内网/Docker内部下载时设为false)
+      - SSRF_PROTECTION=true
+      # 最大并发下载任务数，防止资源耗尽
+      - MAX_CONCURRENT_TASKS=20
+    healthcheck:
+      # 注意：${} 在 compose 解析时替换（取宿主机环境/.env，不是下方 environment 段），
+      # 请与前文 URL_PREFIX 保持一致，否则会请求 //health 导致 404 并累积认证失败
+      test: ["CMD", "curl", "-f", "http://localhost:8080/qj52lajx/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+    mem_limit: 512m
+    memswap_limit: 512m
+    cpus: '1.0'

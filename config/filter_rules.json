@@ -1,0 +1,19 @@
+{
+  "keywords": {
+    "enabled": true,
+    "list": []
+  },
+  "filename_filter": {
+    "enabled": true,
+    "list": []
+  },
+  "filename_dedup": {
+    "enabled": true,
+    "rules": [
+      {
+        "pattern": "(\\w+)(_\\1)+",
+        "replacement": "\\1"
+      }
+    ]
+  }
+}
