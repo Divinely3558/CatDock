@@ -1,17 +1,17 @@
 #!/usr/bin/env python3
-"""user - catdock 下载用户管理命令行工具
+"""userctl - catdock 下载用户管理命令行工具
 
 实际逻辑位于 core/data_db.py（data.db 的 users 表）。
 
 用法:
-    user add <用户名>        添加用户（交互式输入密码）
-    user del <用户名>        删除用户（至少保留一个）
-    user password <用户名>   修改用户密码
-    user --help
+    userctl add <用户名>        添加用户（交互式输入密码）
+    userctl del <用户名>        删除用户（至少保留一个）
+    userctl password <用户名>   修改用户密码
+    userctl --help
 
 用户名规则：仅字母+数字、不能纯数字、字母数量不少于 4 位。
 密码以 pbkdf2 + 随机盐 哈希存储，不留明文。
-首次使用（data.db 无用户）仅允许 user add。
+首次使用（data.db 无用户）仅允许 userctl add。
 """
 import os
 import sys
@@ -51,7 +51,7 @@ def _require_users_exist():
     """data.db 无用户时除 add 外的命令前置检查。返回 True 表示可继续。"""
     try:
         if data_db.user_count() == 0:
-            print("data.db 中尚无用户，请先运行: user add <用户名>", file=sys.stderr)
+            print("data.db 中尚无用户，请先运行: userctl add <用户名>", file=sys.stderr)
             return False
     except Exception as e:
         print(f"读取用户列表失败: {e}", file=sys.stderr)
@@ -62,7 +62,7 @@ def _require_users_exist():
 
 def _cmd_add(args):
     if not args:
-        print("用法: user add <用户名>", file=sys.stderr)
+        print("用法: userctl add <用户名>", file=sys.stderr)
         return 1
     username = args[0].strip()
     # 先做格式预校验，给出友好提示
@@ -90,7 +90,7 @@ def _cmd_del(args):
     if not _require_users_exist():
         return 1
     if not args:
-        print("用法: user del <用户名>", file=sys.stderr)
+        print("用法: userctl del <用户名>", file=sys.stderr)
         return 1
     username = args[0].strip()
     try:
@@ -113,7 +113,7 @@ def _cmd_password(args):
     if not _require_users_exist():
         return 1
     if not args:
-        print("用法: user password <用户名>", file=sys.stderr)
+        print("用法: userctl password <用户名>", file=sys.stderr)
         return 1
     username = args[0].strip()
     if not data_db.user_exists(username):
@@ -136,7 +136,7 @@ def _cmd_password(args):
 
 
 def _print_usage():
-    print("用法: user <子命令> [参数]")
+    print("用法: userctl <子命令> [参数]")
     print("")
     print("子命令:")
     print("  add <用户名>        添加用户（交互式输入密码）")
@@ -146,9 +146,9 @@ def _print_usage():
     print("用户名规则: 仅字母+数字、不能纯数字、字母数量不少于 4 位")
     print("")
     print("示例:")
-    print("  user add alice")
-    print("  user del alice")
-    print("  user password alice")
+    print("  userctl add alice")
+    print("  userctl del alice")
+    print("  userctl password alice")
 
 
 def main():

@@ -33,7 +33,7 @@ def _record_failure_and_log(client_ip):
     """
     result = data_db.record_auth_failure(client_ip)
     if result == 'perm':
-        log_error(f"IP {client_ip} 重复触发封禁阈值，已永久封禁（需在容器内执行 bpip del {client_ip} 手动解除）")
+        log_error(f"IP {client_ip} 重复触发封禁阈值，已永久封禁（需在容器内执行 banip del {client_ip} 手动解除）")
     elif result == 'temp':
         log_error(f"IP {client_ip} 认证失败累计达阈值，已临时封禁 30 分钟")
     return result
@@ -44,11 +44,15 @@ class DownloadHandler(http.server.BaseHTTPRequestHandler):
 
     def send_json(self, data, status=200):
         try:
+            # 先序列化 body，再发响应头：若 json.dumps 失败（如含不可序列化对象），
+            # 此时尚未发送任何字节，客户端不会收到"有头无体"的截断响应
+            body = json.dumps(data, ensure_ascii=False).encode('utf-8')
             self.send_response(status)
             self.send_header('Content-Type', 'application/json')
+            self.send_header('Content-Length', str(len(body)))
             self.send_header('Connection', 'close')
             self.end_headers()
-            self.wfile.write(json.dumps(data, ensure_ascii=False).encode('utf-8'))
+            self.wfile.write(body)
         except Exception as e:
             debug_print(f"发送响应失败: {e}")
 
@@ -163,12 +167,12 @@ class DownloadHandler(http.server.BaseHTTPRequestHandler):
             return False
 
         # 未初始化拦截：data.db 中无任何用户时，拒绝所有业务请求（/health 在此之前已放行）。
-        # 不计入 IP 封禁（AUTH_KEY 已正确，属部署未完成而非攻击）；user add 后实时生效。
+        # 不计入 IP 封禁（AUTH_KEY 已正确，属部署未完成而非攻击）；userctl add 后实时生效。
         if data_db.user_count() == 0:
             log_error(f"系统未初始化（无用户），拒绝请求: {self.path}")
             self.send_json({
                 'success': False,
-                'message': '系统尚未初始化：无可用用户，请在容器内执行 user add <用户名> 添加用户后重试'
+                'message': '系统尚未初始化：无可用用户，请在容器内执行 userctl add <用户名> 添加用户后重试'
             }, 503)
             return False
 
@@ -410,7 +414,7 @@ class DownloadHandler(http.server.BaseHTTPRequestHandler):
                     # 检查用户数（del_user 已防删空，此处防外部替换 data.db 为空库）
                     _uc = data_db.user_count()
                     if _uc == 0:
-                        log_error("警告: 重载后 data.db 中无用户，请运行: user add <用户名>")
+                        log_error("警告: 重载后 data.db 中无用户，请运行: userctl add <用户名>")
                     else:
                         log_info(f"重载完成，当前用户数: {_uc}")
                 finally:

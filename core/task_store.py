@@ -7,7 +7,6 @@
 import os
 import json
 import time
-import shutil
 
 import app_config as cfg
 from app_logger import log_error, debug_print
@@ -46,25 +45,11 @@ def save_tasks(force=False):
 
 
 def load_tasks():
-    # 旧版 tasks.json 存放在挂载卷 config/ 下（网页端时代已无需对外展示），
-    # 首次升级时自动迁移到容器内 .data/ 目录；跨挂载文件系统需用 shutil.move
-    try:
-        if os.path.exists(cfg.LEGACY_TASKS_FILE) and not os.path.exists(cfg.TASKS_FILE):
-            os.makedirs(os.path.dirname(cfg.TASKS_FILE), exist_ok=True)
-            shutil.move(cfg.LEGACY_TASKS_FILE, cfg.TASKS_FILE)
-            print(f"已迁移任务文件: {cfg.LEGACY_TASKS_FILE} -> {cfg.TASKS_FILE}")
-    except Exception as e:
-        log_error(f"迁移任务文件失败: {e} - 尝试从旧路径加载")
-
-    tasks_file = cfg.TASKS_FILE
-    if not os.path.exists(tasks_file) and os.path.exists(cfg.LEGACY_TASKS_FILE):
-        tasks_file = cfg.LEGACY_TASKS_FILE  # 迁移失败时回退读取旧路径，保证功能不受影响
-
-    if not os.path.exists(tasks_file):
+    if not os.path.exists(cfg.TASKS_FILE):
         return
 
     try:
-        with open(tasks_file, 'r', encoding='utf-8-sig') as f:
+        with open(cfg.TASKS_FILE, 'r', encoding='utf-8-sig') as f:
             tasks_data = json.load(f)
 
         with cfg.tasks_lock:

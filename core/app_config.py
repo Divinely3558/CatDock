@@ -30,8 +30,9 @@ FFMPEG_PATH = "/usr/bin/ffmpeg"
 N_M3U8DL = "/home/downloader/N_m3u8DL-RE"
 CONFIG_FILE = "/home/downloader/config/config.json"
 FILTER_RULES_FILE = "/home/downloader/config/filter_rules.json"
-TASKS_FILE = "/home/downloader/.data/tasks.json"
-LEGACY_TASKS_FILE = "/home/downloader/config/tasks.json"  # 旧版任务文件位置，启动时自动迁移
+# tasks.json 与 config.json 同目录（config/ 挂载卷），容器升级重建后任务列表保留，
+# resume_tasks 可恢复断点续存。此前放在容器内 .data/ 会导致升级后任务丢失。
+TASKS_FILE = "/home/downloader/config/tasks.json"
 SUCCESS_LOG_FILE = "/home/downloader/config/success.log"
 FAILURE_LOG_FILE = "/home/downloader/config/failure.log"
 
@@ -113,7 +114,9 @@ _BLOCKED_NETWORKS = [
 ]
 
 # /tasks 响应中需要隐藏的敏感字段
-_SENSITIVE_TASK_FIELDS = ('_referer', '_cookie', '_user_agent')
+# _proc: subprocess.Popen 对象（不可 JSON 序列化，会导致 send_json 失败）
+# _download_dir: per-user 下载目录路径（隐私敏感）
+_SENSITIVE_TASK_FIELDS = ('_referer', '_cookie', '_user_agent', '_proc', '_download_dir')
 
 
 def load_config():

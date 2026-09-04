@@ -1,13 +1,13 @@
 #!/usr/bin/env python3
-"""bpip - IP 封禁管理命令行工具
+"""banip - IP 封禁管理命令行工具
 
 统一入口，实际逻辑位于 core/data_db.py。
 
 用法:
-    bpip show
-    bpip add <IP地址>
-    bpip del <IP地址>
-    bpip --help
+    banip show
+    banip add <IP地址>
+    banip del <IP地址>
+    banip --help
 """
 import os
 import sys

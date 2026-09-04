@@ -5,7 +5,7 @@
   - 认证失败计数与封禁 IP 列表
   - 下载用户及其密码（哈希+盐）
 
-服务端（main.py / api_server.py）与 CLI 工具（bpip / user）共用本模块。
+服务端（main.py / api_server.py）与 CLI 工具（banip / userctl）共用本模块。
 
 数据库表结构：
   - failed_attempts: 记录每个 IP 在时间窗内的认证失败次数（认证成功/触发封禁后清零）
@@ -13,7 +13,7 @@
   - ip_ban_stats:    阶梯封禁统计（每 IP 历史触发自动封禁的次数，认证成功清零）
   - users:           下载用户列表（用户名 + 密码哈希）
 
-CLI 用法（本文件直接作为脚本运行，或通过 bpip 命令调用）：
+CLI 用法（本文件直接作为脚本运行，或通过 banip 命令调用）：
     python data_db.py show
     python data_db.py add <IP地址>
     python data_db.py del <IP地址>
@@ -116,7 +116,7 @@ def _get_conn():
         """)
         # IP 阶梯封禁统计：记录每个 IP 历史触发"自动封禁"的次数，
         # 第 1 次触发 = 临时封禁（reason='auto'，30 分钟自动解封），
-        # 第 2 次触发 = 永久封禁（reason='auto_perm'，只能 bpip del 解除）。
+        # 第 2 次触发 = 永久封禁（reason='auto_perm'，只能 banip del 解除）。
         # 认证成功清零；临时封禁到期不清除（保留升级计数）。
         _db_conn.execute("""
             CREATE TABLE IF NOT EXISTS ip_ban_stats (
@@ -156,8 +156,8 @@ def is_ip_banned(ip):
 
     auto（首次触发）封禁超过 BAN_DURATION_MINUTES 后自动解封（清除失败计数，
     但保留 ip_ban_stats 升级计数）；
-    manual（bpip add 手动）与 auto_perm（重复触发升级）为永久封禁，
-    只能通过 bpip del 手动解除。
+    manual（banip add 手动）与 auto_perm（重复触发升级）为永久封禁，
+    只能通过 banip del 手动解除。
     """
     with _db_lock:
         conn = _get_conn()
@@ -190,7 +190,7 @@ def record_auth_failure(ip):
     仅累计最近 AUTH_FAILURE_WINDOW_MINUTES 分钟内的失败（时间窗外自动清零），
     累计达到 MAX_AUTH_FAILURES 次时触发封禁，阶梯升级：
       - 第 1 次触发：临时封禁 BAN_DURATION_MINUTES 分钟（reason='auto'，到期自动解封）；
-      - 第 2 次及以后触发：永久封禁（reason='auto_perm'，只能 bpip del 解除）。
+      - 第 2 次及以后触发：永久封禁（reason='auto_perm'，只能 banip del 解除）。
     认证成功会清零升级计数（clear_auth_failure），正常用户偶发手滑不会被永久封禁。
 
     返回值：
@@ -235,7 +235,7 @@ def record_auth_failure(ip):
             conn.execute("DELETE FROM failed_attempts WHERE ip = ?", (ip,))
 
             if prior_temp_bans >= 1:
-                # 第 2 次及以后触发：永久封禁（升级），只能 bpip del 解除
+                # 第 2 次及以后触发：永久封禁（升级），只能 banip del 解除
                 conn.execute(
                     "INSERT OR REPLACE INTO banned_ips (ip, banned_at, reason) VALUES (?, ?, ?)",
                     (ip, now, 'auto_perm'),
@@ -452,10 +452,10 @@ def list_users():
         return cursor.fetchall()
 
 
-# ============ CLI 子命令入口（bpip） ============
+# ============ CLI 子命令入口（banip） ============
 
 def _print_usage():
-    print("用法: bpip <子命令> [参数]")
+    print("用法: banip <子命令> [参数]")
     print("")
     print("子命令:")
     print("  show            显示所有被封禁的 IP 列表")
@@ -463,9 +463,9 @@ def _print_usage():
     print("  del <IP地址>     手动删除（解封）封禁 IP")
     print("")
     print("示例:")
-    print("  bpip show")
-    print("  bpip add 192.168.1.100")
-    print("  bpip del 192.168.1.100")
+    print("  banip show")
+    print("  banip add 192.168.1.100")
+    print("  banip del 192.168.1.100")
 
 
 def _cmd_show():
@@ -498,7 +498,7 @@ def _cmd_add(args):
     import sys
     import ipaddress
     if not args:
-        print("用法: bpip add <IP地址>", file=sys.stderr)
+        print("用法: banip add <IP地址>", file=sys.stderr)
         return 1
 
     ip = args[0].strip()
@@ -523,7 +523,7 @@ def _cmd_add(args):
 def _cmd_del(args):
     import sys
     if not args:
-        print("用法: bpip del <IP地址>", file=sys.stderr)
+        print("用法: banip del <IP地址>", file=sys.stderr)
         return 1
 
     ip = args[0].strip()

@@ -55,8 +55,8 @@ catdock/
 │   ├── security.py      # 🛡️ SSRF 防护 / URL 脱敏 / 限流
 │   └── data_db.py       # 🗄️ data.db（封禁 IP + 用户）
 ├── cli/                 # 🔧 命令行工具
-│   ├── bpip             # 🔧 IP 封禁管理 CLI
-│   └── user             # 👤 下载用户管理 CLI
+│   ├── banip            # 🔧 IP 封禁管理 CLI
+│   └── userctl          # 👤 下载用户管理 CLI
 ├── web/                 # 🖥️ 前端资源
 │   ├── webui.html       # 🖥️ 网页控制台单文件页面（HTML/CSS/JS）
 │   └── favicon.ico      # 🌐 网页图标
@@ -240,7 +240,7 @@ http://你的容器IP:5000/admin/
 
 > 访问 `http://你的容器IP:5000/admin`（不带尾斜杠）会自动 302 跳转到 `/admin/`。
 
-- **登录**：输入 `AUTH_KEY`、容器内 `user add` 创建的用户名和密码；凭证仅保存在当前浏览器（localStorage），下次访问自动填充，可点「退出」清除
+- **登录**：输入 `AUTH_KEY`、容器内 `userctl add` 创建的用户名和密码；凭证仅保存在当前浏览器（localStorage），下次访问自动填充，可点「退出」清除
 - **新建下载**：粘贴视频 URL、填写保存文件名（选填），支持折叠的高级选项（Referer / Cookie / User-Agent）
 - **任务列表**：每 3 秒自动刷新，显示文件名、状态徽章（收集中 / 下载中）、进度条与所属用户；点击任务可弹出详情（任务 ID、全部链接、重试次数等）
 - **运维操作**：顶栏实时显示服务健康状态（每 10 秒探测 `/health`），并提供「重载配置」按钮（等价于 `POST /{prefix}/reload`）
@@ -305,7 +305,7 @@ http://你的容器IP:5000/admin/
 | `cookie`    | string | 否   | 空                      | 认证 Cookie，部分站点下载必需                                                      |
 | `userAgent` | string | 否   | 空                      | 自定义 User-Agent                                                                  |
 | `key`       | string | 是   | —                       | 第一层认证：须与 Docker 环境变量 `AUTH_KEY` 一致                                  |
-| `user`      | string | 是   | —                       | 下载用户名：须为容器内 `user add` 创建的用户，下载文件存入其隔离目录            |
+| `user`      | string | 是   | —                       | 下载用户名：须为容器内 `userctl add` 创建的用户，下载文件存入其隔离目录            |
 | `password`  | string | 是   | —                       | 第二层认证：须与 `config.json` 中 `password` 一致，可通过 `/reload` 热更新       |
 
 > **saveName 说明**：
@@ -1098,7 +1098,7 @@ docker exec catdock getent hosts baidu.com
 说明认证未通过，请逐一检查：
 
 - **第一层（key）**：检查 docker-compose.yml 中 `AUTH_KEY` 设置，确认请求体的 `key` 字段与之一致
-- **第二层（user/password）**：确认 `user` 为容器内 `user add` 创建的用户，`password` 与 `config.json` 中 `password` 字段一致
+- **第二层（user/password）**：确认 `user` 为容器内 `userctl add` 创建的用户，`password` 与 `config.json` 中 `password` 字段一致
 - 确认修改环境变量后已 `docker-compose up -d` 重新创建容器
 
 ### 健康检查接口访问不到
@@ -1126,7 +1126,7 @@ docker exec catdock getent hosts baidu.com
 5. **环境变量修改**：修改 `AUTH_KEY`、`URL_PREFIX` 等环境变量需要 `docker-compose up -d` 重新创建容器
 6. **文件格式**：下载完成后会自动转换为配置的输出格式（MP4/MKV）
 7. **URL 前缀**：`URL_PREFIX` 为必填项，所有 API 接口（含健康检查）路径都必须添加前缀，未带前缀返回 404
-8. **两层认证 + 用户**：`AUTH_KEY`（环境变量）、`config.json` 中 `password`、以及容器内 `user add` 创建的用户名均为必填，所有请求必须同时携带正确的 `key`、`user` 和 `password`，否则返回 403；GET 请求通过查询参数 `?key=&user=&password=` 传递
+8. **两层认证 + 用户**：`AUTH_KEY`（环境变量）、`config.json` 中 `password`、以及容器内 `userctl add` 创建的用户名均为必填，所有请求必须同时携带正确的 `key`、`user` 和 `password`，否则返回 403；GET 请求通过查询参数 `?key=&user=&password=` 传递
 9. **任务持久化**：任务列表自动保存到 `tasks.json`，容器重启后会自动恢复未完成的任务
 10. **重复下载**：同一 URL 不会重复下载，系统会自动检测下载历史和已存在的文件
 11. **调试模式**：开启 `debug: true` 可查看详细日志，便于排查问题

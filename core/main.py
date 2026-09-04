@@ -27,7 +27,7 @@ def main():
     cfg.load_config()
     # 初始化数据库（建表：封禁 IP / 认证失败计数 / 用户）
     data_db.init_db()
-    # 无用户时不退出：服务先启动，便于通过 `docker exec ... user add <用户名>` 初始化；
+    # 无用户时不退出：服务先启动，便于通过 `docker exec ... userctl add <用户名>` 初始化；
     # 但在创建首个用户前，api_server 会拒绝所有业务请求（/health 除外）。
     _user_count = data_db.user_count()
     cleanup_all_copy_files()
@@ -60,7 +60,7 @@ def main():
   📊 最大并发: {cfg.max_concurrent_tasks}
   🎬 同视频模式: {'启用' if cfg.same_video_by_filename_enabled else '禁用'}
   📋 过滤规则: 拦截关键字{'✓' if cfg.keywords_enabled else '✗'}({len(cfg.ad_keywords)}) 文件名过滤{'✓' if cfg.filename_filter_enabled else '✗'} 去重{'✓' if cfg.filename_dedup_enabled else '✗'}
-  👥 {f"下载用户: {_user_count}" if _user_count > 0 else "未创建任何用户，请在容器内执行 user add <用户名>"}
+  👥 {f"下载用户: {_user_count}" if _user_count > 0 else "未创建任何用户，请在容器内执行 userctl add <用户名>"}
 ════════════════════════ 猫抓插件配置 ════════════════════════
 
     发送地址: http://你的容器IP:{port}{api_prefix}/download
