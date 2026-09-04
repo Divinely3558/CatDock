@@ -8,8 +8,9 @@
 服务端（main.py / api_server.py）与 CLI 工具（bpip / user）共用本模块。
 
 数据库表结构：
-  - failed_attempts: 记录每个 IP 的认证失败累计次数（永久累计，不清零）
-  - banned_ips:      已封禁的 IP 列表（永久封禁，需手动删除）
+  - failed_attempts: 记录每个 IP 在时间窗内的认证失败次数（认证成功/触发封禁后清零）
+  - banned_ips:      已封禁的 IP 列表（reason: auto=临时自动封禁, auto_perm=永久自动封禁, manual=手动封禁）
+  - ip_ban_stats:    阶梯封禁统计（每 IP 历史触发自动封禁的次数，认证成功清零）
   - users:           下载用户列表（用户名 + 密码哈希）
 
 CLI 用法（本文件直接作为脚本运行，或通过 bpip 命令调用）：
@@ -28,6 +29,13 @@ import secrets
 
 # 认证失败达到该次数后自动封禁
 MAX_AUTH_FAILURES = 5
+
+# 失败计数时间窗：仅累计最近 N 分钟内的失败，历史失败自动清零，
+# 避免"长期偶发失误累积 + 一次手滑 = 封禁"的误伤
+AUTH_FAILURE_WINDOW_MINUTES = 10
+
+# 自动封禁时长：auto 封禁在 N 分钟后自动解封（manual 手动封禁仍为永久）
+BAN_DURATION_MINUTES = 30
 
 # 数据库文件路径：固定为容器内 config.json 同级目录
 # 服务端会通过 set_db_path() 覆盖为 CONFIG_FILE 同级，CLI 直接使用此默认路径
@@ -75,10 +83,16 @@ def _get_conn():
                     os.rename(old_path, DB_PATH)
                 except OSError:
                     pass
-        _db_conn = sqlite3.connect(DB_PATH, check_same_thread=False)
-        # DELETE 为默认日志模式：事务提交后日志自动删除，目录中只保留 .db 文件
-        # （WAL 模式会常驻生成 -wal/-shm 伴随文件，且 SQLite 强制其与 .db 同目录）
-        _db_conn.execute("PRAGMA journal_mode=DELETE")
+        _db_conn = sqlite3.connect(DB_PATH, check_same_thread=False, timeout=30)
+        # WAL 日志模式：读写不互斥（多线程轮询下读不阻塞写、写不阻塞读），
+        # 显著降低 ThreadingHTTPServer 高并发时的 database is locked 冲突。
+        # 会常驻生成 -wal/-shm 伴随文件（与 .db 同目录，位于 config 挂载卷内，容器重启自动恢复）。
+        _db_conn.execute("PRAGMA journal_mode=WAL")
+        # 锁冲突时最多等待 30 秒（与 connect timeout 一致），而非立即抛 database is locked
+        _db_conn.execute("PRAGMA busy_timeout=30000")
+        # WAL 模式下让 checkpoint 自动运行，避免 -wal 文件无限增长
+        _db_conn.execute("PRAGMA wal_autocheckpoint=1000")
+        _db_conn.execute("PRAGMA synchronous=NORMAL")
         _db_conn.execute("""
             CREATE TABLE IF NOT EXISTS failed_attempts (
                 ip TEXT PRIMARY KEY,
@@ -98,6 +112,17 @@ def _get_conn():
                 username TEXT PRIMARY KEY,
                 password_hash TEXT NOT NULL,
                 created_at TEXT
+            )
+        """)
+        # IP 阶梯封禁统计：记录每个 IP 历史触发"自动封禁"的次数，
+        # 第 1 次触发 = 临时封禁（reason='auto'，30 分钟自动解封），
+        # 第 2 次触发 = 永久封禁（reason='auto_perm'，只能 bpip del 解除）。
+        # 认证成功清零；临时封禁到期不清除（保留升级计数）。
+        _db_conn.execute("""
+            CREATE TABLE IF NOT EXISTS ip_ban_stats (
+                ip TEXT PRIMARY KEY,
+                temp_ban_count INTEGER DEFAULT 0,
+                last_ban_time TEXT
             )
         """)
         _db_conn.commit()
@@ -127,26 +152,66 @@ def reconnect_db():
 
 
 def is_ip_banned(ip):
-    """检查 IP 是否已被封禁"""
+    """检查 IP 是否已被封禁。
+
+    auto（首次触发）封禁超过 BAN_DURATION_MINUTES 后自动解封（清除失败计数，
+    但保留 ip_ban_stats 升级计数）；
+    manual（bpip add 手动）与 auto_perm（重复触发升级）为永久封禁，
+    只能通过 bpip del 手动解除。
+    """
     with _db_lock:
         conn = _get_conn()
-        cursor = conn.execute("SELECT 1 FROM banned_ips WHERE ip = ?", (ip,))
-        return cursor.fetchone() is not None
+        cursor = conn.execute(
+            "SELECT banned_at, reason FROM banned_ips WHERE ip = ?", (ip,)
+        )
+        row = cursor.fetchone()
+        if row is None:
+            return False
+        # auto 临时封禁到期自动解封；auto_perm / manual 永久封禁不走此处
+        if row[1] == 'auto':
+            try:
+                banned_at = time.strptime(row[0], '%Y-%m-%d %H:%M:%S')
+                elapsed = time.time() - time.mktime(banned_at)
+                if elapsed >= BAN_DURATION_MINUTES * 60:
+                    conn.execute("DELETE FROM banned_ips WHERE ip = ?", (ip,))
+                    conn.execute(
+                        "DELETE FROM failed_attempts WHERE ip = ?", (ip,)
+                    )
+                    conn.commit()
+                    return False
+            except (ValueError, OverflowError):
+                pass
+        return True
 
 
 def record_auth_failure(ip):
-    """记录一次认证失败（URL_PREFIX / AUTH_KEY 错误）。
+    """记录一次认证失败（AUTH_KEY 错误 或 用户名/密码错误）。
 
-    累计达到 MAX_AUTH_FAILURES 次时自动封禁该 IP。
-    返回 True 表示本次触发了封禁，False 表示仅累计。
+    仅累计最近 AUTH_FAILURE_WINDOW_MINUTES 分钟内的失败（时间窗外自动清零），
+    累计达到 MAX_AUTH_FAILURES 次时触发封禁，阶梯升级：
+      - 第 1 次触发：临时封禁 BAN_DURATION_MINUTES 分钟（reason='auto'，到期自动解封）；
+      - 第 2 次及以后触发：永久封禁（reason='auto_perm'，只能 bpip del 解除）。
+    认证成功会清零升级计数（clear_auth_failure），正常用户偶发手滑不会被永久封禁。
+
+    返回值：
+      False   未触发封禁（仅累计失败次数）
+      'temp'  本次触发临时封禁
+      'perm'  本次触发永久封禁
     """
     with _db_lock:
         conn = _get_conn()
         now = time.strftime('%Y-%m-%d %H:%M:%S')
-        cursor = conn.execute("SELECT count FROM failed_attempts WHERE ip = ?", (ip,))
+        cursor = conn.execute("SELECT count, last_attempt_time FROM failed_attempts WHERE ip = ?", (ip,))
         row = cursor.fetchone()
         if row:
-            count = row[0] + 1
+            # 上次失败超出时间窗则从 1 重新计数
+            in_window = False
+            try:
+                last = time.strptime(row[1], '%Y-%m-%d %H:%M:%S')
+                in_window = (time.time() - time.mktime(last)) < AUTH_FAILURE_WINDOW_MINUTES * 60
+            except (ValueError, OverflowError):
+                in_window = False
+            count = (row[0] + 1) if in_window else 1
             conn.execute(
                 "UPDATE failed_attempts SET count = ?, last_attempt_time = ? WHERE ip = ?",
                 (count, now, ip),
@@ -160,14 +225,43 @@ def record_auth_failure(ip):
         conn.commit()
 
         if count >= MAX_AUTH_FAILURES:
-            conn.execute(
-                "INSERT OR IGNORE INTO banned_ips (ip, banned_at, reason) VALUES (?, ?, ?)",
-                (ip, now, 'auto'),
-            )
+            # 阶梯封禁：查询历史自动封禁次数，决定本次临时封禁还是永久封禁
+            stats_row = conn.execute(
+                "SELECT temp_ban_count FROM ip_ban_stats WHERE ip = ?", (ip,)
+            ).fetchone()
+            prior_temp_bans = stats_row[0] if stats_row else 0
+
             # 封禁后清除失败计数，避免解封后残留
             conn.execute("DELETE FROM failed_attempts WHERE ip = ?", (ip,))
-            conn.commit()
-            return True
+
+            if prior_temp_bans >= 1:
+                # 第 2 次及以后触发：永久封禁（升级），只能 bpip del 解除
+                conn.execute(
+                    "INSERT OR REPLACE INTO banned_ips (ip, banned_at, reason) VALUES (?, ?, ?)",
+                    (ip, now, 'auto_perm'),
+                )
+                conn.execute(
+                    "INSERT INTO ip_ban_stats (ip, temp_ban_count, last_ban_time) VALUES (?, ?, ?) "
+                    "ON CONFLICT(ip) DO UPDATE SET temp_ban_count = temp_ban_count + 1, "
+                    "last_ban_time = excluded.last_ban_time",
+                    (ip, 1, now),
+                )
+                conn.commit()
+                return 'perm'
+            else:
+                # 第 1 次触发：临时封禁 30 分钟，到期自动解封
+                conn.execute(
+                    "INSERT OR REPLACE INTO banned_ips (ip, banned_at, reason) VALUES (?, ?, ?)",
+                    (ip, now, 'auto'),
+                )
+                conn.execute(
+                    "INSERT INTO ip_ban_stats (ip, temp_ban_count, last_ban_time) VALUES (?, 1, ?) "
+                    "ON CONFLICT(ip) DO UPDATE SET temp_ban_count = temp_ban_count + 1, "
+                    "last_ban_time = excluded.last_ban_time",
+                    (ip, now),
+                )
+                conn.commit()
+                return 'temp'
         return False
 
 
@@ -184,11 +278,26 @@ def add_banned_ip(ip):
 
 
 def remove_banned_ip(ip):
-    """手动删除（解封）IP，同时清除其失败计数"""
+    """手动删除（解封）IP，同时清除其失败计数与阶梯封禁统计（解封后重新开始）"""
     with _db_lock:
         conn = _get_conn()
         conn.execute("DELETE FROM banned_ips WHERE ip = ?", (ip,))
         conn.execute("DELETE FROM failed_attempts WHERE ip = ?", (ip,))
+        conn.execute("DELETE FROM ip_ban_stats WHERE ip = ?", (ip,))
+        conn.commit()
+
+
+def clear_auth_failure(ip):
+    """认证成功后清除该 IP 的失败计数与阶梯封禁升级计数。
+
+    已封禁（临时/永久）的 IP 在 handle() 阶段连接即被断开，走不到认证，
+    因此清零升级计数不会影响正在生效的封禁。
+    """
+    with _db_lock:
+        conn = _get_conn()
+        conn.execute("DELETE FROM failed_attempts WHERE ip = ?", (ip,))
+        # 成功登录：清零阶梯升级计数，正常用户偶发手滑不会升级为永久封禁
+        conn.execute("DELETE FROM ip_ban_stats WHERE ip = ?", (ip,))
         conn.commit()
 
 
@@ -376,7 +485,11 @@ def _cmd_show():
     print(f"{'序号':<6}{'IP 地址':<20}{'封禁时间':<22}{'封禁原因'}")
     print("-" * 60)
     for idx, (ip, banned_at, reason) in enumerate(rows, 1):
-        reason_display = '自动封禁' if reason == 'auto' else '手动添加'
+        reason_display = {
+            'auto': '自动封禁(临时)',
+            'auto_perm': '自动封禁(永久)',
+            'manual': '手动添加',
+        }.get(reason, reason)
         print(f"{idx:<6}{ip:<20}{banned_at:<22}{reason_display}")
     return 0
 

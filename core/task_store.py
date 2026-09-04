@@ -31,7 +31,8 @@ def save_tasks(force=False):
                     'urls': task['urls'],
                     'save_name': task.get('save_name', ''),
                     'status': task['status'],
-                    'progress': task.get('progress', 0)
+                    'progress': task.get('progress', 0),
+                    'user': task.get('user', '')
                 }
                 tasks_data.append(task_data)
 
@@ -77,6 +78,7 @@ def load_tasks():
                     'save_name': task.get('save_name', ''),
                     'status': task.get('status', 'running'),
                     'progress': task.get('progress', 0),
+                    'user': task.get('user', ''),
                     '_referer': '',
                     '_cookie': '',
                     '_user_agent': '',

@@ -194,12 +194,13 @@ def load_config():
             debug_print("认证密钥来源: 配置文件")
 
         # 优先从环境变量读取 url_prefix，环境变量优先级高于配置文件
-        env_url_prefix = os.environ.get('URL_PREFIX', '')
+        # 规范化：去首尾空格与斜杠，避免配置值带尾斜杠导致所有请求 404 并累积封禁计数
+        env_url_prefix = os.environ.get('URL_PREFIX', '').strip()
         if env_url_prefix:
-            url_prefix = env_url_prefix
+            url_prefix = env_url_prefix.strip('/')
             debug_print("URL前缀来源: 环境变量")
         else:
-            url_prefix = config.get('url_prefix', '')
+            url_prefix = str(config.get('url_prefix', '')).strip().strip('/')
             debug_print("URL前缀来源: 配置文件")
 
         server_port = int(config.get('port', 8080))

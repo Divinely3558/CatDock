@@ -1213,7 +1213,13 @@
               "&password=" +
               encodeURIComponent(creds.pwd);
           }
-          return fetch(url, { method: "GET" }).then(handleResp);
+          return fetch(url, { method: "GET" })
+            .catch(function () {
+              throw new Error(
+                "无法连接服务器：连接被拒绝。可能 IP 已被封禁（服务器执行 bpip show 查看并 bpip del 解封），或地址前缀有误",
+              );
+            })
+            .then(handleResp);
         }
 
         function apiPost(path, body) {
@@ -1224,7 +1230,13 @@
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify(body),
-          }).then(handleResp);
+          })
+            .catch(function () {
+              throw new Error(
+                "无法连接服务器：连接被拒绝。可能 IP 已被封禁（服务器执行 bpip show 查看并 bpip del 解封），或地址前缀有误",
+              );
+            })
+            .then(handleResp);
         }
 
         function handleResp(resp) {
@@ -1624,7 +1636,7 @@
 
         // ---------- 健康检查 ----------
         function checkHealth() {
-          fetch(BASE + "health", { method: "GET" })
+          return fetch(BASE + "health", { method: "GET" })
             .then(function (r) {
               return r.json();
             })
@@ -1780,25 +1792,59 @@
             });
         }
 
-        // ---------- 轮询（页面隐藏时暂停，节省限流配额） ----------
+        // ---------- 轮询（递归 setTimeout：上一次请求结束后才发下一次） ----------
+        // 用 pollingActive 标志驱动递归调度，保证同一时刻只有一个请求在途，
+        // 避免服务卡顿时 setInterval 请求堆积、凭证失效瞬间多个 403 触发 IP 封禁
+        var pollingActive = false;
+
         function startPolling() {
           stopPolling();
+          pollingActive = true;
           loadConfigInfo();
-          pollTimer = setInterval(function () {
-            if (!document.hidden) refreshTasks();
-          }, 3000);
-          healthTimer = setInterval(function () {
-            if (!document.hidden) checkHealth();
-          }, 10000);
-          checkHealth();
+          scheduleTasks();
+          scheduleHealth();
         }
+
+        // 任务轮询：refreshTasks 结束（成功/失败/403 跳登录）后再等 3 秒
+        function scheduleTasks() {
+          if (!pollingActive) return;
+          if (document.hidden) {
+            pollTimer = setTimeout(scheduleTasks, 3000);
+            return;
+          }
+          var next = function () {
+            if (pollingActive) pollTimer = setTimeout(scheduleTasks, 3000);
+          };
+          refreshTasks().then(next, next);
+        }
+
+        // 健康检查：checkHealth 结束后再等 10 秒
+        function scheduleHealth() {
+          if (!pollingActive) return;
+          if (document.hidden) {
+            healthTimer = setTimeout(scheduleHealth, 10000);
+            return;
+          }
+          checkHealth().then(
+            function () {
+              if (pollingActive)
+                healthTimer = setTimeout(scheduleHealth, 10000);
+            },
+            function () {
+              if (pollingActive)
+                healthTimer = setTimeout(scheduleHealth, 10000);
+            },
+          );
+        }
+
         function stopPolling() {
+          pollingActive = false;
           if (pollTimer) {
-            clearInterval(pollTimer);
+            clearTimeout(pollTimer);
             pollTimer = null;
           }
           if (healthTimer) {
-            clearInterval(healthTimer);
+            clearTimeout(healthTimer);
             healthTimer = null;
           }
         }

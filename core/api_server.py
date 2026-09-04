@@ -26,6 +26,19 @@ from downloader import run_download, resume_tasks, pause_task, resume_paused_tas
 from webui import get_index_html
 
 
+def _record_failure_and_log(client_ip):
+    """记录一次认证失败并按阶梯封禁结果输出日志。
+
+    返回 data_db.record_auth_failure 的结果：False（未封禁）/ 'temp'（临时封禁）/ 'perm'（永久封禁）。
+    """
+    result = data_db.record_auth_failure(client_ip)
+    if result == 'perm':
+        log_error(f"IP {client_ip} 重复触发封禁阈值，已永久封禁（需在容器内执行 bpip del {client_ip} 手动解除）")
+    elif result == 'temp':
+        log_error(f"IP {client_ip} 认证失败累计达阈值，已临时封禁 30 分钟")
+    return result
+
+
 class DownloadHandler(http.server.BaseHTTPRequestHandler):
     REQUEST_TIMEOUT = 30
 
@@ -144,9 +157,8 @@ class DownloadHandler(http.server.BaseHTTPRequestHandler):
         request_key = _get_field('key', 'auth_key', 'token')
         if request_key is None or not hmac.compare_digest(request_key, cfg.auth_key):
             log_error(f"认证失败：第一层 AUTH_KEY 校验未通过")
-            # AUTH_KEY 错误，计入认证失败次数
-            if data_db.record_auth_failure(self.client_address[0]):
-                log_error(f"IP {self.client_address[0]} 认证失败累计达阈值，已自动封禁")
+            # AUTH_KEY 错误，计入认证失败次数（阶梯封禁：首次临时、再次永久）
+            _record_failure_and_log(self.client_address[0])
             self.send_json({'success': False, 'message': '认证失败，密钥不正确'}, 403)
             return False
 
@@ -161,16 +173,20 @@ class DownloadHandler(http.server.BaseHTTPRequestHandler):
             return False
 
         # 第二层：用户名+密码（data.db 的 users 表），通过 user/password 字段传入
-        # 仅校验 AUTH_KEY/URL_PREFIX 计入封禁；用户名/密码错误不计入（多用户共享同一 IP）
+        # key 值 或 账号密码 任一不正确，均计入 IP 封禁计数
+        # （10 分钟内累计 5 次：首次触发临时封禁 30 分钟，再次触发永久封禁）
         request_user = _get_field('user', 'usr')
         request_password = _get_field('password')
         if not request_user or not request_password or \
                 not data_db.verify_user(request_user, request_password):
             log_error(f"认证失败：用户名或密码不正确")
+            _record_failure_and_log(self.client_address[0])
             self.send_json({'success': False, 'message': '认证失败，用户名或密码不正确'}, 403)
             return False
 
         # 记录已认证用户，供下载目录分流 (/home/downloader/downloads/<用户名>)
+        # 认证成功：清除该 IP 的失败计数，避免历史偶发失误累积导致误封
+        data_db.clear_auth_failure(self.client_address[0])
         self.authenticated_user = request_user
         return True
 
@@ -184,10 +200,9 @@ class DownloadHandler(http.server.BaseHTTPRequestHandler):
                 return None
             if path.startswith(prefix_pattern + '/'):
                 return path[len(prefix_pattern):]
-            log_error(f"路径前缀不正确，拒绝请求: {path}")
-            # URL_PREFIX 错误，计入认证失败次数
-            if data_db.record_auth_failure(self.client_address[0]):
-                log_error(f"IP {self.client_address[0]} 认证失败累计达阈值，已自动封禁")
+            # URL_PREFIX/网页链接错误：仅返回 404，不计入封禁计数
+            # （扫描器探测、浏览器误访问、链接敲错等不触发 IP 封禁）
+            debug_print(f"路径前缀不正确，拒绝请求: {path}")
             return None
 
         return path
@@ -236,7 +251,7 @@ class DownloadHandler(http.server.BaseHTTPRequestHandler):
                     with open(ico_path, 'rb') as f:
                         body = f.read()
                     self.send_response(200)
-                    self.send_header('Content-Type', 'image/png')
+                    self.send_header('Content-Type', 'image/x-icon')
                     self.send_header('Content-Length', str(len(body)))
                     self.send_header('Cache-Control', 'public, max-age=86400')
                     self.send_header('Connection', 'close')
@@ -280,12 +295,15 @@ class DownloadHandler(http.server.BaseHTTPRequestHandler):
             }})
         elif path == '/tasks':
             with cfg.tasks_lock:
-                self.send_json({'success': True, 'data': [self._mask_task(t) for t in cfg.tasks.values()]})
+                current_user = self.authenticated_user
+                user_tasks = [self._mask_task(t) for t in cfg.tasks.values()
+                              if t.get('user', '') == current_user]
+                self.send_json({'success': True, 'data': user_tasks})
         elif path.startswith('/tasks/'):
             task_id = path.split('/')[2]
             with cfg.tasks_lock:
                 task = cfg.tasks.get(task_id)
-                if task:
+                if task and task.get('user', '') == self.authenticated_user:
                     self.send_json({'success': True, 'data': self._mask_task(task)})
                 else:
                     self.send_json({'success': False, 'message': '任务不存在'}, 404)
