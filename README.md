@@ -24,8 +24,6 @@
 - **🚪 优雅关闭**：支持 SIGTERM/SIGINT 信号，安全停止服务
 - **🌏 东八区时间**：日志时间戳统一使用北京时间（UTC+8）
 - **🌐 网络就绪检测**：容器启动前自动检测网络状态，确保下载环境就绪
-- **❤️ 健康检查**：Docker 健康检查监控服务状态，异常时可由 swarm/compose 自动重启
-- **📦 资源限制**：限制容器内存 512MB、CPU 1 核，防止资源过度占用
 - **🔁 失败重置**：启动时自动清空 `failure.log`，允许重新下载之前失败的 URL
 - **🧠 自动恢复**：容器重启后自动恢复未完成下载任务，保留进度
 - **🛡️ SSRF 防护**：拦截指向内网/回环/云元数据地址的下载请求，可开关
@@ -108,15 +106,6 @@ services:
       - URL_PREFIX=admin # 🔒 必须设置：URL 路径前缀（建议 8 位随机字符串）
       - SSRF_PROTECTION=true # 🛡️ SSRF防护: true=拦截内网地址, false=允许内网下载
       - MAX_CONCURRENT_TASKS=20 # 📊 最大并发下载任务数
-    healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8080/${URL_PREFIX}/health"]
-      interval: 30s
-      timeout: 10s
-      retries: 3
-      start_period: 30s
-    mem_limit: 512m
-    memswap_limit: 512m
-    cpus: "1.0"
 ```
 
 ### 3. 构建并启动容器
@@ -137,13 +126,6 @@ docker logs -f catdock
 2. 猫抓插件发送地址与请求体模板
 3. API 接口列表
 4. 当前加载的配置摘要
-
-### 5. 健康检查
-
-```bash
-curl http://你的容器IP:5000/admin/health
-# => {"success": true, "status": "ok"}
-```
 
 ## 📂 目录挂载说明
 
