@@ -10,6 +10,10 @@ import sys
 import os
 import json
 import hmac
+import time
+import base64
+import hashlib
+import secrets
 import socket
 import signal
 import urllib.parse
@@ -37,6 +41,80 @@ def _record_failure_and_log(client_ip):
     elif result == 'temp':
         log_error(f"IP {client_ip} 认证失败累计达阈值，已临时封禁 30 分钟")
     return result
+
+
+# ---------- 访问令牌（access_token）----------
+# 无状态 HMAC 签名令牌：POST /login 两层认证通过后签发，
+# 业务接口通过 Authorization: Bearer <token> 请求头携带，
+# 避免在 URL 查询参数中传递密钥/账号密码（URL 会进入浏览器历史与各级访问日志）。
+TOKEN_TTL_SECONDS = 7200  # 令牌有效期 2 小时，过期后需重新登录
+_TOKEN_INFO = b'catdock-token-v1'  # 派生盐，AUTH_KEY 变更后旧令牌自动全部失效
+
+
+def _token_sign_key():
+    """由 AUTH_KEY 派生令牌签名密钥（不在内存中直接复用 AUTH_KEY 本体做签名）"""
+    return hmac.new(cfg.auth_key.encode('utf-8'), _TOKEN_INFO, hashlib.sha256).digest()
+
+
+def _b64url_encode(raw):
+    return base64.urlsafe_b64encode(raw).rstrip(b'=').decode('ascii')
+
+
+def _b64url_decode(text):
+    pad = '=' * (-len(text) % 4)
+    return base64.urlsafe_b64decode(text + pad)
+
+
+def issue_auth_token(username):
+    """为已通过两层认证的用户签发令牌：base64url(payload).base64url(hmac_sha256 签名)
+
+    payload 含唯一 jti 并登记到 data.db 的 auth_tokens 表，支持服务端主动吊销
+    （注销 / 改密码全端下线）。签发时顺带惰性清理已过期的登记行。
+    """
+    payload = json.dumps({
+        'user': username,
+        'exp': int(time.time()) + TOKEN_TTL_SECONDS,
+        'jti': secrets.token_hex(16),
+    }, ensure_ascii=False).encode('utf-8')
+    sig = hmac.new(_token_sign_key(), payload, hashlib.sha256).digest()
+    claims = json.loads(payload)
+    data_db.cleanup_expired_tokens()
+    data_db.save_auth_token(claims['jti'], username, claims['exp'])
+    return _b64url_encode(payload) + '.' + _b64url_encode(sig)
+
+
+def get_token_claims(token):
+    """解析令牌 payload（不验签，仅供签名校验通过后使用），失败返回 None"""
+    try:
+        payload = _b64url_decode(token.split('.', 1)[0])
+        return json.loads(payload.decode('utf-8'))
+    except Exception:
+        return None
+
+
+def verify_auth_token(token):
+    """校验令牌，返回对应的用户名；无效/过期/已吊销/用户已删除时返回 None"""
+    try:
+        payload_b64, sig_b64 = token.split('.', 1)
+        payload = _b64url_decode(payload_b64)
+        expected = hmac.new(_token_sign_key(), payload, hashlib.sha256).digest()
+        if not hmac.compare_digest(expected, _b64url_decode(sig_b64)):
+            return None
+        data = json.loads(payload.decode('utf-8'))
+        username = data.get('user')
+        exp = data.get('exp')
+        jti = data.get('jti')
+        if not username or not isinstance(exp, int) or exp < int(time.time()):
+            return None
+        # 吊销校验：jti 必须登记在册且未被吊销（改密码/注销/删用户后失效）
+        if not jti or not data_db.is_token_valid(jti):
+            return None
+        # 用户在有效期内被 userctl del 删除后，令牌立即失效
+        if not data_db.user_exists(username):
+            return None
+        return username
+    except Exception:
+        return None
 
 
 class DownloadHandler(http.server.BaseHTTPRequestHandler):
@@ -137,23 +215,38 @@ class DownloadHandler(http.server.BaseHTTPRequestHandler):
         return None
 
     def _check_auth(self, data=None):
-        """两层认证：第一层 AUTH_KEY（环境变量），第二层 用户名+密码（data.db 的 users 表）"""
+        """两层认证：第一层 AUTH_KEY（环境变量），第二层 用户名+密码（data.db 的 users 表）
+
+        凭证传递方式（按优先级）：
+        1. Authorization: Bearer <token> 请求头（POST /login 签发，所有业务接口通用）
+        2. 请求体 key/user/password 字段（仅 POST，兼容猫抓插件等第三方调用方）
+        不再支持 URL 查询参数传凭证（URL 会进入浏览器历史与各级访问日志，存在泄露风险）
+        """
         if not cfg.auth_key:
             return True
 
-        # 从请求体或 URL 查询参数中提取认证字段
+        # 方式 1：Bearer 令牌。携带令牌时仅校验令牌本身（签名/有效期/用户存在），
+        # 令牌即已通过两层认证的凭证，无效令牌直接拒绝，不回退到明文凭证
+        auth_header = self.headers.get('Authorization', '')
+        if auth_header.startswith('Bearer '):
+            token = auth_header[len('Bearer '):].strip()
+            username = verify_auth_token(token) if token else None
+            if username:
+                # 认证成功：清除该 IP 的失败计数，避免历史偶发失误累积导致误封
+                data_db.clear_auth_failure(self.client_address[0])
+                self.authenticated_user = username
+                return True
+            log_error("认证失败：令牌无效或已过期")
+            _record_failure_and_log(self.client_address[0])
+            self.send_json({'success': False, 'message': '登录已过期，请重新登录'}, 403)
+            return False
+
+        # 方式 2：请求体凭证（POST 专用，GET 无请求体，也不再支持查询参数）
         def _get_field(*names):
             if data:
                 val = self._get_param(data, *names)
                 if val is not None:
                     return val
-            parsed = urllib.parse.urlparse(self.path)
-            query = urllib.parse.parse_qs(parsed.query)
-            for name in names:
-                if name in query and query[name]:
-                    val = query[name][0].strip()
-                    if val:
-                        return val
             return None
 
         # 第一层：AUTH_KEY（环境变量），通过 key/auth_key/token 字段传入
@@ -323,7 +416,43 @@ class DownloadHandler(http.server.BaseHTTPRequestHandler):
             self.wfile.write(b'404 Not Found')
             return
 
-        if path == '/download':
+        # 登录接口：请求体提交 key/user/password，两层认证通过后签发访问令牌。
+        # 认证同样先于限流（DoS 防护），失败计入 IP 封禁（与其他接口一致）
+        if path == '/login':
+            data = self._read_json_body()
+            if data is None:
+                return
+
+            if not self._check_auth(data):
+                return
+
+            if not self._check_rate_limit():
+                return
+
+            self.send_json({'success': True, 'data': {
+                'token': issue_auth_token(self.authenticated_user),
+                'expiresIn': TOKEN_TTL_SECONDS,
+            }})
+        # 注销：吊销当前 Bearer 令牌（服务端 auth_tokens 表置 revoked），
+        # 使该令牌在所有设备上立即失效；此后仅清理本地副本
+        elif path == '/logout':
+            data = self._read_json_body()
+            if data is None:
+                return
+
+            if not self._check_auth(data):
+                return
+
+            if not self._check_rate_limit():
+                return
+
+            auth_header = self.headers.get('Authorization', '')
+            token = auth_header[len('Bearer '):].strip()
+            claims = get_token_claims(token)
+            if claims and claims.get('jti'):
+                data_db.revoke_auth_token(claims['jti'])
+            self.send_json({'success': True, 'message': '已注销，令牌已失效'})
+        elif path == '/download':
             try:
                 data = self._read_json_body()
                 if data is None:

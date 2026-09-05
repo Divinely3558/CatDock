@@ -10,7 +10,10 @@
 - **🎬 完整下载参数**：支持 referer、cookie、user-agent 等关键参数
 - **💾 数据持久化**：下载文件、临时文件与配置文件均持久化到宿主机
 - **🔒 URL 路径前缀**：支持设置访问前缀（如 `/admin`），增强接口安全性
-- **🔑 请求体认证**：支持 `key` 参数认证，防止未授权访问
+- **🎫 访问令牌认证**：登录签发 2 小时短期令牌（Bearer Token），凭证不再通过 URL 传递；POST 接口兼容请求体凭证（猫抓插件等第三方调用方）
+- **🔄 令牌吊销**：网页「注销」立即吊销当前令牌；改密码/删用户后该用户全部令牌强制失效（全端下线）
+- **👥 多用户隔离**：任务列表按登录用户过滤，下载文件存入独立的 `/downloads/<用户名>` 目录
+- **🚨 IP 阶梯封禁**：10 分钟内 5 次认证失败触发临时封禁 30 分钟，再次触发升级为永久封禁（`banip` CLI 管理）
 - **🔐 敏感配置隔离**：`AUTH_KEY` 与 `URL_PREFIX` 仅通过 Docker 环境变量注入，不写入配置文件，且**必须设置**，否则程序拒绝启动
 - **📋 任务持久化**：任务列表自动保存到 `tasks.json`，重启后自动恢复
 - **🎥 输出格式配置**：支持 MP4/MKV 格式切换
@@ -29,7 +32,7 @@
 - **🛡️ SSRF 防护**：拦截指向内网/回环/云元数据地址的下载请求，可开关
 - **🚦 速率限制**：每 IP 60 秒内最多 60 次请求，防止暴力破解与 DoS
 - **📊 并发任务限制**：默认最多 20 个并发下载任务，防止资源耗尽
-- **🔒 接口认证全覆盖**：所有 API 接口（含 GET）均需认证，未带前缀的请求返回 404
+- **🔒 接口认证全覆盖**：除 `/health`、`/login` 外所有接口均需认证，未带前缀的请求返回 404
 - **🔑 恒定时间密钥比较**：使用 `hmac.compare_digest` 防止时序攻击
 - **🙈 日志 URL 脱敏**：自动隐藏 URL 中的 token/sign/key 等敏感查询参数
 - **🙈 敏感字段隐藏**：`/tasks` 响应不返回 `_cookie`、`_referer`、`_user_agent`
@@ -51,7 +54,7 @@ catdock/
 │   ├── dedup.py         # 🔁 下载去重缓存
 │   ├── filters.py       # 🔍 广告拦截 + 文件名过滤/去重
 │   ├── security.py      # 🛡️ SSRF 防护 / URL 脱敏 / 限流
-│   └── data_db.py       # 🗄️ data.db（封禁 IP + 用户）
+│   └── data_db.py       # 🗄️ data.db（封禁 IP + 用户 + 令牌吊销）
 ├── cli/                 # 🔧 命令行工具
 │   ├── banip            # 🔧 IP 封禁管理 CLI
 │   └── userctl          # 👤 下载用户管理 CLI
@@ -139,13 +142,14 @@ docker logs -f catdock
 
 `config` 目录中会生成/保存以下文件：
 
-| 文件                | 说明                                              |
-| ------------------- | ------------------------------------------------- |
-| `config.json`       | 端口、输出格式、调试开关等非敏感配置              |
-| `filter_rules.json` | 过滤规则配置（广告拦截 + 文件名过滤）             |
-| `tasks.json`        | 当前正在下载的任务列表（自动生成，无需手动编辑）  |
-| `success.log`       | 已成功下载的 URL 记录（用于去重）                 |
-| `failure.log`       | 下载失败的 URL 记录（启动时会自动清空以允许重试） |
+| 文件                | 说明                                                     |
+| ------------------- | -------------------------------------------------------- |
+| `config.json`       | 端口、输出格式、调试开关等非敏感配置                     |
+| `filter_rules.json` | 过滤规则配置（广告拦截 + 文件名过滤）                    |
+| `data.db`           | SQLite 数据库（封禁 IP + 用户 + 令牌吊销登记，WAL 模式） |
+| `tasks.json`        | 当前正在下载的任务列表（自动生成，无需手动编辑）         |
+| `success.log`       | 已成功下载的 URL 记录（用于去重）                        |
+| `failure.log`       | 下载失败的 URL 记录（启动时会自动清空以允许重试）        |
 
 ## 🔌 猫抓插件配置
 
@@ -193,21 +197,21 @@ docker logs -f catdock
 ### 注意事项
 
 - 发送地址必须包含 `url_prefix`，如 `http://你的容器IP:5000/admin/download`
-- `key` 字段必须与 `AUTH_KEY` 环境变量一致，`password` 字段必须与 `config.json` 中的 `password` 一致，`user` 字段必须为容器内已创建的用户，三者均正确才能通过认证，否则返回 403
+- `key` 字段必须与 `AUTH_KEY` 环境变量一致，`user`/`password` 必须为容器内 `userctl add` 创建的用户及其密码，三者均正确才能通过认证，否则返回 403
 - 支持直接视频链接（mp4、mkv、ts、flv 等），自动使用 curl 下载
 
 ### 猫抓内置变量对照
 
 请求体中以 `${xxx}` 形式出现的占位符由猫抓插件在发送时自动替换为实际值，服务端无需也无法解析这些变量：
 
-| 变量         | 含义                           | 用途                           |
-| ------------ | ------------------------------ | ------------------------------ |
-| `${url}`     | 当前资源的下载链接（m3u8/直链）| 填入 `url` 字段，**必填**       |
-| `${title}`   | 资源标题（来自页面/文件名）    | 填入 `saveName`，建议默认值    |
-| `${now}`     | 当前时间戳（毫秒）             | 可选拼接到 `saveName` 防重名    |
-| `${referer}` | 来源页面地址                   | 填入 `referer`，部分站点必需   |
-| `${cookie}`  | 浏览器 Cookie                  | 填入 `cookie`，部分站点必需    |
-| `${userAgent}` | 浏览器 User-Agent            | 填入 `userAgent`，按需          |
+| 变量           | 含义                            | 用途                         |
+| -------------- | ------------------------------- | ---------------------------- |
+| `${url}`       | 当前资源的下载链接（m3u8/直链） | 填入 `url` 字段，**必填**    |
+| `${title}`     | 资源标题（来自页面/文件名）     | 填入 `saveName`，建议默认值  |
+| `${now}`       | 当前时间戳（毫秒）              | 可选拼接到 `saveName` 防重名 |
+| `${referer}`   | 来源页面地址                    | 填入 `referer`，部分站点必需 |
+| `${cookie}`    | 浏览器 Cookie                   | 填入 `cookie`，部分站点必需  |
+| `${userAgent}` | 浏览器 User-Agent               | 填入 `userAgent`，按需       |
 
 > - `key`、`user`、`password` 三个认证字段**不是**猫抓变量，需在猫抓「数据发送」配置中手动填写真实值。
 > - `${now}` 为毫秒级时间戳，如 `1672329448871`。默认 `saveName` 不含 `${now}`，仅在需要防重名时追加。
@@ -222,26 +226,28 @@ http://你的容器IP:5000/admin/
 
 > 访问 `http://你的容器IP:5000/admin`（不带尾斜杠）会自动 302 跳转到 `/admin/`。
 
-- **登录**：输入 `AUTH_KEY`、容器内 `userctl add` 创建的用户名和密码；凭证仅保存在当前浏览器（localStorage），下次访问自动填充，可点「退出」清除
+- **登录**：输入 `AUTH_KEY`、容器内 `userctl add` 创建的用户名和密码，换取 2 小时有效期的访问令牌；浏览器仅保存令牌与用户名（明文密钥/密码不落盘），「退出」会吊销服务端令牌并清除本地副本，令牌过期后需重新登录
 - **新建下载**：粘贴视频 URL、填写保存文件名（选填），支持折叠的高级选项（Referer / Cookie / User-Agent）
-- **任务列表**：每 3 秒自动刷新，显示文件名、状态徽章（收集中 / 下载中）、进度条与所属用户；点击任务可弹出详情（任务 ID、全部链接、重试次数等）
+- **任务列表**：每 3 秒自动刷新，显示文件名、状态徽章（收集中 / 下载中 / 已暂停）、进度条与所属用户；点击任务可弹出详情（任务 ID、全部链接、重试次数等）
 - **运维操作**：顶栏实时显示服务健康状态（每 10 秒探测 `/health`），并提供「重载配置」按钮（等价于 `POST /{prefix}/reload`）
-- 页面为纯静态外壳（不含任何敏感信息），所有数据操作均携带两层认证调用 API；任务完成（成功或失败）后会自动从列表中移除
+- 页面为纯静态外壳（不含任何敏感信息），所有数据操作均在 `Authorization: Bearer` 请求头中携带访问令牌调用 API；任务完成（成功或失败）后会自动从列表中移除
 
 ## 📡 API 接口
 
-> 注意：**所有接口路径均需要添加 URL 前缀**（如 `/admin`），未带前缀的请求返回 `404 Not Found`。所有接口（含 GET，`/health` 除外）均需**两层认证 + 用户**：POST 通过请求体传 `key`/`user`/`password`，GET 通过查询参数 `?key=<AUTH_KEY>&user=<用户名>&password=<密码>` 传递。
+> 注意：**所有接口路径均需要添加 URL 前缀**（如 `/admin`），未带前缀的请求返回 `404 Not Found`。所有接口（`/health`、`/login` 除外）均需认证，**推荐使用访问令牌（Bearer Token）**：先调用 `POST /{prefix}/login` 用 `key`/`user`/`password`（请求体）换取 2 小时有效期的短期令牌，后续请求在 `Authorization: Bearer <token>` 请求头中携带令牌即可。**凭证不通过 URL 查询参数传递**（URL 会进入浏览器历史与各级访问日志，存在泄露风险）。POST 接口同时兼容请求体传 `key`/`user`/`password`（如猫抓插件等第三方调用方）。
 
-| 接口                     | 方法 | 说明                           | 认证 |
-| ------------------------ | ---- | ------------------------------ | ---- |
-| `/{prefix}/download`     | POST | 添加下载任务                   | 是   |
-| `/{prefix}/tasks`        | GET  | 获取所有任务                   | 是   |
-| `/{prefix}/tasks/{id}`   | GET  | 获取任务详情                   | 是   |
-| `/{prefix}/task/pause`   | POST | 暂停下载任务（进度保留）       | 是   |
-| `/{prefix}/task/resume`  | POST | 继续暂停的任务                 | 是   |
-| `/{prefix}/task/delete`  | POST | 删除任务（同时删除已下载文件） | 是   |
-| `/{prefix}/reload`       | POST | 重新加载配置                   | 是   |
-| `/{prefix}/health`       | GET  | 健康检查                       | 否   |
+| 接口                    | 方法 | 说明                                | 认证    |
+| ----------------------- | ---- | ----------------------------------- | ------- |
+| `/{prefix}/login`       | POST | 登录并签发访问令牌（有效期 2 小时） | 两层    |
+| `/{prefix}/logout`      | POST | 注销并吊销当前访问令牌              | 令牌    |
+| `/{prefix}/download`    | POST | 添加下载任务                        | 令牌/是 |
+| `/{prefix}/tasks`       | GET  | 获取当前用户的任务                  | 令牌    |
+| `/{prefix}/tasks/{id}`  | GET  | 获取任务详情                        | 令牌    |
+| `/{prefix}/task/pause`  | POST | 暂停下载任务（进度保留）            | 令牌/是 |
+| `/{prefix}/task/resume` | POST | 继续暂停的任务                      | 令牌/是 |
+| `/{prefix}/task/delete` | POST | 删除任务（同时删除已下载文件）      | 令牌/是 |
+| `/{prefix}/reload`      | POST | 重新加载配置                        | 令牌/是 |
+| `/{prefix}/health`      | GET  | 健康检查                            | 否      |
 
 > 示例：如果 `URL_PREFIX` 设置为 `admin`，则完整路径为 `/admin/download`
 
@@ -279,18 +285,21 @@ http://你的容器IP:5000/admin/
 }
 ```
 
-| 参数        | 类型   | 必填 | 默认值                  | 说明                                                                              |
-| ----------- | ------ | ---- | ----------------------- | --------------------------------------------------------------------------------- |
-| `url`       | string | 是   | —                       | m3u8 视频链接或直接视频链接（mp4/mkv/ts/flv/avi/webm/mov/wmv 等直链自动用 curl）  |
-| `saveName`  | string | 否   | `download_<任务ID>`     | 保存文件名（不含扩展名，扩展名由输出格式决定）。默认**不追加时间戳**             |
-| `referer`   | string | 否   | 空                      | 来源页面地址，部分站点下载必需                                                     |
-| `cookie`    | string | 否   | 空                      | 认证 Cookie，部分站点下载必需                                                      |
-| `userAgent` | string | 否   | 空                      | 自定义 User-Agent                                                                  |
-| `key`       | string | 是   | —                       | 第一层认证：须与 Docker 环境变量 `AUTH_KEY` 一致                                  |
-| `user`      | string | 是   | —                       | 下载用户名：须为容器内 `userctl add` 创建的用户，下载文件存入其隔离目录            |
-| `password`  | string | 是   | —                       | 第二层认证：须与 `config.json` 中 `password` 一致，可通过 `/reload` 热更新       |
+| 参数        | 类型   | 必填 | 默认值              | 说明                                                                                                    |
+| ----------- | ------ | ---- | ------------------- | ------------------------------------------------------------------------------------------------------- |
+| `url`       | string | 是   | —                   | m3u8 视频链接或直接视频链接（mp4/mkv/ts/flv/avi/webm/mov/wmv 等直链自动用 curl）                        |
+| `saveName`  | string | 否   | `download_<任务ID>` | 保存文件名（不含扩展名，扩展名由输出格式决定）。默认**不追加时间戳**                                    |
+| `referer`   | string | 否   | 空                  | 来源页面地址，部分站点下载必需                                                                          |
+| `cookie`    | string | 否   | 空                  | 认证 Cookie，部分站点下载必需                                                                           |
+| `userAgent` | string | 否   | 空                  | 自定义 User-Agent                                                                                       |
+| `key`       | string | 是\* | —                   | 第一层认证：须与 Docker 环境变量 `AUTH_KEY` 一致                                                        |
+| `user`      | string | 是\* | —                   | 下载用户名：须为容器内 `userctl add` 创建的用户，下载文件存入其隔离目录                                 |
+| `password`  | string | 是\* | —                   | 第二层认证：该用户在 `userctl add` 时设置的密码，可用 `userctl password` 修改（改后该用户全部令牌失效） |
+
+> **认证字段说明**：标 `是*` 的三个字段在使用 `Authorization: Bearer <token>` 令牌调用时可全部省略（令牌通过 `POST /{prefix}/login` 换取）；猫抓插件等第三方调用方仍通过请求体传递。
 
 > **saveName 说明**：
+>
 > - 默认建议只传标题（如 `"saveName": "${title}"`），**不加时间戳**。
 > - 如需追加时间戳防重名，可写成 `"saveName": "${title}_${now}"`，`_${now}` 会被猫抓替换为毫秒时间戳。
 > - 完全省略 `saveName` 字段时，服务端自动用 `download_<任务ID>` 命名（如 `download_abc12345`）。
@@ -341,9 +350,49 @@ http://你的容器IP:5000/admin/
 }
 ```
 
+### POST /{prefix}/login
+
+登录接口：请求体提交 `key`/`user`/`password`，两层认证通过后签发短期访问令牌（有效期 2 小时）。
+
+```json
+{
+  "key": "<你的AUTH_KEY>",
+  "user": "<用户名>",
+  "password": "<用户密码>"
+}
+```
+
+响应（成功）：
+
+```json
+{
+  "success": true,
+  "data": {
+    "token": "<访问令牌>",
+    "expiresIn": 7200
+  }
+}
+```
+
+> **注意**：登录失败与业务接口认证失败一致，会计入 IP 封禁计数（10 分钟内 5 次 → 首次临时封禁 30 分钟，再次触发永久封禁）。
+
+### POST /{prefix}/logout
+
+注销接口：在请求头携带 `Authorization: Bearer <token>`，服务端将该令牌立即吊销（`data.db` 的 `auth_tokens` 表置 `revoked`），被吊销的令牌在所有设备上即刻失效。
+
+```bash
+curl -X POST -H "Authorization: Bearer <token>" http://容器IP:5000/{prefix}/logout
+```
+
+> **吊销机制**：令牌签发时会登记唯一 `jti` 到 `auth_tokens` 表，每次业务请求校验吊销状态。除网页「注销」外，以下操作也会批量作废令牌：`userctl password` 修改密码（该用户全端强制下线）、`userctl del` 删除用户（防止重建同名用户后旧令牌复活）。已过期的登记行会在下次签发令牌时自动清理。
+
 ### GET /{prefix}/tasks
 
-需要在 URL 后携带认证参数：`GET /{prefix}/tasks?key=<AUTH_KEY>&user=<用户名>&password=<密码>`
+在请求头携带访问令牌：`Authorization: Bearer <token>`
+
+```bash
+curl -H "Authorization: Bearer <token>" http://容器IP:5000/{prefix}/tasks
+```
 
 响应：
 
@@ -366,7 +415,11 @@ http://你的容器IP:5000/admin/
 
 ### GET /{prefix}/tasks/{id}
 
-需要在 URL 后携带认证参数：`GET /{prefix}/tasks/{id}?key=<AUTH_KEY>&user=<用户名>&password=<密码>`
+在请求头携带访问令牌：`Authorization: Bearer <token>`
+
+```bash
+curl -H "Authorization: Bearer <token>" http://容器IP:5000/{prefix}/tasks/{id}
+```
 
 响应（成功）：
 
@@ -469,17 +522,17 @@ services:
 
 ### 环境变量
 
-| 变量名              | 说明                                       | 默认值 | 是否必填 |
-| ------------------- | ------------------------------------------ | ------ | -------- |
-| `API_PORT`          | 覆盖配置文件中的端口设置                   | 8080   | 否       |
-| `AUTH_KEY`          | 第一层认证密钥（所有接口必须）             | 空     | **是**   |
-| `URL_PREFIX`        | URL 路径前缀（所有接口必须）               | 空     | **是**   |
-| `SSRF_PROTECTION`   | SSRF 防护开关，`false` 允许内网地址下载    | true   | 否       |
-| `MAX_CONCURRENT_TASKS` | 最大并发下载任务数                       | 20     | 否       |
+| 变量名                 | 说明                                    | 默认值 | 是否必填 |
+| ---------------------- | --------------------------------------- | ------ | -------- |
+| `API_PORT`             | 覆盖配置文件中的端口设置                | 8080   | 否       |
+| `AUTH_KEY`             | 第一层认证密钥（所有接口必须）          | 空     | **是**   |
+| `URL_PREFIX`           | URL 路径前缀（所有接口必须）            | 空     | **是**   |
+| `SSRF_PROTECTION`      | SSRF 防护开关，`false` 允许内网地址下载 | true   | 否       |
+| `MAX_CONCURRENT_TASKS` | 最大并发下载任务数                      | 20     | 否       |
 
 > **安全建议**：`AUTH_KEY` 和 `URL_PREFIX` 必须通过环境变量设置，**不要**写入 `config.json`。未设置时程序会拒绝启动。
 >
-> **两层认证**：系统采用两层认证机制——第一层 `AUTH_KEY`（环境变量，不可通过 reload 修改），第二层 `password`（`config.json` 中的 `password` 字段，可通过 `/reload` 热更新）。请求必须同时携带正确的 `key` 和 `password` 才能通过认证。
+> **两层认证**：系统采用两层认证机制——第一层 `AUTH_KEY`（环境变量，不可通过 reload 修改），第二层用户名+密码（容器内 `userctl add` 创建的用户，密码可用 `userctl password` 修改，改后该用户全部令牌失效）。推荐先调用 `POST /{prefix}/login` 换取访问令牌，业务接口在 `Authorization: Bearer <token>` 请求头携带令牌即可；POST 接口同时兼容请求体传 `key`/`user`/`password`（猫抓插件等第三方调用方）。
 >
 > `AUTH_KEY` 与 `URL_PREFIX` 的生效优先级为：**环境变量 > config.json 中的默认值 > 内置默认值**。
 
@@ -524,7 +577,7 @@ services:
 
 ### 工作原理
 
-1. **自动保存**：每次任务状态变更时，任务列表自动保存到 `tasks.json` 文件（仅保存 `running` 状态的任务）
+1. **自动保存**：每次任务状态变更时，任务列表自动保存到 `tasks.json` 文件（含 `running`/`collecting`/`paused` 等全部未完成任务）
 2. **重启恢复**：容器启动时自动加载 `tasks.json`，并恢复所有正在下载的任务
 3. **临时文件清理**：恢复任务前会自动清理上次中断产生的临时文件
 4. **任务删除**：任务完成或失败后立即从 `tasks.json` 中删除，释放内存和磁盘空间
@@ -548,7 +601,8 @@ services:
     "urls": ["https://example.com/stream.m3u8"],
     "save_name": "我的视频_1672329448871",
     "status": "running",
-    "progress": 45
+    "progress": 45,
+    "user": "alice"
   }
 ]
 ```
@@ -557,18 +611,20 @@ services:
 
 ### 任务状态说明
 
-> **注意**：任务完成或失败后会立即从 tasks.json 中删除，因此文件中只会包含 `running` 状态的任务。
+> **注意**：任务完成或失败后会立即从 tasks.json 中删除，文件中只包含尚未结束的任务。
 
-| 状态      | 说明       |
-| --------- | ---------- |
-| `running` | 正在下载中 |
+| 状态         | 说明                             |
+| ------------ | -------------------------------- |
+| `running`    | 正在下载中                       |
+| `collecting` | 正在收集视频信息（任务初始阶段） |
+| `paused`     | 已暂停（断点保留，可继续下载）   |
 
 ### 恢复机制
 
 当容器重启时：
 
 1. 自动加载 `tasks.json` 文件
-2. 检测所有状态为 `running` 的任务
+2. 检测所有状态为 `running` 或 `paused` 的任务
 3. 检查 URL 是否已成功下载过（通过 `success.log`）
 4. 检查是否已存在同名视频文件
 5. 检查是否存在未转换的源文件（`.ts` 或 `.MUX.mp4`），如有则尝试转换
@@ -626,7 +682,7 @@ mkdir -p /youdir/config
 
 #### 步骤 2：创建 config.json
 
-```bash
+````bash
 cat > /youdir/config/config.json << 'EOF'
 {
   "port": 8080,
@@ -636,8 +692,7 @@ cat > /youdir/config/config.json << 'EOF'
   "debug": false,
   "same_video_by_filename": false,
   "ssrf_protection": true,
-  "max_concurrent_tasks": 20,
-  "password": "your_password_here"
+  "max_concurrent_tasks": 20
 }
 EOF```
 
@@ -665,7 +720,7 @@ cat > /youdir/config/filter_rules.json << 'EOF'
   }
 }
 EOF
-```
+````
 
 #### 步骤 4：修改 docker-compose.yml 添加挂载
 
@@ -684,15 +739,14 @@ docker-compose up -d --build
 
 ### config.json 参数说明
 
-| 参数                     | 说明                                             | 默认值 |
-| ------------------------ | ------------------------------------------------ | ------ |
-| `port`                   | 服务监听端口，可被环境变量 `API_PORT` 覆盖       | 8080   |
-| `output_format.format`   | 输出格式，`mp4` 或 `mkv`                         | `mp4`  |
-| `debug`                  | 是否启用调试模式，开启后会输出详细日志           | false  |
-| `same_video_by_filename` | 是否启用同视频模式（按文件名聚合多链接轮流下载） | false  |
+| 参数                     | 说明                                                 | 默认值 |
+| ------------------------ | ---------------------------------------------------- | ------ |
+| `port`                   | 服务监听端口，可被环境变量 `API_PORT` 覆盖           | 8080   |
+| `output_format.format`   | 输出格式，`mp4` 或 `mkv`                             | `mp4`  |
+| `debug`                  | 是否启用调试模式，开启后会输出详细日志               | false  |
+| `same_video_by_filename` | 是否启用同视频模式（按文件名聚合多链接轮流下载）     | false  |
 | `ssrf_protection`        | 是否启用 SSRF 防护（拦截内网地址），可被环境变量覆盖 | true   |
-| `max_concurrent_tasks`   | 最大并发下载任务数，可被环境变量覆盖             | 20     |
-| `password`               | 第二层认证密码，请求体 `password` 字段需与此一致，可通过 `/reload` 热更新 | 空     |
+| `max_concurrent_tasks`   | 最大并发下载任务数，可被环境变量覆盖                 | 20     |
 
 > ⚠️ `config.json` 中**不再**包含 `auth_key` 与 `url_prefix`，这两个敏感参数统一通过 Docker 环境变量注入。
 
@@ -1014,6 +1068,29 @@ docker-compose restart
 docker-compose up -d --build
 ```
 
+## 🧰 容器内命令行工具
+
+### userctl — 下载用户管理
+
+```bash
+docker exec -it catdock userctl add <用户名>       # 创建用户（交互式输入密码）
+docker exec -it catdock userctl password <用户名>  # 修改密码（该用户全部访问令牌立即失效）
+docker exec -it catdock userctl del <用户名>       # 删除用户（至少保留一个；该用户全部令牌作废）
+```
+
+- 用户名规则：仅字母+数字、不能为纯数字、字母字符不少于 4 位
+- 首次使用必须先创建用户，否则所有业务接口返回 503（系统未初始化）
+
+### banip — IP 封禁管理
+
+```bash
+docker exec -it catdock banip show                 # 查看封禁列表（区分临时/永久/手动）
+docker exec -it catdock banip add <IP地址>         # 手动封禁（永久，需 banip del 解除）
+docker exec -it catdock banip del <IP地址>         # 解封（同时清零失败计数与阶梯升级计数）
+```
+
+自动封禁规则：10 分钟内累计 5 次认证失败（`AUTH_KEY` 错误或用户名/密码错误均计入；URL 前缀错误返回 404 **不**计入）→ 第 1 次触发临时封禁 30 分钟（到期自动解封），解封后再次触发升级为永久封禁。认证成功会自动清零失败计数，正常用户偶发手滑不会升级为永久封禁。
+
 ## 🛠️ 故障排查
 
 ### 断电/宿主机重启后容器无法下载
@@ -1054,11 +1131,11 @@ Docker 守护进程通常在宿主机 DNS（如 `systemd-resolved`）完全就�
 在 `docker-compose.yml` 中通过 `dns` 字段显式指定 DNS 服务器：
 
 ```yaml
-    dns:
-      - 223.5.5.5        # 阿里 DNS
-      - 223.6.6.6        # 阿里 DNS 备用
-      - 114.114.114.114  # 114 DNS
-      - 119.29.29.29     # 腾讯 DNS
+dns:
+  - 223.5.5.5 # 阿里 DNS
+  - 223.6.6.6 # 阿里 DNS 备用
+  - 114.114.114.114 # 114 DNS
+  - 119.29.29.29 # 腾讯 DNS
 ```
 
 这样容器启动时 Docker 会将这些 DNS 作为上游服务器直接配置，不再依赖宿主机开机时未就绪的 `resolv.conf`，从根本上避免时序问题。
@@ -1079,15 +1156,16 @@ docker exec catdock getent hosts baidu.com
 
 说明认证未通过，请逐一检查：
 
+- **令牌方式（Bearer）**：确认令牌未过期（2 小时有效期）且未被吊销（注销/改密码/删用户后全部失效），过期或失效后重新调用 `POST /{prefix}/login` 获取
 - **第一层（key）**：检查 docker-compose.yml 中 `AUTH_KEY` 设置，确认请求体的 `key` 字段与之一致
-- **第二层（user/password）**：确认 `user` 为容器内 `userctl add` 创建的用户，`password` 与 `config.json` 中 `password` 字段一致
+- **第二层（user/password）**：确认 `user` 为容器内 `userctl add` 创建的用户，`password` 为该用户创建/修改时设置的密码
 - 确认修改环境变量后已 `docker-compose up -d` 重新创建容器
 
 ### 健康检查接口访问不到
 
 - 确认端口映射 `5000:8080` 未被占用
 - 确认容器内服务已正常启动（查看 `docker logs catdock`）
-- 容器启动时会等待网络就绪，最长 10 秒内才会开始启动 API
+- 容器启动时会等待网络就绪，最长 10 分钟内才会开始启动 API
 
 ### 下载卡在 "仍在等待网络就绪..."
 
@@ -1108,7 +1186,7 @@ docker exec catdock getent hosts baidu.com
 5. **环境变量修改**：修改 `AUTH_KEY`、`URL_PREFIX` 等环境变量需要 `docker-compose up -d` 重新创建容器
 6. **文件格式**：下载完成后会自动转换为配置的输出格式（MP4/MKV）
 7. **URL 前缀**：`URL_PREFIX` 为必填项，所有 API 接口（含健康检查）路径都必须添加前缀，未带前缀返回 404
-8. **两层认证 + 用户**：`AUTH_KEY`（环境变量）、`config.json` 中 `password`、以及容器内 `userctl add` 创建的用户名均为必填，所有请求必须同时携带正确的 `key`、`user` 和 `password`，否则返回 403；GET 请求通过查询参数 `?key=&user=&password=` 传递
+8. **两层认证 + 用户 + 令牌**：`AUTH_KEY`（环境变量）、`config.json` 中 `password`、以及容器内 `userctl add` 创建的用户名均为必填。先调用 `POST /{prefix}/login`（请求体传 `key`/`user`/`password`）换取 2 小时有效期的访问令牌，业务接口在 `Authorization: Bearer <token>` 请求头携带令牌；POST 接口同时兼容请求体传 `key`/`user`/`password`（猫抓插件等第三方）。凭证不支持通过 URL 查询参数传递，否则返回 403
 9. **任务持久化**：任务列表自动保存到 `tasks.json`，容器重启后会自动恢复未完成的任务
 10. **重复下载**：同一 URL 不会重复下载，系统会自动检测下载历史和已存在的文件
 11. **调试模式**：开启 `debug: true` 可查看详细日志，便于排查问题
@@ -1123,7 +1201,7 @@ docker exec catdock getent hosts baidu.com
 A: 宿主机断电重启后网络服务需要一定时间初始化，容器会主动检测网络状态避免在网络未就绪时盲目下载。最长等待 10 分钟，超时后仍会启动服务。
 
 **Q: 我把 AUTH_KEY 写在 config.json 里会生效吗？**
-A: 为了安全，`config.json` 中不支持 `auth_key` 与 `url_prefix`，请务必通过 Docker 环境变量设置。但 `password`（第二层认证密码）需要写在 `config.json` 中。
+A: 为了安全，`config.json` 中不支持 `auth_key` 与 `url_prefix`，请务必通过 Docker 环境变量设置。用户密码（第二层认证）也不写在配置文件中：通过容器内 `userctl add <用户名>` 创建用户并设置密码，`userctl password <用户名>` 可修改密码（改后该用户全部令牌失效）。
 
 **Q: 如何修改输出格式？**
 A: 修改 `config.json` 中 `output_format.format` 为 `mp4` 或 `mkv`，然后调用 `POST /{prefix}/reload` 接口即可。

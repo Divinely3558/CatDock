@@ -12,6 +12,7 @@
   - banned_ips:      已封禁的 IP 列表（reason: auto=临时自动封禁, auto_perm=永久自动封禁, manual=手动封禁）
   - ip_ban_stats:    阶梯封禁统计（每 IP 历史触发自动封禁的次数，认证成功清零）
   - users:           下载用户列表（用户名 + 密码哈希）
+  - auth_tokens:     访问令牌登记（jti，支撑服务端主动吊销：注销/改密码/删用户失效）
 
 CLI 用法（本文件直接作为脚本运行，或通过 banip 命令调用）：
     python data_db.py show
@@ -125,6 +126,21 @@ def _get_conn():
                 last_ban_time TEXT
             )
         """)
+        # 访问令牌登记表：支撑服务端主动吊销（POST /logout 单令牌吊销、
+        # 改密码/删用户全端下线）。签名仍无状态，吊销状态以本表为准。
+        _db_conn.execute("""
+            CREATE TABLE IF NOT EXISTS auth_tokens (
+                jti TEXT PRIMARY KEY,
+                username TEXT NOT NULL,
+                expires_at INTEGER NOT NULL,
+                revoked INTEGER DEFAULT 0,
+                created_at TEXT
+            )
+        """)
+        _db_conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_auth_tokens_username ON auth_tokens(username)")
+        _db_conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_auth_tokens_expires ON auth_tokens(expires_at)")
         _db_conn.commit()
     return _db_conn
 
@@ -394,13 +410,18 @@ def del_user(username):
         cnt_cursor = conn.execute("SELECT COUNT(*) FROM users")
         if cnt_cursor.fetchone()[0] <= 1:
             raise ValueError("至少保留一个用户，不能删除最后一个用户")
+        # 同步作废该用户全部令牌：防止删除后重建同名用户时旧令牌"复活"
+        conn.execute("UPDATE auth_tokens SET revoked = 1 WHERE username = ?", (username,))
         conn.execute("DELETE FROM users WHERE username = ?", (username,))
         conn.commit()
         return True
 
 
 def change_password(username, new_password):
-    """修改用户密码。用户不存在或新密码为空时抛出 ValueError。"""
+    """修改用户密码。用户不存在或新密码为空时抛出 ValueError。
+
+    改密码即全端强制下线：该用户已签发的全部令牌一并作废。
+    """
     if not new_password:
         raise ValueError("密码不能为空")
     with _db_lock:
@@ -412,6 +433,7 @@ def change_password(username, new_password):
             "UPDATE users SET password_hash = ? WHERE username = ?",
             (_hash_password(new_password), username),
         )
+        conn.execute("UPDATE auth_tokens SET revoked = 1 WHERE username = ?", (username,))
         conn.commit()
 
 
@@ -441,6 +463,57 @@ def user_count():
         conn = _get_conn()
         cursor = conn.execute("SELECT COUNT(*) FROM users")
         return cursor.fetchone()[0]
+
+
+# ---------- 访问令牌吊销（auth_tokens 表）----------
+
+def save_auth_token(jti, username, expires_at):
+    """签发令牌时登记。返回 False 表示 jti 已存在（不应发生）。"""
+    with _db_lock:
+        conn = _get_conn()
+        try:
+            conn.execute(
+                "INSERT INTO auth_tokens (jti, username, expires_at, revoked, created_at) "
+                "VALUES (?, ?, ?, 0, ?)",
+                (jti, username, expires_at, time.strftime('%Y-%m-%d %H:%M:%S')),
+            )
+            conn.commit()
+            return True
+        except sqlite3.IntegrityError:
+            return False
+
+
+def is_token_valid(jti):
+    """令牌登记记录是否存在且未吊销（过期与否由签名 exp 校验，此处仅查吊销状态）"""
+    with _db_lock:
+        conn = _get_conn()
+        cursor = conn.execute(
+            "SELECT 1 FROM auth_tokens WHERE jti = ? AND revoked = 0", (jti,))
+        return cursor.fetchone() is not None
+
+
+def revoke_auth_token(jti):
+    """吊销单个令牌（POST /logout 调用）"""
+    with _db_lock:
+        conn = _get_conn()
+        conn.execute("UPDATE auth_tokens SET revoked = 1 WHERE jti = ?", (jti,))
+        conn.commit()
+
+
+def revoke_user_tokens(username):
+    """吊销某用户当前全部令牌（改密码/强制下线场景）"""
+    with _db_lock:
+        conn = _get_conn()
+        conn.execute("UPDATE auth_tokens SET revoked = 1 WHERE username = ?", (username,))
+        conn.commit()
+
+
+def cleanup_expired_tokens():
+    """清理已过期的令牌登记行（惰性清理：签发新令牌时触发）"""
+    with _db_lock:
+        conn = _get_conn()
+        conn.execute("DELETE FROM auth_tokens WHERE expires_at < ?", (int(time.time()),))
+        conn.commit()
 
 
 def list_users():

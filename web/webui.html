@@ -947,7 +947,8 @@
           <div class="alert alert-error" id="loginAlert"></div>
         </form>
         <div class="login-foot">
-          凭证仅保存在当前浏览器 (localStorage)，不会上传到任何第三方
+          登录后仅持有短期访问令牌（2 小时），保存在当前浏览器
+          localStorage；密钥与密码不做持久化，也不会出现在请求 URL 中
         </div>
       </div>
     </div>
@@ -1099,15 +1100,16 @@
         // 页面由服务端托管在 /{prefix}/ 下，相对路径自动适配 URL 前缀
         var BASE = location.pathname.replace(/[^/]*$/, "");
         var LS = {
-          key: "catdock_key",
+          token: "catdock_token",
           user: "catdock_user",
-          pwd: "catdock_pwd",
           fmt: "catdock_fmt",
           palette: "catdock_palette",
           mode: "catdock_mode",
         };
 
-        var creds = { key: "", user: "", pwd: "" };
+        // 登录成功后仅持有短期访问令牌（POST /login 签发），
+        // 密钥/账号/密码不再持久化，也不出现在 URL 中
+        var creds = { token: "", user: "" };
         var pollTimer = null,
           healthTimer = null;
 
@@ -1201,19 +1203,14 @@
         }
 
         // ---------- API 封装 ----------
-        function apiGet(path, withAuth) {
-          var url = BASE + path;
-          if (withAuth) {
-            url +=
-              (url.indexOf("?") >= 0 ? "&" : "?") +
-              "key=" +
-              encodeURIComponent(creds.key) +
-              "&user=" +
-              encodeURIComponent(creds.user) +
-              "&password=" +
-              encodeURIComponent(creds.pwd);
-          }
-          return fetch(url, { method: "GET" })
+        function authHeaders() {
+          var h = {};
+          if (creds.token) h["Authorization"] = "Bearer " + creds.token;
+          return h;
+        }
+
+        function apiGet(path) {
+          return fetch(BASE + path, { method: "GET", headers: authHeaders() })
             .catch(function () {
               throw new Error(
                 "无法连接服务器：连接被拒绝。可能 IP 已被封禁（服务器执行 banip show 查看并 banip del 解封），或地址前缀有误",
@@ -1223,12 +1220,13 @@
         }
 
         function apiPost(path, body) {
-          body.key = creds.key;
-          body.user = creds.user;
-          body.password = creds.pwd;
+          var headers = Object.assign(
+            { "Content-Type": "application/json" },
+            authHeaders(),
+          );
           return fetch(BASE + path, {
             method: "POST",
-            headers: { "Content-Type": "application/json" },
+            headers: headers,
             body: JSON.stringify(body),
           })
             .catch(function () {
@@ -1262,28 +1260,29 @@
 
         // ---------- 登录 / 退出 ----------
         function loadCreds() {
-          creds.key = localStorage.getItem(LS.key) || "";
+          creds.token = localStorage.getItem(LS.token) || "";
           creds.user = localStorage.getItem(LS.user) || "";
-          creds.pwd = localStorage.getItem(LS.pwd) || "";
-          if (creds.key) $("loginKey").value = creds.key;
-          if (creds.user) $("loginUser").value = creds.user;
-          if (creds.pwd) $("loginPwd").value = creds.pwd;
+          // 清理旧版本残留的明文凭证（key/user/pwd 已改为令牌模式）
+          localStorage.removeItem("catdock_key");
+          localStorage.removeItem("catdock_pwd");
           // 恢复上次选择的输出格式
           var savedFmt = localStorage.getItem(LS.fmt);
           if (savedFmt === "mp4" || savedFmt === "mkv")
             $("fFormat").value = savedFmt;
         }
 
+        function enterApp() {
+          $("loginView").style.display = "none";
+          $("appView").style.display = "";
+          $("userChip").textContent = "👤 " + creds.user;
+          hideAlert($("loginAlert"));
+          startPolling();
+          refreshTasks();
+        }
+
         function tryLogin(saved) {
-          return apiGet("tasks", true)
-            .then(function () {
-              $("loginView").style.display = "none";
-              $("appView").style.display = "";
-              $("userChip").textContent = "👤 " + creds.user;
-              hideAlert($("loginAlert"));
-              startPolling();
-              refreshTasks();
-            })
+          return apiGet("tasks")
+            .then(enterApp)
             .catch(function (e) {
               if (saved) backToLogin("");
               else
@@ -1304,23 +1303,35 @@
 
         $("loginForm").addEventListener("submit", function (e) {
           e.preventDefault();
-          creds.key = $("loginKey").value.trim();
-          creds.user = $("loginUser").value.trim();
-          creds.pwd = $("loginPwd").value;
-          if (!creds.key || !creds.user || !creds.pwd) {
+          var key = $("loginKey").value.trim();
+          var user = $("loginUser").value.trim();
+          var pwd = $("loginPwd").value;
+          if (!key || !user || !pwd) {
             showAlert($("loginAlert"), "请填写完整的认证信息", false);
             return;
           }
           var btn = $("loginBtn");
           btn.disabled = true;
           btn.textContent = "登录中…";
-          localStorage.setItem(LS.key, creds.key);
-          localStorage.setItem(LS.user, creds.user);
-          localStorage.setItem(LS.pwd, creds.pwd);
-          tryLogin(false).finally(function () {
-            btn.disabled = false;
-            btn.textContent = "登 录";
-          });
+          // 登录：两层认证通过后签发短期令牌，明文凭证不落盘、不进 URL
+          apiPost("login", { key: key, user: user, password: pwd })
+            .then(function (data) {
+              creds.token = data.data.token;
+              creds.user = user;
+              localStorage.setItem(LS.token, creds.token);
+              localStorage.setItem(LS.user, creds.user);
+              $("loginPwd").value = "";
+              $("loginKey").value = "";
+              $("loginUser").value = "";
+              enterApp();
+            })
+            .catch(function (e) {
+              showAlert($("loginAlert"), e.message, false);
+            })
+            .finally(function () {
+              btn.disabled = false;
+              btn.textContent = "登 录";
+            });
         });
 
         // ---------- 用户菜单（注销 / 重载配置） ----------
@@ -1349,12 +1360,14 @@
 
         $("menuLogout").addEventListener("click", function () {
           closeUserMenu();
-          localStorage.removeItem(LS.key);
-          localStorage.removeItem(LS.user);
-          localStorage.removeItem(LS.pwd);
-          creds = { key: "", user: "", pwd: "" };
-          $("loginPwd").value = "";
-          backToLogin("");
+          // 先通知服务端吊销当前令牌（尽力而为，失败也继续清理本地）
+          var done = function () {
+            localStorage.removeItem(LS.token);
+            creds = { token: "", user: "" };
+            $("loginPwd").value = "";
+            backToLogin("");
+          };
+          apiPost("logout", {}).then(done).catch(done);
         });
 
         // ---------- 提交下载 ----------
@@ -1655,7 +1668,7 @@
 
         // ---------- 服务信息 ----------
         function loadConfigInfo() {
-          apiGet("config", true)
+          apiGet("config")
             .then(function (data) {
               var c = data.data || {};
               var on = function (v) {
@@ -1851,7 +1864,8 @@
 
         // ---------- 启动 ----------
         loadCreds();
-        if (creds.key && creds.user && creds.pwd) {
+        if (creds.token) {
+          // 持有未过期的令牌时静默恢复会话，否则停留在登录页
           tryLogin(true);
         }
       })();
