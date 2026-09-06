@@ -398,10 +398,10 @@ class DownloadHandler(http.server.BaseHTTPRequestHandler):
     def do_GET(self):
         raw_path = urllib.parse.urlparse(self.path).path
 
-        # /{prefix}（无尾斜杠）重定向到 /{prefix}/，便于浏览器直接打开网页控制台
+        # /{prefix}（无尾斜杠）重定向到登录页规范地址，便于浏览器直接打开网页控制台
         if cfg.url_prefix and raw_path == f'/{cfg.url_prefix}':
             self.send_response(302)
-            self.send_header('Location', f'/{cfg.url_prefix}/')
+            self.send_header('Location', f'/{cfg.url_prefix}/login.html')
             self.send_header('Content-Length', '0')
             self.send_header('Connection', 'close')
             self.end_headers()
@@ -415,11 +415,24 @@ class DownloadHandler(http.server.BaseHTTPRequestHandler):
             self.wfile.write(b'404 Not Found')
             return
 
-        # /{prefix}/admin（无尾斜杠）重定向到 /{prefix}/admin/（管理网页）
-        if path == '/admin':
+        # 网页规范地址统一为 /login.html、/user.html、/admin.html；
+        # 旧入口（根路径、/index.html、/login、/user、/admin 及带尾斜杠形式、/admin/index.html）
+        # 一律 302 跳转到对应规范地址（仅 GET 页面；POST /login 等 API 不受影响）
+        page_redirects = {
+            '/': '/login.html',
+            '/index.html': '/login.html',
+            '/login': '/login.html',
+            '/login/': '/login.html',
+            '/user': '/user.html',
+            '/user/': '/user.html',
+            '/admin': '/admin.html',
+            '/admin/': '/admin.html',
+            '/admin/index.html': '/admin.html',
+        }
+        if path in page_redirects:
             base = f'/{cfg.url_prefix}' if cfg.url_prefix else ''
             self.send_response(302)
-            self.send_header('Location', f'{base}/admin/')
+            self.send_header('Location', f'{base}{page_redirects[path]}')
             self.send_header('Content-Length', '0')
             self.send_header('Connection', 'close')
             self.end_headers()
@@ -447,18 +460,18 @@ class DownloadHandler(http.server.BaseHTTPRequestHandler):
                     debug_print(f"发送图标失败: {e}")
             return
 
-        # 登录页：静态外壳，认证在页面内的 API 调用中完成
-        if path in ('/', '/index.html', '/login.html'):
+        # 登录页：静态外壳，认证在页面内的 API 调用中完成（仅规范地址提供页面）
+        if path == '/login.html':
             self.send_html(get_login_html())
             return
 
-        # 下载控制台：普通用户页面（/user 和 /user/ 均支持）
-        if path in ('/user', '/user/', '/user.html'):
+        # 下载控制台：普通用户页面
+        if path == '/user.html':
             self.send_html(get_user_html())
             return
 
         # 管理网页：独立静态外壳（用户管理 / AUTH_KEY），认证在页面内的 API 调用中完成
-        if path in ('/admin/', '/admin/index.html'):
+        if path == '/admin.html':
             self.send_html(get_admin_html())
             return
 

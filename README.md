@@ -7,7 +7,7 @@
 - **🐳 Docker 容器部署**：轻量级 Debian 基础镜像，非 root 用户运行
 - **🔌 猫抓插件支持**：通过数据发送功能远程控制容器下载
 - **📡 HTTP API**：提供下载触发、任务查询、用户管理等接口
-- **🖥️ 三套网页**：登录页 `/{prefix}/`、下载控制台 `/{prefix}/user.html`、管理控制台 `/{prefix}/admin/`；登录后按角色自动跳转，纯静态外壳 + Bearer 令牌调用 API
+- **🖥️ 三套网页**：登录页 `/{prefix}/login.html`、下载控制台 `/{prefix}/user.html`、管理控制台 `/{prefix}/admin.html`；旧地址（根路径、`/login`、`/user`、`/admin` 及带尾斜杠形式）访问时 302 跳转到对应 `.html` 规范地址；登录后按角色自动跳转，纯静态外壳 + Bearer 令牌调用 API
 - **🎬 完整下载参数**：支持 referer、cookie、user-agent、逐任务输出格式（mp4/mkv）等
 - **💾 数据持久化**：配置、用户数据、下载缓存与成品文件均持久化到宿主机，重建容器不丢失
 - **🔒 URL 路径前缀**：支持设置访问前缀（如 `/qj52lajx`），增强接口安全性
@@ -220,7 +220,7 @@ docker logs -f catdock
 
 ### 注意事项
 
-- 发送地址必须包含 `url_prefix`，如 `http://你的容器IP:5000/admin/download`
+- 发送地址必须包含 `url_prefix`，如 `http://你的容器IP:5000/qj52lajx/download`
 - `key` 字段必须与 admin_config.json 中的 `auth_key` 一致（首启自动生成，见启动日志；管理网页可热更新），`user`/`password` 必须为已创建的用户（管理员或 `userctl add` 创建的下载用户）及其密码，三者均正确才能通过认证，否则返回 403
 - 支持直接视频链接（mp4、mkv、ts、flv 等），自动使用 curl 下载
 
@@ -244,11 +244,13 @@ docker logs -f catdock
 
 服务内置三个零依赖的单文件网页，浏览器直接访问即可：
 
-| 页面       | 地址（前缀以 `qj52lajx` 为例）              | 说明                                           |
-| ---------- | ------------------------------------------- | ---------------------------------------------- |
-| 登录页     | `http://你的容器IP:5000/qj52lajx/`          | 统一入口，登录后按角色自动跳转                 |
-| 下载控制台 | `http://你的容器IP:5000/qj52lajx/user.html` | 普通用户使用（`/user`、`/user/` 亦可访问）     |
-| 管理控制台 | `http://你的容器IP:5000/qj52lajx/admin/`    | 管理员使用（`/admin` 不带尾斜杠自动 302 跳转） |
+| 页面       | 地址（前缀以 `qj52lajx` 为例）               | 说明                           |
+| ---------- | -------------------------------------------- | ------------------------------ |
+| 登录页     | `http://你的容器IP:5000/qj52lajx/login.html` | 统一入口，登录后按角色自动跳转 |
+| 下载控制台 | `http://你的容器IP:5000/qj52lajx/user.html`  | 普通用户页面                   |
+| 管理控制台 | `http://你的容器IP:5000/qj52lajx/admin.html` | 管理员页面                     |
+
+> **旧地址兼容（302 跳转）**：`/{prefix}`、`/{prefix}/`、`/index.html`、`/login`、`/login/`、`/user`、`/user/`、`/admin`、`/admin/`、`/admin/index.html` 在浏览器打开时都会 302 跳转到对应的 `.html` 规范地址。此跳转仅作用于 GET 网页访问；`POST /{prefix}/login` 等 API 路径不受影响。
 
 - **登录**：输入 `AUTH_KEY`（admin_config.json 的 `auth_key`，首启自动生成）与用户名/密码，换取 2 小时有效期的访问令牌；登录响应返回用户角色，**管理员自动跳转到管理控制台**，普通用户进入下载控制台；浏览器仅保存令牌与用户名（明文密钥/密码不落盘），「退出」会吊销服务端令牌并回到登录页，令牌过期后需重新登录
 - **新建下载**（下载控制台）：粘贴视频 URL、填写保存文件名（选填）、选择输出格式（MP4/MKV，默认 MP4），支持折叠的高级选项（Referer / Cookie / User-Agent）
@@ -262,7 +264,7 @@ docker logs -f catdock
 管理员账户登录后自动进入独立的管理网页（不含任何下载功能，管理员账户不能提交下载任务）：
 
 - **用户管理**：查看全部用户（用户名/角色/状态/创建时间）、添加下载用户、删除用户（确认弹窗明确提示配置目录、下载缓存、成品文件将全部删除且不可恢复）、重置用户密码、禁用（ban）/解禁（unban）用户；被禁用用户立即无法登录且已签发令牌全部失效，禁用状态下即使密码正确也返回 403 且不计入 IP 封禁
-- **AUTH_KEY 热更新**：修改并保存后立即写回 admin_config.json 并生效，**包括管理员在内的所有用户令牌全部吊销**（全员强制重新登录）；新 KEY 至少 8 位，支持随机生成。之后把新 KEY 通知各用户即可，用户密码无需改动；猫抓插件请求体中的 `key` 也需同步更换
+- **AUTH_KEY 热更新**：在「服务器配置」中点击「🎲 随机」自动生成新 KEY（**输入框只读，不支持手填**；密钥固定 14 位，含至少 1 个大写字母、1 个小写字母、1 个数字和 1-3 个符号，使用浏览器密码学随机源生成），保存后立即写回 admin_config.json 并生效，**包括管理员在内的所有用户令牌全部吊销**（全员强制重新登录）；之后把新 KEY 通知各用户即可，用户密码无需改动；猫抓插件请求体中的 `key` 也需同步更换
 - **过滤规则模板**：编辑全局过滤规则模板（config/filter_rules.json），保存即时生效；**新用户**首次使用时自动复制一份作为个人规则，已有用户的个人规则不受影响
 - **修改密码**：管理员修改自己的密码（同网页菜单「修改密码」）
 - **命令行参考**：页面内附 `adminctl` / `userctl` / `banip` 全部命令速查
@@ -270,35 +272,35 @@ docker logs -f catdock
 
 ## 📡 API 接口
 
-> 注意：**所有接口路径均需要添加 URL 前缀**（如 `/qj52lajx`），未带前缀的请求返回 `404 Not Found`。网页页面（`/`、`/user.html`、`/admin/`）与 `favicon.ico`、`/health` 为公开静态资源；其余 API 均需认证，**推荐使用访问令牌（Bearer Token）**：先调用 `POST /{prefix}/login` 用 `key`/`user`/`password`（请求体）换取 2 小时有效期的短期令牌，后续请求在 `Authorization: Bearer <token>` 请求头中携带令牌即可。**凭证不通过 URL 查询参数传递**（URL 会进入浏览器历史与各级访问日志，存在泄露风险）。POST 接口同时兼容请求体传 `key`/`user`/`password`（如猫抓插件等第三方调用方）。
+> 注意：**所有接口路径均需要添加 URL 前缀**（如 `/qj52lajx`），未带前缀的请求返回 `404 Not Found`。网页页面（`/login.html`、`/user.html`、`/admin.html` 三个规范地址，旧地址 302 跳转）与 `favicon.ico`、`/health` 为公开静态资源；其余 API 均需认证，**推荐使用访问令牌（Bearer Token）**：先调用 `POST /{prefix}/login` 用 `key`/`user`/`password`（请求体）换取 2 小时有效期的短期令牌，后续请求在 `Authorization: Bearer <token>` 请求头中携带令牌即可。**凭证不通过 URL 查询参数传递**（URL 会进入浏览器历史与各级访问日志，存在泄露风险）。POST 接口同时兼容请求体传 `key`/`user`/`password`（如猫抓插件等第三方调用方）。
 
-| 接口                             | 方法     | 说明                                                                         | 认证          |
-| -------------------------------- | -------- | ---------------------------------------------------------------------------- | ------------- |
-| `/{prefix}/`、`/login.html`      | GET      | 登录页（纯静态外壳）                                                         | 公开          |
-| `/{prefix}/user.html`            | GET      | 下载控制台页面（`/user`、`/user/` 亦可）                                     | 公开          |
-| `/{prefix}/admin/`               | GET      | 管理控制台页面（纯静态外壳，无下载功能；页内 API 需管理员）                  | 公开          |
-| `/{prefix}/health`               | GET      | 健康检查                                                                     | 否            |
-| `/{prefix}/login`                | POST     | 登录并签发访问令牌（有效期 2 小时）                                          | 两层凭证      |
-| `/{prefix}/logout`               | POST     | 退出并吊销当前访问令牌                                                       | 令牌          |
-| `/{prefix}/password`             | POST     | 修改自己的密码（旧密码 + 新密码，成功后该用户令牌全部吊销）                  | 令牌          |
-| `/{prefix}/config`               | GET      | 获取运行配置摘要（端口/前缀/开关/用户数，AUTH_KEY 脱敏）                     | 令牌          |
-| `/{prefix}/download`             | POST     | 添加下载任务（仅下载用户，管理员不可下载）                                   | 令牌/两层凭证 |
-| `/{prefix}/tasks`                | GET      | 获取当前用户的任务（按登录用户过滤）                                         | 令牌          |
-| `/{prefix}/tasks/{id}`           | GET      | 获取任务详情（非本人任务返回 404）                                           | 令牌          |
-| `/{prefix}/task/pause`           | POST     | 暂停下载任务（进度保留）                                                     | 令牌/两层凭证 |
-| `/{prefix}/task/resume`          | POST     | 继续暂停的任务                                                               | 令牌/两层凭证 |
-| `/{prefix}/task/delete`          | POST     | 删除任务（同时删除已下载文件）                                               | 令牌/两层凭证 |
-| `/{prefix}/filters`              | GET      | 获取自己的过滤规则                                                           | 令牌          |
-| `/{prefix}/filters`              | POST     | 保存自己的过滤规则（keywords/filename_filter/filename_dedup 三段，即时生效） | 令牌          |
-| `/{prefix}/admin/users`          | GET      | 获取全部用户列表（角色/状态/创建时间）                                       | 管理员        |
-| `/{prefix}/admin/users/add`      | POST     | 添加下载用户                                                                 | 管理员        |
-| `/{prefix}/admin/users/delete`   | POST     | 删除下载用户（连同其配置/缓存/成品三个目录）                                 | 管理员        |
-| `/{prefix}/admin/users/password` | POST     | 重置下载用户密码                                                             | 管理员        |
-| `/{prefix}/admin/users/ban`      | POST     | 禁用用户（令牌立即失效）                                                     | 管理员        |
-| `/{prefix}/admin/users/unban`    | POST     | 解禁用户                                                                     | 管理员        |
-| `/{prefix}/admin/auth-key`       | POST     | 热更新 AUTH_KEY（全员令牌吊销）                                              | 管理员        |
-| `/{prefix}/admin/filters`        | GET/POST | 获取/保存全局过滤规则模板（新用户首次使用复制）                              | 管理员        |
-| `/{prefix}/reload`               | POST     | 重新加载 admin_config.json 与全局过滤模板（auth_key 变更则全员令牌失效）     | 管理员        |
+| 接口                             | 方法     | 说明                                                                                                               | 认证          |
+| -------------------------------- | -------- | ------------------------------------------------------------------------------------------------------------------ | ------------- |
+| `/{prefix}/login.html`           | GET      | 登录页（纯静态外壳）；`/`、`/index.html`、`/login`、`/login/` 302 跳转到此                                         | 公开          |
+| `/{prefix}/user.html`            | GET      | 下载控制台页面；`/user`、`/user/` 302 跳转到此                                                                     | 公开          |
+| `/{prefix}/admin.html`           | GET      | 管理控制台页面（纯静态外壳，无下载功能；页内 API 需管理员）；`/admin`、`/admin/`、`/admin/index.html` 302 跳转到此 | 公开          |
+| `/{prefix}/health`               | GET      | 健康检查                                                                                                           | 否            |
+| `/{prefix}/login`                | POST     | 登录并签发访问令牌（有效期 2 小时）                                                                                | 两层凭证      |
+| `/{prefix}/logout`               | POST     | 退出并吊销当前访问令牌                                                                                             | 令牌          |
+| `/{prefix}/password`             | POST     | 修改自己的密码（旧密码 + 新密码，成功后该用户令牌全部吊销）                                                        | 令牌          |
+| `/{prefix}/config`               | GET      | 获取运行配置摘要（端口/前缀/开关/用户数，AUTH_KEY 脱敏）                                                           | 令牌          |
+| `/{prefix}/download`             | POST     | 添加下载任务（仅下载用户，管理员不可下载）                                                                         | 令牌/两层凭证 |
+| `/{prefix}/tasks`                | GET      | 获取当前用户的任务（按登录用户过滤）                                                                               | 令牌          |
+| `/{prefix}/tasks/{id}`           | GET      | 获取任务详情（非本人任务返回 404）                                                                                 | 令牌          |
+| `/{prefix}/task/pause`           | POST     | 暂停下载任务（进度保留）                                                                                           | 令牌/两层凭证 |
+| `/{prefix}/task/resume`          | POST     | 继续暂停的任务                                                                                                     | 令牌/两层凭证 |
+| `/{prefix}/task/delete`          | POST     | 删除任务（同时删除已下载文件）                                                                                     | 令牌/两层凭证 |
+| `/{prefix}/filters`              | GET      | 获取自己的过滤规则                                                                                                 | 令牌          |
+| `/{prefix}/filters`              | POST     | 保存自己的过滤规则（keywords/filename_filter/filename_dedup 三段，即时生效）                                       | 令牌          |
+| `/{prefix}/admin/users`          | GET      | 获取全部用户列表（角色/状态/创建时间）                                                                             | 管理员        |
+| `/{prefix}/admin/users/add`      | POST     | 添加下载用户                                                                                                       | 管理员        |
+| `/{prefix}/admin/users/delete`   | POST     | 删除下载用户（连同其配置/缓存/成品三个目录）                                                                       | 管理员        |
+| `/{prefix}/admin/users/password` | POST     | 重置下载用户密码                                                                                                   | 管理员        |
+| `/{prefix}/admin/users/ban`      | POST     | 禁用用户（令牌立即失效）                                                                                           | 管理员        |
+| `/{prefix}/admin/users/unban`    | POST     | 解禁用户                                                                                                           | 管理员        |
+| `/{prefix}/admin/auth-key`       | POST     | 热更新 AUTH_KEY（全员令牌吊销；`newKey` ≥8 位，管理网页仅支持「🎲 随机」生成 14 位）                               | 管理员        |
+| `/{prefix}/admin/filters`        | GET/POST | 获取/保存全局过滤规则模板（新用户首次使用复制）                                                                    | 管理员        |
+| `/{prefix}/reload`               | POST     | 重新加载 admin_config.json 与全局过滤模板（auth_key 变更则全员令牌失效）                                           | 管理员        |
 
 > 示例：如果 `URL_PREFIX` 设置为 `qj52lajx`，则完整路径为 `/qj52lajx/download`
 
@@ -1167,7 +1169,7 @@ docker exec -it catdock userctl unban <用户名>      # 解禁用户
 - 用户名规则：仅字母+数字、不能为纯数字、字母字符不少于 4 位
 - `ban`/`unban` 为可逆禁用：被禁用户密码正确时返回 403「账号已被禁用」，且**不计入**封禁失败计数
 - `ban`/`del`/`password` 不能作用于管理员账户（请改用 `adminctl` 命令）；下载用户可全部删除
-- 以上操作也可在管理网页 `/{prefix}/admin/` 中完成（管理员增删除外）
+- 以上操作也可在管理网页 `/{prefix}/admin.html` 中完成（管理员增删除外）
 
 ### banip — IP 封禁管理
 
@@ -1294,7 +1296,7 @@ docker exec catdock getent hosts baidu.com
 A: 宿主机断电重启后网络服务需要一定时间初始化，容器会主动检测网络状态避免在网络未就绪时盲目下载。最长等待 10 分钟，超时后仍会启动服务。
 
 **Q: AUTH_KEY 在哪里配置？可以随时修改吗？**
-A: `AUTH_KEY` 保存在 admin_config.json 的 `auth_key` 字段：首次启动若为空或 `CHANGE_ME` 会自动随机生成并写回文件，同时在启动日志打印一次。修改方式：管理员登录管理网页 `/{prefix}/admin/`，在「服务器配置」中填写新 KEY（至少 8 位，可随机生成）并保存，立即写回 admin_config.json 并生效——**包括管理员在内全员令牌吊销**，所有用户用新 KEY 重新登录即可，用户密码无需改动、无需重启容器。`URL_PREFIX` 仍仅通过环境变量配置以保证访问地址恒定。用户密码（第二层认证）通过 `userctl add/password` 或管理网页管理；管理员账户通过 `adminctl` CLI 管理。
+A: `AUTH_KEY` 保存在 admin_config.json 的 `auth_key` 字段：首次启动若为空或 `CHANGE_ME` 会自动随机生成并写回文件，同时在启动日志打印一次。修改方式：管理员登录管理网页 `/{prefix}/admin.html`，在「服务器配置」中填写新 KEY（至少 8 位，可随机生成）并保存，立即写回 admin_config.json 并生效——**包括管理员在内全员令牌吊销**，所有用户用新 KEY 重新登录即可，用户密码无需改动、无需重启容器。`URL_PREFIX` 仍仅通过环境变量配置以保证访问地址恒定。用户密码（第二层认证）通过 `userctl add/password` 或管理网页管理；管理员账户通过 `adminctl` CLI 管理。
 
 **Q: 默认管理员账户是什么？**
 A: 首次启动自动创建管理员 `admin`，密码为 14 位随机字符串，仅在启动日志显示一次（`docker logs catdock`）。请妥善保存并尽快登录管理网页修改；管理员登录后自动进入管理控制台，可添加/删除下载用户、重置密码、禁用用户、热更新 AUTH_KEY、编辑全局过滤模板。管理员账户的增删需在容器内用 `adminctl add/del/password/list` 命令操作。

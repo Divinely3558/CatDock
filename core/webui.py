@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
 """webui - 内置网页页面加载
 
-包含三个零依赖单文件页面：
-  - login.html：登录页，GET /{prefix}/ 返回
-  - user.html：下载控制台（普通用户），GET /{prefix}/user 返回
-  - admin.html：管理控制台（管理员），GET /{prefix}/admin/ 返回
+包含三个零依赖单文件页面（规范地址；旧入口由 api_server 302 跳转）：
+  - login.html：登录页，GET /{prefix}/login.html 返回
+  - user.html：下载控制台（普通用户），GET /{prefix}/user.html 返回
+  - admin.html：管理控制台（管理员），GET /{prefix}/admin.html 返回
 首次访问时读取并缓存。
 """
 import os

@@ -3,7 +3,7 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <link rel="icon" href="../favicon.ico" />
+    <link rel="icon" href="favicon.ico" />
     <title>CatDock 管理控制台</title>
     <style>
       /* ===== 默认主题（墨绿 · 亮色），与下载控制台默认风格一致 ===== */
@@ -639,16 +639,14 @@
           <code>key</code> 字段与所有网页登录都要同步更换。
         </div>
         <label class="field">
-          <span
-            >新 AUTH_KEY<span class="req">*</span>（至少 8 位，建议 14
-            位以上随机字符串）</span
-          >
+          <span>新 AUTH_KEY<span class="req">*</span></span>
           <div class="key-row">
             <input
               type="text"
               id="newKey"
-              placeholder="输入新的 AUTH_KEY"
+              placeholder="点击「🎲 随机」自动生成"
               autocomplete="off"
+              readonly
             />
             <button class="btn btn-ghost" id="btnGenKey" type="button">
               🎲 随机
@@ -819,6 +817,9 @@
       var token = localStorage.getItem(LS.token) || "";
       var userName = localStorage.getItem(LS.user) || "";
 
+      // 规范地址 /{prefix}/admin.html；/admin、/admin/ 旧入口也兼容归一
+      var BASE = location.pathname.replace(/\/admin(?:\.html)?\/?$/, "/");
+
       document.getElementById("userChip").textContent =
         "👤 " + (userName || "管理员");
 
@@ -826,12 +827,12 @@
         localStorage.removeItem(LS.token);
         localStorage.removeItem(LS.user);
         localStorage.removeItem(LS.role);
-        location.href = "../login.html";
+        location.href = BASE + "login.html";
       }
 
       // ---------- API ----------
       function api(method, path, body) {
-        return fetch(path, {
+        return fetch(BASE + path, {
           method: method,
           headers: {
             "Content-Type": "application/json",
@@ -909,7 +910,7 @@
 
       // ---------- 用户列表 ----------
       function loadUsers() {
-        return api("GET", "users")
+        return api("GET", "admin/users")
           .then(function (j) {
             renderUsers(j.data || []);
           })
@@ -1004,7 +1005,7 @@
               if (!v.pwd) return (toast("密码不能为空", true), false);
               if (v.pwd !== v.pwd2)
                 return (toast("两次输入的密码不一致", true), false);
-              api("POST", "users/password", {
+              api("POST", "admin/users/password", {
                 username: u.username,
                 newPassword: v.pwd,
               })
@@ -1024,7 +1025,7 @@
             danger: true,
             okText: "禁用",
             onOk: function () {
-              api("POST", "users/ban", { username: u.username })
+              api("POST", "admin/users/ban", { username: u.username })
                 .then(function (j) {
                   toast(j.message);
                   loadUsers();
@@ -1035,7 +1036,7 @@
             },
           });
         } else if (act === "unban") {
-          api("POST", "users/unban", { username: u.username })
+          api("POST", "admin/users/unban", { username: u.username })
             .then(function (j) {
               toast(j.message);
               loadUsers();
@@ -1052,7 +1053,7 @@
             danger: true,
             okText: "全部删除",
             onOk: function () {
-              api("POST", "users/delete", { username: u.username })
+              api("POST", "admin/users/delete", { username: u.username })
                 .then(function (j) {
                   toast(j.message);
                   loadUsers();
@@ -1099,7 +1100,10 @@
               return (toast("用户名和密码不能为空", true), false);
             if (v.pwd !== v.pwd2)
               return (toast("两次输入的密码不一致", true), false);
-            api("POST", "users/add", { username: v.username, password: v.pwd })
+            api("POST", "admin/users/add", {
+              username: v.username,
+              password: v.pwd,
+            })
               .then(function (j) {
                 toast(j.message);
                 loadUsers();
@@ -1112,22 +1116,48 @@
       };
 
       // ---------- AUTH_KEY ----------
+      // 生成 14 位随机密钥：至少 1 个大写、1 个小写、1 个数字、1-3 个符号
       function genRandomKey() {
-        var chars =
-          "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_";
-        var arr = new Uint8Array(24);
-        (window.crypto || window.msCrypto).getRandomValues(arr);
-        var s = "";
-        for (var i = 0; i < arr.length; i++) s += chars[arr[i] % chars.length];
-        return s;
+        var UPPER = "ABCDEFGHIJKLMNOPQRSTUVWXYZ";
+        var LOWER = "abcdefghijklmnopqrstuvwxyz";
+        var DIGIT = "0123456789";
+        var SYMBOL = "!@#$%^&*?-_=+";
+        var cryptoObj = window.crypto || window.msCrypto;
+        // 无模偏的随机整数 [0, max)
+        function randInt(max) {
+          var limit = Math.floor(256 / max) * max;
+          var buf = new Uint8Array(1);
+          var v;
+          do {
+            cryptoObj.getRandomValues(buf);
+            v = buf[0];
+          } while (v >= limit);
+          return v % max;
+        }
+        function pick(set) {
+          return set[randInt(set.length)];
+        }
+        var symCount = 1 + randInt(3); // 符号 1-3 个
+        var chars = [pick(UPPER), pick(LOWER), pick(DIGIT)];
+        for (var i = 0; i < symCount; i++) chars.push(pick(SYMBOL));
+        var all = UPPER + LOWER + DIGIT;
+        while (chars.length < 14) chars.push(pick(all));
+        // Fisher-Yates 洗牌，避免各类字符位置固定
+        for (var j = chars.length - 1; j > 0; j--) {
+          var k = randInt(j + 1);
+          var t = chars[j];
+          chars[j] = chars[k];
+          chars[k] = t;
+        }
+        return chars.join("");
       }
       document.getElementById("btnGenKey").onclick = function () {
         document.getElementById("newKey").value = genRandomKey();
       };
       document.getElementById("btnSaveKey").onclick = function () {
         var key = document.getElementById("newKey").value.trim();
-        if (!key) return (toast("请输入新 AUTH_KEY", true), false);
-        if (key.length < 8) return (toast("AUTH_KEY 至少 8 位", true), false);
+        if (!key)
+          return (toast("请先点击「🎲 随机」生成 AUTH_KEY", true), false);
         openModal({
           title: "确认修改 AUTH_KEY？",
           msg:
@@ -1136,7 +1166,7 @@
           danger: true,
           okText: "修改并全员下线",
           onOk: function () {
-            api("POST", "auth-key", { newKey: key })
+            api("POST", "admin/auth-key", { newKey: key })
               .then(function (j) {
                 toast(j.message + " 即将返回登录页…");
                 setTimeout(backToLogin, 1500);
@@ -1199,7 +1229,7 @@
               toast("两次输入的新密码不一致", true);
               return false;
             }
-            api("POST", "../password", {
+            api("POST", "password", {
               oldPassword: v.old,
               newPassword: v.new1,
             })
@@ -1215,7 +1245,7 @@
         });
       };
       document.getElementById("menuLogout").onclick = function () {
-        fetch("../logout", {
+        fetch(BASE + "logout", {
           method: "POST",
           headers: {
             "Content-Type": "application/json",
@@ -1331,7 +1361,7 @@
       }
 
       function loadFilters() {
-        api("GET", "filters")
+        api("GET", "admin/filters")
           .then(function (data) {
             filterState = {
               keywords: {
@@ -1422,7 +1452,7 @@
         }
         var btn = document.getElementById("filterSave");
         btn.disabled = true;
-        api("POST", "filters", filterState)
+        api("POST", "admin/filters", filterState)
           .then(function (data) {
             showAlert(
               document.getElementById("filterAlert"),

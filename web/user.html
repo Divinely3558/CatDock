@@ -1230,8 +1230,8 @@
       (function () {
         "use strict";
 
-        // 页面由服务端托管在 /{prefix}/ 下，相对路径自动适配 URL 前缀
-        // /user、/user/、/user.html 三种入口都归一到 /{prefix}/，确保相对路径 API 正确
+        // 规范入口 /{prefix}/user.html（/user、/user/ 旧入口由服务端 302 跳转）
+        // BASE 归一到 /{prefix}/，确保相对路径 API 正确
         var BASE = location.pathname.replace(/\/user(?:\.html)?\/?$/, "/");
         var LS = {
           token: "catdock_token",
@@ -2190,7 +2190,7 @@
         if (!creds.token) {
           location.href = BASE + "login.html";
         } else if (localStorage.getItem(LS.role) === "admin") {
-          location.href = BASE + "admin/";
+          location.href = BASE + "admin.html";
         } else {
           tryLogin();
         }

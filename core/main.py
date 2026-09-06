@@ -76,7 +76,7 @@ def main():
 ════════════════════════ 猫抓插件配置 ════════════════════════
 
     发送地址: http://你的容器IP:{port}{api_prefix}/download
-    网页控制台: http://你的容器IP:{port}{api_prefix}/
+    网页控制台: http://你的容器IP:{port}{api_prefix}/login.html
 
     请求体:
     {{

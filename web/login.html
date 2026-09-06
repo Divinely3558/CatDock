@@ -1224,7 +1224,7 @@
               $("loginUser").value = "";
               // 根据角色跳转：管理员 → 管理控制台，用户 → 下载控制台
               if (data.data.role === "admin") {
-                location.href = "admin/";
+                location.href = "admin.html";
               } else {
                 location.href = "user.html";
               }
@@ -1242,7 +1242,7 @@
         var savedToken = localStorage.getItem(LS.token);
         if (savedToken) {
           if (localStorage.getItem(LS.role) === "admin") {
-            location.href = "admin/";
+            location.href = "admin.html";
           } else {
             location.href = "user.html";
           }
