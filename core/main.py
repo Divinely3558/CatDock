@@ -81,7 +81,7 @@ def main():
     请求体:
     {{
       "url": "${{url}}",
-      "saveName": "${{title}}",
+      "saveName": "${{title}}_${{now}}",
       "referer": "${{referer}}",
       "cookie": "${{cookie}}",
       "userAgent": "${{userAgent}}",

@@ -11,6 +11,7 @@
 """
 import os
 import re
+import json
 import time
 import shutil
 import uuid
@@ -23,7 +24,7 @@ from app_logger import log_info, log_warning, log_error, debug_print
 from task_store import save_tasks, append_log
 from dedup import is_url_downloaded, is_filename_downloaded
 from filters import filter_filename, get_ad_keywords, reload_user_rules
-from security import sanitize_url_for_log
+from security import sanitize_url_for_log, is_safe_url
 
 
 # ---- per-user 上下文（线程级）----
@@ -117,7 +118,10 @@ def convert_to_format(input_file, output_file, target_format):
 
 
 VIDEO_EXTS = ('.mp4', '.mkv')
-DIRECT_VIDEO_EXTS = ('.mp4', '.mkv', '.ts', '.flv', '.avi', '.webm', '.mov', '.wmv')
+DIRECT_VIDEO_EXTS = ('.mp4', '.mkv', '.ts', '.flv', '.avi', '.webm', '.mov', '.wmv', '.f4v')
+# 直链下载后需要 ffmpeg 无损转封装（-c copy）为目标格式的扩展名：
+# .f4v 实际内容多为 FLV / 碎片化 MP4（如爱奇艺 CDN），保留 .f4v 扩展名多数播放器无法识别
+DIRECT_CONVERT_EXTS = ('.f4v',)
 
 
 def is_direct_video_url(url):
@@ -130,6 +134,80 @@ def is_direct_video_url(url):
 
 def is_video_file(file_name):
     return os.path.splitext(file_name)[1].lower() in VIDEO_EXTS
+
+
+def plan_direct_output(base_name, video_ext, fmt):
+    """规划直链视频的 curl 下载目标与最终成品路径。
+
+    .f4v 等扩展名：curl 先下载为 <base_name><ext> 源文件（可断点续传），
+    再无损转封装为用户指定格式 <base_name>.<fmt>；其余直链格式源文件即成品。
+    返回 (curl_target, final_output, needs_convert)
+    """
+    download_dir = get_download_dir()
+    if video_ext in DIRECT_CONVERT_EXTS:
+        source = os.path.join(download_dir, f"{base_name}{video_ext}")
+        final = os.path.join(download_dir, f"{base_name}.{fmt}")
+        return source, final, True
+    final = os.path.join(download_dir, f"{base_name}{video_ext}")
+    return final, final, False
+
+
+def _remux_video(source_file, output_file, target_format, max_tries=3):
+    """ffmpeg 无损转封装（-c copy），最多 max_tries 次；产出合格成品返回 True"""
+    for i in range(max_tries):
+        if convert_to_format(source_file, output_file, target_format):
+            if os.path.exists(output_file) and os.path.getsize(output_file) >= cfg.MIN_FILE_SIZE:
+                return True
+        if i < max_tries - 1:
+            time.sleep(2)
+    return False
+
+
+def _post_process_direct_download(source_file, final_file, target_format, base_name):
+    """直链视频下载完成后的转封装收尾（.f4v 等）。
+
+    .f4v 实际内容多为 FLV / 碎片化 MP4，ffmpeg -c copy 即可无损 remux 为
+    用户指定的 mp4/mkv；转封装失败时兜底改名为 .flv 保留（内容通常为 FLV），
+    避免任务彻底失败丢失已下载数据。
+    返回 True 表示已有合格成品（或兜底成品）。
+    """
+    # 无需转封装：curl 目标即成品
+    if os.path.abspath(source_file) == os.path.abspath(final_file):
+        return True
+
+    # 成品已存在且完整（可能是上次运行已转好）
+    if os.path.exists(final_file) and os.path.getsize(final_file) >= cfg.MIN_FILE_SIZE:
+        try:
+            if os.path.exists(source_file):
+                os.remove(source_file)
+        except Exception as e:
+            debug_print(f"清理源文件失败: {e}")
+        return True
+
+    if not os.path.exists(source_file) or os.path.getsize(source_file) < cfg.MIN_FILE_SIZE:
+        debug_print(f"[直链后处理] 源文件不存在或过小: {source_file}")
+        return False
+
+    if _remux_video(source_file, final_file, target_format):
+        debug_print(f"[直链后处理] 转封装成功: {source_file} -> {final_file}")
+        try:
+            os.remove(source_file)
+        except Exception as e:
+            debug_print(f"清理源文件失败: {e}")
+        return True
+
+    # 兜底：转封装失败（编码不被目标容器支持等），源内容通常为 FLV，改名 .flv 保留
+    log_warning(f"转封装为 {target_format} 失败，保留原始下载文件: {source_file}")
+    fallback_file = os.path.splitext(source_file)[0] + '.flv'
+    try:
+        if os.path.abspath(source_file) != os.path.abspath(fallback_file):
+            if os.path.exists(fallback_file):
+                os.remove(fallback_file)
+            os.rename(source_file, fallback_file)
+            log_info(f"已将源文件改名为 {os.path.basename(fallback_file)} 保留")
+    except Exception as e:
+        log_error(f"兜底改名失败: {e}")
+    return True
 
 
 def extract_percent(line):
@@ -290,6 +368,42 @@ def _build_curl_cmd(url, output_file, referer=None, cookie=None, user_agent=None
     return cmd
 
 
+# CDN 调度 JSON 响应中可能携带真实下载地址的字段名（爱奇艺 pcw-data 接口使用 'l'）
+_DISPATCH_URL_KEYS = ('l', 'url')
+
+
+def _extract_dispatch_url(file_path):
+    """检测下载到的小文件是否为 CDN 调度 JSON 响应。
+
+    部分站点（如爱奇艺 pcw-data.video.iqiyi.com）的媒体链接返回的不是视频本身，
+    而是一小段 JSON，形如 {"l": "https://真实CDN节点/xxx.f4v?...", "e": "0"}，
+    真实视频地址在 'l' 字段中（每次请求动态分配节点）。
+
+    命中且真实地址通过 SSRF 安全校验时返回该地址，否则返回 None。
+    """
+    try:
+        if not os.path.exists(file_path) or os.path.getsize(file_path) > 64 * 1024:
+            return None
+        with open(file_path, 'rb') as f:
+            head = f.read(8192).lstrip()
+        if not head.startswith(b'{'):
+            return None
+        data = json.loads(head.decode('utf-8', errors='ignore'))
+        if not isinstance(data, dict):
+            return None
+        for key in _DISPATCH_URL_KEYS:
+            candidate = data.get(key)
+            if isinstance(candidate, str) and candidate.startswith(('http://', 'https://')):
+                if not is_safe_url(candidate):
+                    debug_print(f"[调度解析] 真实地址未通过安全校验，忽略: "
+                                f"{sanitize_url_for_log(candidate)[:100]}")
+                    return None
+                return candidate
+    except Exception as e:
+        debug_print(f"[调度解析] 解析失败: {e}")
+    return None
+
+
 # ---- 任务控制辅助：进程关联与状态查询 ----
 
 def _register_proc(task_id, process):
@@ -418,9 +532,10 @@ def _do_single_download_attempt(base_name, url, referer, cookie, user_agent, tas
     is_direct_video, video_ext = is_direct_video_url(url)
 
     if is_direct_video:
-        output_file = os.path.join(get_download_dir(), f"{base_name}{video_ext}")
+        # .f4v 等：curl_target 为源文件（.f4v），output_file 为转封装后的成品
+        curl_target, output_file, needs_convert = plan_direct_output(base_name, video_ext, fmt)
     else:
-        output_file = os.path.join(get_download_dir(), f"{base_name}.{fmt}")
+        curl_target, output_file, needs_convert = None, os.path.join(get_download_dir(), f"{base_name}.{fmt}"), False
 
     # 尝试前先清理残留（避免上一次失败的残留影响，但是保留已存在的大文件 -> 直接成功）
     has_existing, existing_path = has_existing_video(base_name)
@@ -437,47 +552,72 @@ def _do_single_download_attempt(base_name, url, referer, cookie, user_agent, tas
     try:
         if is_direct_video:
             # 直接视频下载，使用 curl，只重试1次
-            cmd = _build_curl_cmd(url, output_file, referer, cookie, user_agent)
+            # dl_url 可能在检测到 CDN 调度 JSON（爱奇艺 pcw-data 等）后切换为真实地址，
+            # 最多跟随 3 跳
+            dl_url = url
+            seen_urls = {url}
+            for _hop in range(4):
+                cmd = _build_curl_cmd(dl_url, curl_target, referer, cookie, user_agent)
 
-            process = subprocess.Popen(
-                cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
-                text=True, cwd='/home/downloader'
-            )
-            _register_proc(task_id, process)
-            try:
-                for _ in iter(process.stdout.readline, ''):
-                    pass
-            finally:
-                process.stdout.close()
-            return_code = process.wait()
-            _unregister_proc(task_id, process)
+                process = subprocess.Popen(
+                    cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+                    text=True, cwd='/home/downloader'
+                )
+                _register_proc(task_id, process)
+                try:
+                    for _ in iter(process.stdout.readline, ''):
+                        pass
+                finally:
+                    process.stdout.close()
+                return_code = process.wait()
+                _unregister_proc(task_id, process)
 
-            # 暂停/删除优先于结果判定（SIGINT 退出码不可信）
-            status = _get_task_status(task_id) if task_id else None
-            if task_id and status is None:
-                return 'deleted'
-            if task_id and status == 'paused':
-                debug_print(f"[单链接尝试] 任务已暂停，停止下载: {base_name}")
-                return 'paused'
+                # 暂停/删除优先于结果判定（SIGINT 退出码不可信）
+                status = _get_task_status(task_id) if task_id else None
+                if task_id and status is None:
+                    return 'deleted'
+                if task_id and status == 'paused':
+                    debug_print(f"[单链接尝试] 任务已暂停，停止下载: {base_name}")
+                    return 'paused'
 
-            if os.path.exists(output_file):
-                file_size = os.path.getsize(output_file)
-                if file_size >= cfg.MIN_FILE_SIZE:
-                    if return_code == 0:
-                        debug_print(f"[单链接尝试] 直接下载成功: {output_file}")
-                        success = True
-                    else:
-                        debug_print(f"[单链接尝试] 命令返回非零但文件有效: {output_file}")
-                        success = True
-                else:
+                if os.path.exists(curl_target):
+                    file_size = os.path.getsize(curl_target)
+                    if file_size >= cfg.MIN_FILE_SIZE:
+                        if return_code == 0:
+                            debug_print(f"[单链接尝试] 直接下载成功: {curl_target}")
+                        else:
+                            debug_print(f"[单链接尝试] 命令返回非零但文件有效: {curl_target}")
+                        if needs_convert:
+                            # .f4v 等：下载完成后转封装为用户指定格式
+                            if _post_process_direct_download(curl_target, output_file, fmt, base_name):
+                                success = True
+                            else:
+                                debug_print(f"[单链接尝试] 转封装失败: {base_name}")
+                        else:
+                            success = True
+                        break
+
+                    # 文件过小：可能是 CDN 调度 JSON（{"l": "真实地址"}）
+                    resolved = _extract_dispatch_url(curl_target)
+                    if resolved and resolved not in seen_urls and len(seen_urls) < 4:
+                        seen_urls.add(resolved)
+                        log_info(f"检测到 CDN 调度响应，转向真实下载地址: "
+                                 f"{sanitize_url_for_log(resolved)[:120]}")
+                        try:
+                            os.remove(curl_target)
+                        except Exception:
+                            pass
+                        dl_url = resolved
+                        continue
                     debug_print(f"[单链接尝试] 下载文件太小 ({file_size} bytes)")
                     try:
-                        if os.path.exists(output_file):
-                            os.remove(output_file)
+                        if os.path.exists(curl_target):
+                            os.remove(curl_target)
                     except Exception:
                         pass
-            else:
-                debug_print(f"[单链接尝试] 直接下载失败，返回码: {return_code}")
+                else:
+                    debug_print(f"[单链接尝试] 直接下载失败，返回码: {return_code}")
+                break
         else:
             # m3u8 下载，使用 N_m3u8DL，只重试1次
             cmd = _build_m3u8_cmd(url, base_name, referer, cookie, user_agent)
@@ -994,15 +1134,25 @@ def _run_same_video_group_worker(task_id, base_name, output_format=None):
         _finish_task(task_id, False)
 
 
-def _run_direct_download_worker(task_id, url, output_file, referer, cookie, user_agent, initial_retry_count=0):
+def _run_direct_download_worker(task_id, url, output_file, referer, cookie, user_agent,
+                                initial_retry_count=0, final_file=None, target_format=None):
+    """直链下载 worker（curl + 断点续传）。
+
+    output_file 为 curl 下载目标；final_file 不为空且与 output_file 不同时
+    （.f4v 等格式），下载完成后转封装为 final_file（用户指定的 mp4/mkv）。
+    """
     # 继承 per-user 上下文（后台线程 thread-local 默认为空）
     _inherit_task_context(task_id)
+    if final_file is None:
+        final_file = output_file
     try:
-        cmd = _build_curl_cmd(url, output_file, referer, cookie, user_agent)
-
         base_name = os.path.basename(output_file)
         max_retries = 5
         retry_count = initial_retry_count
+        # dl_url 可能在检测到 CDN 调度 JSON（爱奇艺 pcw-data 等）后切换为真实地址，
+        # 最多跟随 3 跳；切换地址不消耗重试次数
+        dl_url = url
+        seen_urls = {url}
         while retry_count < max_retries:
             # 循环顶响应暂停/删除（覆盖退避等待、网络检查期间收到的请求）
             status = _get_task_status(task_id)
@@ -1012,7 +1162,9 @@ def _run_direct_download_worker(task_id, url, output_file, referer, cookie, user
                 debug_print(f"任务已暂停，停止下载尝试 (ID: {task_id})")
                 return
 
-            debug_print(f"直接下载尝试 {retry_count + 1}/{max_retries} (ID: {task_id}, 名称: {base_name}): {sanitize_url_for_log(url)} -> {output_file}")
+            cmd = _build_curl_cmd(dl_url, output_file, referer, cookie, user_agent)
+
+            debug_print(f"直接下载尝试 {retry_count + 1}/{max_retries} (ID: {task_id}, 名称: {base_name}): {sanitize_url_for_log(dl_url)} -> {output_file}")
 
             process = subprocess.Popen(
                 cmd,
@@ -1048,16 +1200,39 @@ def _run_direct_download_worker(task_id, url, output_file, referer, cookie, user
             if os.path.exists(output_file):
                 file_size = os.path.getsize(output_file)
                 if file_size >= cfg.MIN_FILE_SIZE:
-                    if return_code == 0:
-                        log_info(f"下载成功")
-                        _finish_task(task_id, True)
-                        return
-                    else:
+                    if return_code != 0:
                         debug_print(f"直接下载命令返回非零码 {return_code}，但已检测到有效输出文件: {output_file} (大小: {file_size} bytes)")
+                    # .f4v 等格式：curl 下载完成后转封装为用户指定格式
+                    if os.path.abspath(final_file) != os.path.abspath(output_file):
+                        with cfg.tasks_lock:
+                            if task_id in cfg.tasks:
+                                cfg.tasks[task_id]['progress'] = 90
+                        save_tasks()
+                        if _post_process_direct_download(
+                                output_file, final_file,
+                                target_format or cfg.output_format, base_name):
+                            log_info(f"下载成功")
+                            _finish_task(task_id, True)
+                            return
+                        debug_print(f"转封装未产出合格成品，准备重试下载...")
+                    else:
+                        log_info(f"下载成功")
                         _finish_task(task_id, True)
                         return
                 else:
                     debug_print(f"下载文件太小 ({file_size} bytes)，可能是错误页面")
+                    # 小文件可能是 CDN 调度 JSON（如爱奇艺 pcw-data 返回 {"l": "真实地址"}）
+                    resolved = _extract_dispatch_url(output_file)
+                    if resolved and resolved not in seen_urls and len(seen_urls) < 4:
+                        seen_urls.add(resolved)
+                        log_info(f"检测到 CDN 调度响应，转向真实下载地址: "
+                                 f"{sanitize_url_for_log(resolved)[:120]}")
+                        try:
+                            os.remove(output_file)
+                        except Exception:
+                            pass
+                        dl_url = resolved
+                        continue
 
             debug_print(f"直接下载失败，返回码: {return_code}")
 
@@ -1205,6 +1380,15 @@ def _resume_single_task(task):
         _finish_task(task_id, True)
         return
 
+    # 检查是否存在 .f4v 直链已下载但未转封装的残留源文件
+    f4v_source = os.path.join(get_download_dir(), f"{base_name}.f4v")
+    if os.path.exists(f4v_source) and os.path.getsize(f4v_source) >= cfg.MIN_FILE_SIZE:
+        log_info(f"已存在未转封装的 .f4v 源文件，尝试转封装: {f4v_source}")
+        final_file = os.path.join(get_download_dir(), f"{base_name}.{cfg.output_format}")
+        ok = _post_process_direct_download(f4v_source, final_file, cfg.output_format, base_name)
+        _finish_task(task_id, ok)
+        return
+
     # 检查是否存在未转换的源文件（下载完成但尚未转换）
     source_file = find_existing_source_file(base_name)
     if source_file and os.path.getsize(source_file) >= cfg.MIN_FILE_SIZE:
@@ -1235,9 +1419,12 @@ def _resume_single_task(task):
     is_direct_video, video_ext = is_direct_video_url(url)
 
     if is_direct_video:
-        output_file = os.path.join(get_download_dir(), f"{base_name}{video_ext}")
+        # .f4v 等：curl 目标为源文件，成品为转封装后的目标格式
+        curl_target, output_file, needs_convert = plan_direct_output(
+            base_name, video_ext, cfg.output_format)
     else:
-        output_file = os.path.join(get_download_dir(), f"{base_name}.{cfg.output_format}")
+        curl_target, output_file, needs_convert = None, \
+            os.path.join(get_download_dir(), f"{base_name}.{cfg.output_format}"), False
 
     if os.path.exists(output_file):
         if is_direct_video:
@@ -1265,7 +1452,8 @@ def _resume_single_task(task):
     if is_direct_video:
         thread = threading.Thread(
             target=_run_direct_download_worker,
-            args=(task_id, url, output_file, referer, cookie, user_agent, retry_count),
+            args=(task_id, url, curl_target, referer, cookie, user_agent, retry_count),
+            kwargs={'final_file': output_file, 'target_format': cfg.output_format},
             daemon=True
         )
         thread.start()
@@ -1516,9 +1704,11 @@ def run_download(url, save_name=None, referer=None, cookie=None, user_agent=None
         return None, False
 
     if is_direct_video:
-        output_file = os.path.join(get_download_dir(), f"{base_name}{video_ext}")
+        # .f4v 等：curl 目标为源文件（.f4v），成品为转封装后的目标格式
+        curl_target, output_file, needs_convert = plan_direct_output(base_name, video_ext, fmt)
     else:
-        output_file = os.path.join(get_download_dir(), f"{base_name}.{fmt}")
+        curl_target, output_file, needs_convert = None, \
+            os.path.join(get_download_dir(), f"{base_name}.{fmt}"), False
 
     if os.path.exists(output_file):
         if is_direct_video:
@@ -1560,10 +1750,14 @@ def run_download(url, save_name=None, referer=None, cookie=None, user_agent=None
     debug_print(f"任务启动: {task_id}, is_direct_video={is_direct_video}, output_file={output_file}")
 
     if is_direct_video:
-        log_info(f"检测到直接视频链接，使用 curl 直接下载: {video_ext}")
+        if needs_convert:
+            log_info(f"检测到直接视频链接 {video_ext}，使用 curl 下载并转封装为 {fmt}")
+        else:
+            log_info(f"检测到直接视频链接，使用 curl 直接下载: {video_ext}")
         thread = threading.Thread(
             target=_run_direct_download_worker,
-            args=(task_id, url, output_file, referer, cookie, user_agent),
+            args=(task_id, url, curl_target, referer, cookie, user_agent),
+            kwargs={'final_file': output_file, 'target_format': fmt},
             daemon=True
         )
         thread.start()
