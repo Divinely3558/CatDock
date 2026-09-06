@@ -150,7 +150,7 @@ class DownloadHandler(http.server.BaseHTTPRequestHandler):
             self.end_headers()
             self.wfile.write(body)
         except Exception as e:
-            debug_print(f"发送响应失败: {e}")
+            debug_print(f"[HTTP] 响应发送失败（客户端可能已断开）: {e}")
 
     def send_html(self, html, status=200):
         try:
@@ -162,7 +162,7 @@ class DownloadHandler(http.server.BaseHTTPRequestHandler):
             self.end_headers()
             self.wfile.write(body)
         except Exception as e:
-            debug_print(f"发送页面失败: {e}")
+            debug_print(f"[HTTP] 页面发送失败（客户端可能已断开）: {e}")
 
     def handle(self):
         # IP 封禁检查：被封禁的 IP 直接断开连接，不返回任何响应
@@ -378,7 +378,7 @@ class DownloadHandler(http.server.BaseHTTPRequestHandler):
                 return path[len(prefix_pattern):]
             # URL_PREFIX/网页链接错误：仅返回 404，不计入封禁计数
             # （扫描器探测、浏览器误访问、链接敲错等不触发 IP 封禁）
-            debug_print(f"路径前缀不正确，拒绝请求: {path}")
+            debug_print(f"[HTTP] 路径前缀不正确，拒绝请求: {path}")
             return None
 
         return path
@@ -457,7 +457,7 @@ class DownloadHandler(http.server.BaseHTTPRequestHandler):
                     self.end_headers()
                     self.wfile.write(body)
                 except Exception as e:
-                    debug_print(f"发送图标失败: {e}")
+                    debug_print(f"[HTTP] 图标发送失败（客户端可能已断开）: {e}")
             return
 
         # 登录页：静态外壳，认证在页面内的 API 调用中完成（仅规范地址提供页面）
@@ -656,7 +656,7 @@ class DownloadHandler(http.server.BaseHTTPRequestHandler):
                     self.send_json({'success': False, 'message': '旧密码不正确'}, 400)
                     return
                 data_db.change_password(username, new_password)
-                log_info(f"用户已修改自己的密码: {username}（全部令牌已吊销）")
+                log_info(f"用户修改密码: {username}（全部登录令牌已吊销）")
                 self.send_json({'success': True,
                                 'message': '密码已修改，所有登录已失效，请使用新密码重新登录'})
             except Exception as e:
@@ -709,7 +709,7 @@ class DownloadHandler(http.server.BaseHTTPRequestHandler):
                 }
                 cfg._write_json_atomic(cfg.FILTER_RULES_FILE, new_rules, mode=0o644)
                 cfg.load_filters()
-                log_info(f"管理员已更新过滤规则模板: 拦截 {len(kw_list)} 个 / 过滤 {len(ff_list)} 个 / 去重 {len(rules_out)} 条")
+                log_info(f"管理员更新过滤规则模板（拦截关键字 {len(kw_list)} / 文件名过滤 {len(ff_list)} / 去重规则 {len(rules_out)}）")
                 self.send_json({'success': True, 'message': '过滤规则模板已保存，新用户将使用此模板'})
             except Exception as e:
                 self.send_json({'success': False, 'message': str(e)}, 500)
@@ -768,7 +768,7 @@ class DownloadHandler(http.server.BaseHTTPRequestHandler):
                     'filename_dedup': {'enabled': bool(dd.get('enabled', False)), 'rules': rules_out},
                 }
                 save_user_rules(username, new_rules)
-                log_info(f"用户已更新过滤规则: {username}（拦截 {len(kw_list)} 个 / 过滤 {len(ff_list)} 个 / 去重 {len(rules_out)} 条）")
+                log_info(f"用户更新过滤规则: {username}（拦截关键字 {len(kw_list)} / 文件名过滤 {len(ff_list)} / 去重规则 {len(rules_out)}）")
                 self.send_json({'success': True,
                                 'message': '过滤规则已保存，对新增下载任务立即生效'})
             except Exception as e:
@@ -817,7 +817,7 @@ class DownloadHandler(http.server.BaseHTTPRequestHandler):
                 is_ad, keyword = is_ad_content(save_name, url, user=self.authenticated_user)
                 if is_ad:
                     log_info(f"已拦截广告: {save_name}")
-                    debug_print(f"广告拦截命中关键字: {keyword}，URL: {sanitize_url_for_log(url)[:80]}")
+                    debug_print(f"[HTTP] 广告拦截命中关键字: {keyword}，URL: {sanitize_url_for_log(url)[:80]}")
                     self.send_json({
                         'success': False,
                         'message': f'检测到广告内容，已拦截。关键字: {keyword}',
@@ -874,12 +874,12 @@ class DownloadHandler(http.server.BaseHTTPRequestHandler):
                 if _uc == 0:
                     log_error("警告: 重载后 data.db 中无用户，请运行: adminctl add <用户名> 或 userctl add <用户名>")
                 else:
-                    log_info(f"重载完成，当前用户数: {_uc}")
+                    log_info(f"系统重载配置完成（当前用户 {_uc} 个）")
 
                 # AUTH_KEY 变更后旧令牌签名立即失效，同时全量吊销登记令牌（双保险）
                 if cfg.auth_key != old_auth_key:
                     data_db.revoke_all_tokens()
-                    log_info("重载后 AUTH_KEY 已变更，全部令牌已作废，需重新登录")
+                    debug_print("[启动] reload 检测到 AUTH_KEY 变更，已吊销全部令牌")
 
                 self.send_json({'success': True, 'message': '配置已重新加载'})
             except Exception as e:
@@ -907,7 +907,7 @@ class DownloadHandler(http.server.BaseHTTPRequestHandler):
                     cfg.save_auth_key(new_key)
                     # 令牌签名密钥源自 AUTH_KEY，旧令牌签名即刻失效；登记令牌一并全量吊销
                     data_db.revoke_all_tokens()
-                    log_info("管理员已热更新 AUTH_KEY，全部令牌已作废，全员需重新登录")
+                    log_info("管理员更新 AUTH_KEY（全员需重新登录）")
                     self.send_json({'success': True,
                                     'message': 'AUTH_KEY 已更新，所有登录已失效，请使用新 KEY 重新登录'})
                 elif path == '/admin/users/add':
@@ -961,7 +961,7 @@ class DownloadHandler(http.server.BaseHTTPRequestHandler):
                     except ValueError as e:
                         self.send_json({'success': False, 'message': str(e)}, 400)
                         return
-                    log_info(f"管理员重置用户密码: {username}")
+                    log_info(f"管理员重置密码: {username}")
                     self.send_json({'success': True, 'message': f'已重置用户密码: {username}'})
                 elif path in ('/admin/users/ban', '/admin/users/unban'):
                     username = self._get_param(data, 'username', 'user')
@@ -978,7 +978,7 @@ class DownloadHandler(http.server.BaseHTTPRequestHandler):
                         return
                     flag = (path == '/admin/users/ban')
                     data_db.set_user_disabled(username, flag)
-                    log_info(f"管理员{'禁用' if flag else '解禁'}用户: {username}")
+                    log_info(f"管理员{'禁用用户' if flag else '解禁用户'}: {username}")
                     self.send_json({'success': True,
                                     'message': f"已{'禁用' if flag else '解禁'}用户: {username}"})
                 else:
@@ -1009,7 +1009,7 @@ class DownloadHandler(http.server.BaseHTTPRequestHandler):
                 else:
                     ok, message = delete_task(task_id)
 
-                debug_print(f"任务操作 {path}: taskId={task_id}, 结果={ok}")
+                debug_print(f"[HTTP] 任务操作 {path}: taskId={task_id}, 结果={ok}")
                 self.send_json({'success': ok, 'message': message}, 200 if ok else 400)
             except Exception as e:
                 self.send_json({'success': False, 'message': str(e)}, 500)
@@ -1038,12 +1038,12 @@ def start_server(port):
 
 
 def stop_server(_signum=None, _frame=None):
-    log_info("\n收到停止信号，正在关闭服务...")
+    log_info("系统关闭: 收到停止信号，正在停止服务")
 
     if cfg.server_instance:
         cfg.server_instance.shutdown()
         cfg.server_instance.server_close()
-        log_info("服务已关闭")
+        log_info("系统关闭完成")
 
     sys.exit(0)
 

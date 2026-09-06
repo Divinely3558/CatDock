@@ -100,16 +100,15 @@ def is_url_downloaded(url, user=None, check_failure=True):
         (hit: bool, status: str | None) — status 为 'success' 或 'failure'
     """
     normalized_url = url.strip().rstrip('/')
-    debug_print(f"is_url_downloaded: user={user}, URL={sanitize_url_for_log(normalized_url)[:80]}, check_failure={check_failure}")
     with _dedup_lock:
         cache = _get_cache(user)
         if normalized_url in cache['success_urls']:
-            debug_print("is_url_downloaded: 命中 success.log")
+            debug_print(f"[去重] URL 命中成功日志（用户={user}）: {sanitize_url_for_log(normalized_url)[:80]}")
             return True, 'success'
         if check_failure and normalized_url in cache['failure_urls']:
-            debug_print("is_url_downloaded: 命中 failure.log")
+            debug_print(f"[去重] URL 命中失败日志（用户={user}）: {sanitize_url_for_log(normalized_url)[:80]}")
             return True, 'failure'
-    debug_print("is_url_downloaded: 未命中")
+    # 未命中是常态（之后会正常启动下载），不打日志降噪
     return False, None
 
 
@@ -121,7 +120,6 @@ def is_filename_downloaded(save_name, user=None, check_failure=True):
     """
     if not save_name:
         return False, None
-    debug_print(f"is_filename_downloaded: user={user}, name={save_name}, check_failure={check_failure}")
     with _dedup_lock:
         cache = _get_cache(user)
         for name_key, status in [('success_names', 'success'), ('failure_names', 'failure')]:
@@ -131,7 +129,7 @@ def is_filename_downloaded(save_name, user=None, check_failure=True):
                 if entry_save_name == save_name or \
                    entry_save_name.startswith(save_name + '.') or \
                    save_name.startswith(entry_save_name):
-                    debug_print(f"is_filename_downloaded: 命中{status}.log")
+                    debug_print(f"[去重] 文件名命中{('成功' if status == 'success' else '失败')}日志（用户={user}）: {save_name}")
                     return True, status
-    debug_print(f"is_filename_downloaded: 未命中")
+    # 未命中是常态，不打日志降噪
     return False, None

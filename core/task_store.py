@@ -96,7 +96,7 @@ def load_tasks():
                     loaded_count += 1
 
         if loaded_count:
-            debug_print(f"已加载 {loaded_count} 个任务")
+            debug_print(f"[启动] 已加载 {loaded_count} 个未完成任务")
     except Exception as e:
         log_error(f"加载任务失败: {e}")
 

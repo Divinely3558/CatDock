@@ -193,7 +193,9 @@ def load_filters():
                     except re.error as e:
                         log_info(f"文件名去重正则编译失败 [{pattern_str}]: {e}")
 
-        debug_print(f"过滤规则加载成功: 拦截关键字 {'启用' if keywords_enabled else '禁用'} ({len(ad_keywords)} 个), 文件名过滤 {'启用' if filename_filter_enabled else '禁用'} ({len(filename_filters)} 个), 文件名去重: {'启用' if filename_dedup_enabled else '禁用'} ({len(filename_dedup_rules)} 条正则规则)")
+        debug_print(f"[启动] 过滤规则加载: 拦截关键字 {'启用' if keywords_enabled else '禁用'} ({len(ad_keywords)} 个), "
+                    f"文件名过滤 {'启用' if filename_filter_enabled else '禁用'} ({len(filename_filters)} 个), "
+                    f"文件名去重 {'启用' if filename_dedup_enabled else '禁用'} ({len(filename_dedup_rules)} 条正则规则)")
     except Exception as e:
         log_error(f"过滤规则加载失败: {e}")
         ad_keywords = []
@@ -242,10 +244,10 @@ def load_config():
         env_url_prefix = os.environ.get('URL_PREFIX', '').strip()
         if env_url_prefix:
             url_prefix = env_url_prefix.strip('/')
-            debug_print("URL前缀来源: 环境变量")
+            debug_print("[启动] URL前缀来源: 环境变量")
         else:
             url_prefix = str(config.get('url_prefix', '')).strip().strip('/')
-            debug_print("URL前缀来源: 配置文件")
+            debug_print("[启动] URL前缀来源: 配置文件")
 
         server_port = int(config.get('port', 8080))
 
@@ -360,10 +362,10 @@ def save_auth_key(new_key):
     管理网页修改 AUTH_KEY 与首启自动生成共用此入口；调用方负责令牌吊销。
     """
     global auth_key
-    from app_logger import log_info
+    from app_logger import debug_print
     admin = _read_admin_dict()
     admin['auth_key'] = new_key
     # 含认证密钥：文件权限限制为仅所有者可读写（0600）
     _write_json_atomic(ADMIN_CONFIG_FILE, admin, mode=0o600)
     auth_key = new_key
-    log_info(f"AUTH_KEY 已写回 {ADMIN_CONFIG_FILE}")
+    debug_print(f"[启动] AUTH_KEY 已写回配置文件: {ADMIN_CONFIG_FILE}")
