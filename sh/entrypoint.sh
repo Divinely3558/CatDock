@@ -6,12 +6,14 @@ echo "======================================"
 echo "  catdock 启动中..."
 echo "======================================"
 
-# 确保目录存在
-mkdir -p /home/downloader/config
+# 确保目录存在（user/ 为每用户配置目录：tasks.json / 日志 / filter_rules.json）
+mkdir -p /home/downloader/config /home/downloader/user /home/downloader/temp /home/downloader/downloads
 
 # 默认配置文件路径（镜像内置模板，含占位密码；运行时配置由挂载卷覆盖）
 DEFAULT_CONFIG="/home/downloader/config.example.json"
 TARGET_CONFIG="/home/downloader/config/config.json"
+DEFAULT_ADMIN_CONFIG="/home/downloader/admin_config.example.json"
+TARGET_ADMIN_CONFIG="/home/downloader/config/admin_config.json"
 DEFAULT_FILTER_RULES="/home/downloader/filter_rules.json"
 TARGET_FILTER_RULES="/home/downloader/config/filter_rules.json"
 
@@ -25,6 +27,18 @@ if [ ! -f "$TARGET_CONFIG" ]; then
     fi
 else
     echo "使用已存在的配置文件: $TARGET_CONFIG"
+fi
+
+# 如果目标管理员配置文件不存在，复制默认配置（auth_key 占位符首启自动生成）
+if [ ! -f "$TARGET_ADMIN_CONFIG" ]; then
+    if [ -f "$DEFAULT_ADMIN_CONFIG" ]; then
+        cp "$DEFAULT_ADMIN_CONFIG" "$TARGET_ADMIN_CONFIG"
+        echo "已复制默认管理员配置到: $TARGET_ADMIN_CONFIG"
+    else
+        echo "警告: 默认管理员配置文件不存在"
+    fi
+else
+    echo "使用已存在的管理员配置文件: $TARGET_ADMIN_CONFIG"
 fi
 
 # 如果目标过滤规则文件不存在，复制默认配置

@@ -1,8 +1,9 @@
 #!/usr/bin/env python3
-"""dedup - 下载去重内存缓存
+"""dedup - 下载去重内存缓存（按用户隔离）
 
-启动时从 success.log / failure.log 一次性载入，append_log 时通过
-note_log_entry() 增量更新，避免每次下载检查都同步遍历日志文件。
+每用户独立缓存（user/<名>/success.log、failure.log 惰性载入），
+note_log_entry() 写日志后增量更新，避免每次下载检查都遍历日志文件。
+用户删除后调用 drop_user_cache() 释放内存。
 """
 import os
 import json
@@ -12,111 +13,125 @@ import app_config as cfg
 from app_logger import debug_print, log_error
 from security import sanitize_url_for_log
 
-# 去重缓存（启动载入 + 写日志时增量更新）
+# 每用户去重缓存：user -> {'success_urls': set, 'failure_urls': set,
+#                          'success_names': [], 'failure_names': []}
 _dedup_lock = threading.Lock()
-_success_urls = set()       # success.log 中出现过的 URL（已规范化）
-_failure_urls = set()       # failure.log 中的 URL（启动清空后增量）
-_success_filenames = []     # success.log 中的 save_name 列表（前缀匹配）
-_failure_filenames = []     # failure.log 中的 save_name 列表
+_caches = {}
 
 
-def note_log_entry(log_file, save_name, unique_urls):
-    """append_log 写入日志后增量更新去重缓存。"""
+def _empty_cache():
+    return {'success_urls': set(), 'failure_urls': set(),
+            'success_names': [], 'failure_names': []}
+
+
+def _load_user_cache(user):
+    """从用户日志文件惰性载入去重缓存（调用方须持有 _dedup_lock）。"""
+    cache = _empty_cache()
+    for log_file, url_key, name_key in [
+        (cfg.user_success_log(user), 'success_urls', 'success_names'),
+        (cfg.user_failure_log(user), 'failure_urls', 'failure_names'),
+    ]:
+        if not os.path.exists(log_file):
+            continue
+        try:
+            with open(log_file, 'r', encoding='utf-8') as f:
+                for line in f:
+                    line = line.strip()
+                    if not line:
+                        continue
+                    try:
+                        entry = json.loads(line)
+                        if isinstance(entry, list) and len(entry) >= 3:
+                            # 格式: [时间, 文件名, url1, url2, ...]
+                            for u in entry[2:]:
+                                if isinstance(u, str) and u.strip():
+                                    cache[url_key].add(u.strip().rstrip('/'))
+                            sn = entry[1]
+                            if isinstance(sn, str) and sn:
+                                cache[name_key].append(sn)
+                    except json.JSONDecodeError:
+                        continue
+        except Exception as e:
+            log_error(f"载入去重缓存失败 {log_file}: {e}")
+    cache['_loaded'] = True
+    return cache
+
+
+def _get_cache(user):
+    """获取用户缓存（未载入时惰性载入）。user 为空时返回空结构。"""
+    if not user:
+        return _empty_cache()
+    cache = _caches.get(user)
+    if cache is None:
+        cache = _load_user_cache(user)
+        _caches[user] = cache
+    return cache
+
+
+def drop_user_cache(user):
+    """用户删除后释放其去重缓存。"""
+    if not user:
+        return
     with _dedup_lock:
-        if log_file == cfg.SUCCESS_LOG_FILE:
-            u_set, n_list = _success_urls, _success_filenames
-        elif log_file == cfg.FAILURE_LOG_FILE:
-            u_set, n_list = _failure_urls, _failure_filenames
-        else:
-            return
+        _caches.pop(user, None)
+
+
+def note_log_entry(user, kind, save_name, unique_urls):
+    """append_log 写入日志后增量更新去重缓存。
+
+    kind: 'success' / 'failure'；user 为空时不更新。
+    """
+    if not user or kind not in ('success', 'failure'):
+        return
+    with _dedup_lock:
+        cache = _get_cache(user)
+        url_set = cache[f'{kind}_urls']
+        name_list = cache[f'{kind}_names']
         for u in unique_urls:
-            u_set.add(u.strip().rstrip('/'))
+            url_set.add(u.strip().rstrip('/'))
         if save_name:
-            n_list.append(save_name)
+            name_list.append(save_name)
 
 
-def is_url_downloaded(url, check_failure=True):
-    """检查 URL 是否已下载过（命中成功或失败日志）。
+def is_url_downloaded(url, user=None, check_failure=True):
+    """检查 URL 是否已下载过（命中该用户的成功或失败日志）。
 
     Returns:
         (hit: bool, status: str | None) — status 为 'success' 或 'failure'
     """
     normalized_url = url.strip().rstrip('/')
-    debug_print(f"is_url_downloaded: URL={sanitize_url_for_log(normalized_url)[:80]}, check_failure={check_failure}")
+    debug_print(f"is_url_downloaded: user={user}, URL={sanitize_url_for_log(normalized_url)[:80]}, check_failure={check_failure}")
     with _dedup_lock:
-        if normalized_url in _success_urls:
+        cache = _get_cache(user)
+        if normalized_url in cache['success_urls']:
             debug_print("is_url_downloaded: 命中 success.log")
             return True, 'success'
-        if check_failure and normalized_url in _failure_urls:
+        if check_failure and normalized_url in cache['failure_urls']:
             debug_print("is_url_downloaded: 命中 failure.log")
             return True, 'failure'
     debug_print("is_url_downloaded: 未命中")
     return False, None
 
 
-def is_filename_downloaded(save_name, check_failure=True):
-    """same_video_by_filename 模式: 检查文件名是否已下载过（前缀匹配）。
+def is_filename_downloaded(save_name, user=None, check_failure=True):
+    """same_video_by_filename 模式: 检查文件名是否已下载过（前缀匹配，按用户隔离）。
 
     Returns:
         (hit: bool, status: str | None) — status 为 'success' 或 'failure'
     """
     if not save_name:
         return False, None
-    debug_print(f"is_filename_downloaded: name={save_name}, check_failure={check_failure}")
+    debug_print(f"is_filename_downloaded: user={user}, name={save_name}, check_failure={check_failure}")
     with _dedup_lock:
-        for name_list, status in [(_success_filenames, 'success'), (_failure_filenames, 'failure')]:
+        cache = _get_cache(user)
+        for name_key, status in [('success_names', 'success'), ('failure_names', 'failure')]:
             if status == 'failure' and not check_failure:
                 continue
-            for entry_save_name in name_list:
+            for entry_save_name in cache[name_key]:
                 if entry_save_name == save_name or \
                    entry_save_name.startswith(save_name + '.') or \
                    save_name.startswith(entry_save_name):
                     debug_print(f"is_filename_downloaded: 命中{status}.log")
                     return True, status
-    debug_print("is_filename_downloaded: 未命中")
+    debug_print(f"is_filename_downloaded: 未命中")
     return False, None
-
-
-def init_dedup_cache():
-    """启动时从日志一次性载入去重缓存。
-
-    须在清空 failure.log 之后、resume_tasks 之前调用（resume_tasks 会调用去重检查）。
-    """
-    with _dedup_lock:
-        _success_urls.clear()
-        _failure_urls.clear()
-        _success_filenames.clear()
-        _failure_filenames.clear()
-        for log_file, url_set, name_list in [
-            (cfg.SUCCESS_LOG_FILE, _success_urls, _success_filenames),
-            (cfg.FAILURE_LOG_FILE, _failure_urls, _failure_filenames),
-        ]:
-            if not os.path.exists(log_file):
-                continue
-            try:
-                with open(log_file, 'r', encoding='utf-8') as f:
-                    for line in f:
-                        line = line.strip()
-                        if not line:
-                            continue
-                        try:
-                            entry = json.loads(line)
-                            if isinstance(entry, list) and len(entry) >= 2:
-                                for u in entry[2:] if len(entry) >= 3 else []:
-                                    if isinstance(u, str) and u.strip():
-                                        url_set.add(u.strip().rstrip('/'))
-                                sn = entry[1]
-                                if isinstance(sn, str) and sn:
-                                    name_list.append(sn)
-                            elif isinstance(entry, dict):
-                                u = entry.get('url', '')
-                                if isinstance(u, str) and u.strip():
-                                    url_set.add(u.strip().rstrip('/'))
-                                sn = entry.get('save_name', '')
-                                if isinstance(sn, str) and sn:
-                                    name_list.append(sn)
-                        except json.JSONDecodeError:
-                            continue
-            except Exception as e:
-                log_error(f"载入去重缓存失败 {log_file}: {e}")
-    debug_print(f"去重缓存已载入: success urls={len(_success_urls)} filenames={len(_success_filenames)}; failure urls={len(_failure_urls)} filenames={len(_failure_filenames)}")

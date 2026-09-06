@@ -25,20 +25,33 @@ from api_server import start_server, register_signal_handlers
 
 def main():
     cfg.load_config()
-    # 初始化数据库（建表：封禁 IP / 认证失败计数 / 用户）
+    # 首启初始化 AUTH_KEY：config.json 为空/占位符时生成随机密钥并写回，
+    # 之后可在管理网页热更新（无需重启容器）
+    _initial_auth_key = None
+    if not cfg.auth_key or cfg.auth_key == cfg.AUTH_KEY_PLACEHOLDER:
+        _initial_auth_key = cfg.generate_random_key()
+        cfg.save_auth_key(_initial_auth_key)
+    # 初始化数据库（建表：封禁 IP / 认证失败计数 / 用户+角色 / 令牌）
     data_db.init_db()
-    # 无用户时不退出：服务先启动，便于通过 `docker exec ... userctl add <用户名>` 初始化；
-    # 但在创建首个用户前，api_server 会拒绝所有业务请求（/health 除外）。
+    # 首启初始化管理员：无 role='admin' 时创建默认 admin（14 位随机密码）
+    _admin_created, _admin_pw = data_db.ensure_default_admin()
     _user_count = data_db.user_count()
     cleanup_all_copy_files()
 
-    # 启动时清空失败日志，允许重新下载之前失败的 URL
-    if os.path.exists(cfg.FAILURE_LOG_FILE):
-        try:
-            os.remove(cfg.FAILURE_LOG_FILE)
-            print("已清空失败日志，允许重新下载之前失败的 URL")
-        except Exception as e:
-            print(f"清空失败日志失败: {e}")
+    # 启动时清空各用户的失败日志，允许重新下载之前失败的 URL
+    # （日志按用户隔离存放在 user/<名>/failure.log）
+    _cleared_failure = 0
+    if os.path.isdir(cfg.USER_DIR):
+        for _u in os.listdir(cfg.USER_DIR):
+            _flog = cfg.user_failure_log(_u)
+            if os.path.exists(_flog):
+                try:
+                    os.remove(_flog)
+                    _cleared_failure += 1
+                except Exception as e:
+                    print(f"清空失败日志失败: {_flog} - {e}")
+    if _cleared_failure:
+        print("已清空失败日志，允许重新下载之前失败的 URL")
 
     register_signal_handlers()
 
@@ -54,7 +67,6 @@ def main():
 ╚════════════════════════════════════════════════════════╝
 
   📡 API 端口: {port}
-  📤 输出格式: {cfg.output_format}
   🔗 URL前缀: {cfg.url_prefix}
   🛡️ SSRF防护: {'启用' if cfg.ssrf_protection else '关闭'}
   📊 最大并发: {cfg.max_concurrent_tasks}
@@ -75,7 +87,8 @@ def main():
       "userAgent": "${{userAgent}}",
       "key": "<你的AUTH_KEY>",
       "user": "<你的user>",
-      "password": "<你的password>"
+      "password": "<你的password>",
+      "format": "mp4"
     }}
 
 ══════════════════════════ API 接口 ══════════════════════════
@@ -86,6 +99,17 @@ def main():
 ╚══════════════════════════════════════════════════════════╝
 """
     print(banner)
+
+    # 首启凭据仅在生成时输出一次（banner 外，避免改动框线区块）
+    if _initial_auth_key:
+        print(f"首次启动：已自动生成 AUTH_KEY 并写入 admin_config.json: {_initial_auth_key}")
+        print("请妥善保存；可在管理网页修改 AUTH_KEY（修改后全员需用新 KEY 重新登录）")
+    if _admin_created:
+        print(f"首次启动：已创建默认管理员账户 admin，初始密码: {_admin_pw}")
+        print("请尽快登录管理网页或使用 adminctl password 命令修改密码")
+    elif data_db.admin_count() == 0:
+        print("警告: 用户名 admin 已被普通用户占用，未自动创建管理员")
+        print("请在容器内执行 adminctl add <用户名> 创建管理员账户")
 
     start_server(port)
 

@@ -22,24 +22,54 @@ import app_config as cfg
 from app_logger import log_info, log_warning, log_error, debug_print
 from task_store import save_tasks, append_log
 from dedup import is_url_downloaded, is_filename_downloaded
-from filters import filter_filename
+from filters import filter_filename, get_ad_keywords, reload_user_rules
 from security import sanitize_url_for_log
 
 
-# ---- per-user 下载目录（线程级上下文）----
+# ---- per-user 上下文（线程级）----
 # 下载在后台线程执行，请求线程的上下文不会自动传递；
-# 在 run_download(请求线程) 与各 worker 入口显式设置，扫描类函数统一读 get_download_dir()。
-_download_dir_local = threading.local()
+# 在 run_download(请求线程) 与各 worker 入口显式设置，扫描类函数统一读取。
+# 携带：用户名（过滤规则/日志/去重按用户隔离）、下载目录、缓存目录
+_ctx = threading.local()
+
+
+def _set_thread_context(user=None, download_dir=None, temp_dir=None):
+    """设置当前线程的 per-user 上下文"""
+    _ctx.user = user
+    _ctx.download_dir = download_dir
+    _ctx.temp_dir = temp_dir
 
 
 def _set_thread_download_dir(path):
-    """设置当前线程的下载目录（per-user）"""
-    _download_dir_local.path = path
+    """兼容入口：仅设置下载目录（启动期扫描等场景）"""
+    _ctx.download_dir = path
 
 
 def get_download_dir():
     """获取当前线程的下载目录；未设置时回退到基础 DOWNLOAD_DIR"""
-    return getattr(_download_dir_local, 'path', None) or cfg.DOWNLOAD_DIR
+    return getattr(_ctx, 'download_dir', None) or cfg.DOWNLOAD_DIR
+
+
+def get_temp_dir():
+    """获取当前线程的下载缓存目录；未设置时回退到基础 TEMP_DIR"""
+    return getattr(_ctx, 'temp_dir', None) or cfg.TEMP_DIR
+
+
+def get_current_user():
+    """获取当前线程的下载用户名；未设置时返回 None"""
+    return getattr(_ctx, 'user', None)
+
+
+def _inherit_task_context(task_id):
+    """后台 worker 继承任务的 per-user 上下文（下载目录/缓存目录/用户名）"""
+    with cfg.tasks_lock:
+        task = cfg.tasks.get(task_id)
+    if task is None:
+        return
+    user = task.get('user') or 'default'
+    _set_thread_context(user,
+                        task.get('_download_dir') or os.path.join(cfg.DOWNLOAD_DIR, user),
+                        cfg.user_temp_dir(user))
 
 
 FORMAT_MAP = {
@@ -165,7 +195,7 @@ def find_existing_source_file(base_name):
 
 def cleanup_residue(base_name, exclude_file=None, preserve_source=True):
     """清理下载完成后残留的临时文件、文件夹和 .tmp 文件"""
-    for dir_to_clean in [get_download_dir(), cfg.TEMP_DIR]:
+    for dir_to_clean in [get_download_dir(), get_temp_dir()]:
         if not os.path.exists(dir_to_clean):
             continue
         for item in os.listdir(dir_to_clean):
@@ -222,9 +252,13 @@ def _check_network_ready(max_wait=30):
 
 
 def _build_m3u8_cmd(url, base_name, referer=None, cookie=None, user_agent=None):
-    """构建 N_m3u8DL-RE 下载命令（resume_tasks 和 run_download 共用）"""
+    """构建 N_m3u8DL-RE 下载命令（resume_tasks 和 run_download 共用）。
+
+    缓存目录与广告关键字取当前线程 per-user 上下文（缓存按用户隔离、
+    广告关键字按用户各自的 filter_rules.json）。
+    """
     cmd = [cfg.N_M3U8DL, url,
-           '--tmp-dir', cfg.TEMP_DIR,
+           '--tmp-dir', get_temp_dir(),
            '--save-dir', get_download_dir(),
            '--ffmpeg-binary-path', cfg.FFMPEG_PATH,
            '--save-name', base_name,
@@ -235,8 +269,9 @@ def _build_m3u8_cmd(url, base_name, referer=None, cookie=None, user_agent=None):
         cmd.extend(['--cookie', cookie])
     if user_agent:
         cmd.extend(['--user-agent', user_agent])
-    if cfg.keywords_enabled and cfg.ad_keywords:
-        for keyword in cfg.ad_keywords:
+    ad_keywords = get_ad_keywords(get_current_user())
+    if ad_keywords:
+        for keyword in ad_keywords:
             cmd.extend(['--ad-keyword', keyword])
     cmd.extend(['--no-log'])
     return cmd
@@ -635,9 +670,14 @@ def has_any_existing_file(base_name):
             if item == base_name:
                 return True, item_path
             file_size = os.path.getsize(item_path)
-            if file_size >= cfg.MIN_FILE_SIZE_SMALL:
-                if copy_pattern.match(item) or is_video_file(item):
-                    return True, item_path
+            # .copy 重复成品：任一大小都视为已有成品；
+            # 但 .mp4/.mkv 视频必须 ≥ MIN_FILE_SIZE 才算成品——
+            # 否则直链视频（curl 断点续传）下载到一半的小分片（几十 KB）
+            # 会被误判为“已完成”而跳过恢复，导致任务被错误标记成功。
+            if copy_pattern.match(item):
+                return True, item_path
+            if is_video_file(item) and file_size >= cfg.MIN_FILE_SIZE:
+                return True, item_path
     return False, None
 
 
@@ -723,7 +763,13 @@ def cleanup_copy_files(base_name):
                     log_info(f"清理重复文件失败: {item_path} - {e}")
 
 
-def _finish_task(task_id, success):
+def _finish_task(task_id, success, write_log=True):
+    """任务结束处理：写成功/失败日志 → 从内存删除任务 → 持久化。
+
+    write_log=False 用于重启恢复时“URL 已存在于日志”的清理分支：
+    该任务在历史上已写过日志（is_url_downloaded 命中即证明），
+    无需重复追加一条记录，只需把残留的任务记录从列表/磁盘清除。
+    """
     task_data = None
     with cfg.tasks_lock:
         if task_id in cfg.tasks:
@@ -749,15 +795,18 @@ def _finish_task(task_id, success):
         if task_id not in cfg.tasks:
             return
         # 在删除任务前先写入日志，防止竞态条件导致重复下载
-        log_file = cfg.SUCCESS_LOG_FILE if success else cfg.FAILURE_LOG_FILE
-        try:
-            append_log(log_file, task_data)
-            debug_print(f"任务日志已写入: {task_id}, success={success}, log_file={log_file}")
-        except Exception as e:
-            log_error(f"写入日志失败，任务保留在列表中: {task_id} - {e}")
-            debug_print(f"写入日志失败，任务保留在列表中: {task_id} - {e}")
-            # 日志写入失败，保留任务以便重启后恢复
-            return
+        # 日志按用户隔离：user/<名>/success.log 或 failure.log
+        user = task_data.get('user') or 'default'
+        if write_log:
+            log_file = cfg.user_success_log(user) if success else cfg.user_failure_log(user)
+            try:
+                append_log(log_file, task_data, 'success' if success else 'failure')
+                debug_print(f"任务日志已写入: {task_id}, success={success}, log_file={log_file}")
+            except Exception as e:
+                log_error(f"写入日志失败，任务保留在列表中: {task_id} - {e}")
+                debug_print(f"写入日志失败，任务保留在列表中: {task_id} - {e}")
+                # 日志写入失败，保留任务以便重启后恢复
+                return
         del cfg.tasks[task_id]
         save_tasks(force=True)
         debug_print(f"任务已删除: {task_id}, 剩余任务数={len(cfg.tasks)}")
@@ -778,11 +827,8 @@ def _run_same_video_group_worker(task_id, base_name, output_format=None):
     """
     debug_print(f"[多链接调度] 启动视频组任务 {task_id}: {base_name}")
 
-    # 继承 per-user 下载目录（后台线程 thread-local 默认为空）
-    with cfg.tasks_lock:
-        _td = cfg.tasks.get(task_id)
-        if _td and _td.get('_download_dir'):
-            _set_thread_download_dir(_td['_download_dir'])
+    # 继承 per-user 上下文（后台线程 thread-local 默认为空）
+    _inherit_task_context(task_id)
 
     with cfg.video_groups_lock:
         group = cfg.video_groups.get(base_name)
@@ -949,11 +995,8 @@ def _run_same_video_group_worker(task_id, base_name, output_format=None):
 
 
 def _run_direct_download_worker(task_id, url, output_file, referer, cookie, user_agent, initial_retry_count=0):
-    # 继承 per-user 下载目录（后台线程 thread-local 默认为空）
-    with cfg.tasks_lock:
-        _td = cfg.tasks.get(task_id)
-        if _td and _td.get('_download_dir'):
-            _set_thread_download_dir(_td['_download_dir'])
+    # 继承 per-user 上下文（后台线程 thread-local 默认为空）
+    _inherit_task_context(task_id)
     try:
         cmd = _build_curl_cmd(url, output_file, referer, cookie, user_agent)
 
@@ -1053,11 +1096,8 @@ def _run_direct_download_worker(task_id, url, output_file, referer, cookie, user
 
 
 def _run_worker(task_id, cmd, base_name, output_file, target_format, initial_retry_count=0):
-    # 继承 per-user 下载目录（后台线程 thread-local 默认为空）
-    with cfg.tasks_lock:
-        _td = cfg.tasks.get(task_id)
-        if _td and _td.get('_download_dir'):
-            _set_thread_download_dir(_td['_download_dir'])
+    # 继承 per-user 上下文（后台线程 thread-local 默认为空）
+    _inherit_task_context(task_id)
     try:
         dl_result = _run_download_with_retry(cmd, task_id, max_retries=5, initial_retry_count=initial_retry_count, base_name=base_name)
         if dl_result in ('paused', 'deleted'):
@@ -1127,33 +1167,31 @@ def _resume_single_task(task):
     user_agent = task.get('_user_agent')
     retry_count = task.get('_retry_count', 0)
 
-    # 设置 per-user 下载目录上下文（恢复期文件检查在主线程执行）
-    _ddir = task.get('_download_dir')
-    if not _ddir:
-        _u = task.get('user')
-        if _u:
-            _ddir = os.path.join(cfg.DOWNLOAD_DIR, _u)
-    if _ddir:
-        _set_thread_download_dir(_ddir)
+    # 设置 per-user 上下文（恢复期文件检查在主线程执行）
+    user = task.get('user') or 'default'
+    _ddir = task.get('_download_dir') or os.path.join(cfg.DOWNLOAD_DIR, user)
+    _set_thread_context(user, _ddir, cfg.user_temp_dir(user))
 
     normalized_url = url.strip().rstrip('/')
 
     debug_print(f"恢复任务检查: task_id={task_id}, save_name={save_name}, url={sanitize_url_for_log(normalized_url)[:100]}...")
 
-    url_hit, url_status = is_url_downloaded(url)
+    url_hit, url_status = is_url_downloaded(url, user=user)
     if url_hit:
         display_name = save_name or task_id
         if url_status == 'success':
-            log_info(f"文件{display_name}下载成功")
+            log_info(f"文件{display_name}已下载完成，清理残留任务记录")
         else:
-            log_info(f"文件{display_name}下载失败")
-        _finish_task(task_id, True)
+            log_info(f"文件{display_name}下载失败，清理残留任务记录")
+        # URL 已存在于成功/失败日志（is_url_downloaded 命中即证明），
+        # 仅清除残留任务记录，不重复追加日志
+        _finish_task(task_id, True, write_log=False)
         return
 
     base_name = save_name or f"download_{task_id}"
-    # 应用文件名过滤
+    # 应用文件名过滤（按用户规则）
     original_name = base_name
-    base_name, _ = filter_filename(base_name)
+    base_name, _ = filter_filename(base_name, user=user)
     if base_name != original_name:
         # 更新任务中的 save_name 为过滤后的名称
         with cfg.tasks_lock:
@@ -1183,10 +1221,11 @@ def _resume_single_task(task):
         _finish_task(task_id, True)
         return
 
-    if os.path.exists(cfg.TEMP_DIR):
-        temp_files = [f for f in os.listdir(cfg.TEMP_DIR) if match_base_name(f, base_name)]
+    user_temp = get_temp_dir()
+    if os.path.exists(user_temp):
+        temp_files = [f for f in os.listdir(user_temp) if match_base_name(f, base_name)]
         for temp_file in temp_files:
-            temp_path = os.path.join(cfg.TEMP_DIR, temp_file)
+            temp_path = os.path.join(user_temp, temp_file)
             try:
                 if temp_file.endswith('.tmp'):
                     os.remove(temp_path)
@@ -1297,19 +1336,16 @@ def delete_task(task_id):
 
     save_tasks(force=True)
 
-    # 删除已下载文件：下载目录（per-user）+ DOWNLOAD_DIR 根（旧恢复任务无 user 记录时的回退位置）+ 临时目录
-    user_dir = os.path.join(cfg.DOWNLOAD_DIR, task.get('user') or 'default')
+    # 删除已下载文件：该用户的下载目录 + 缓存目录（temp/<用户>）
+    user = task.get('user') or 'default'
     removed = 0
-    for target_dir in [user_dir, cfg.DOWNLOAD_DIR, cfg.TEMP_DIR]:
+    for target_dir in [os.path.join(cfg.DOWNLOAD_DIR, user), cfg.user_temp_dir(user)]:
         if not os.path.exists(target_dir):
             continue
         for item in os.listdir(target_dir):
             if not match_base_name(item, base_name):
                 continue
             item_path = os.path.join(target_dir, item)
-            # 安全防护：DOWNLOAD_DIR 根目录下的子目录是用户隔离目录，不得整目录删除
-            if os.path.abspath(target_dir) == os.path.abspath(cfg.DOWNLOAD_DIR) and os.path.isdir(item_path):
-                continue
             try:
                 if os.path.isdir(item_path):
                     shutil.rmtree(item_path)
@@ -1327,15 +1363,17 @@ def run_download(url, save_name=None, referer=None, cookie=None, user_agent=None
     normalized_url = url.strip().rstrip('/')
     # 解析本次任务的输出格式：网页可逐任务指定，不传时回退到 config.json 全局设置
     fmt = output_format if output_format in ('mp4', 'mkv') else cfg.output_format
-    # per-user 下载目录：/home/downloader/downloads/<用户名>
+    # per-user 目录：下载 /home/downloader/downloads/<用户名>，缓存 /home/downloader/temp/<用户名>
     if not user:
         user = 'default'
     download_dir = os.path.join(cfg.DOWNLOAD_DIR, user)
+    user_temp_dir = cfg.user_temp_dir(user)
     try:
         os.makedirs(download_dir, exist_ok=True)
+        os.makedirs(user_temp_dir, exist_ok=True)
     except Exception as e:
-        debug_print(f"创建用户下载目录失败: {e}")
-    _set_thread_download_dir(download_dir)
+        debug_print(f"创建用户目录失败: {e}")
+    _set_thread_context(user, download_dir, user_temp_dir)
     debug_print(f"run_download: URL={sanitize_url_for_log(normalized_url)[:100]}..., save_name={save_name}, user={user}")
 
     # ---- same_video_by_filename 模式分支 ----
@@ -1343,10 +1381,10 @@ def run_download(url, save_name=None, referer=None, cookie=None, user_agent=None
         # 计算 base_name（标准过滤后的文件名）作为"同一视频"的唯一键
         task_id_tmp = str(uuid.uuid4())[:8]
         base_name_raw = save_name or f"download_{task_id_tmp}"
-        base_name, ad_count = filter_filename(base_name_raw)
+        base_name, ad_count = filter_filename(base_name_raw, user=user)
 
-        # 1) 检查日志：文件名是否已成功/失败记录过
-        name_hit, name_status = is_filename_downloaded(base_name)
+        # 1) 检查日志：文件名是否已成功/失败记录过（按用户隔离）
+        name_hit, name_status = is_filename_downloaded(base_name, user=user)
         if name_hit:
             debug_print(f"[同视频模式] 文件名已下载记录过，跳过下载: {base_name}, status={name_status}")
             if name_status == 'success':
@@ -1435,7 +1473,7 @@ def run_download(url, save_name=None, referer=None, cookie=None, user_agent=None
         return task_id, False
 
     # ---- 原有逻辑 (same_video_by_filename 关闭时) ----
-    url_hit, url_status = is_url_downloaded(url)
+    url_hit, url_status = is_url_downloaded(url, user=user)
     if url_hit:
         debug_print(f"URL已在日志中，跳过下载, status={url_status}")
         display_name = save_name or normalized_url
@@ -1464,8 +1502,8 @@ def run_download(url, save_name=None, referer=None, cookie=None, user_agent=None
     task_id = str(uuid.uuid4())[:8]
     base_name = save_name or f"download_{task_id}"
 
-    # 应用文件名过滤
-    base_name, ad_count = filter_filename(base_name)
+    # 应用文件名过滤（按用户规则）
+    base_name, ad_count = filter_filename(base_name, user=user)
 
     skip, hit_path = _check_local_file_exists_skip(base_name)
     if skip:
@@ -1532,8 +1570,9 @@ def run_download(url, save_name=None, referer=None, cookie=None, user_agent=None
     else:
         cmd = _build_m3u8_cmd(url, base_name, referer, cookie, user_agent)
 
-        if cfg.keywords_enabled and cfg.ad_keywords:
-            log_info(f"已添加 {len(cfg.ad_keywords)} 个广告关键字过滤")
+        _user_kws = get_ad_keywords(user)
+        if _user_kws:
+            log_info(f"已添加 {len(_user_kws)} 个广告关键字过滤")
 
         thread = threading.Thread(target=_run_worker, args=(task_id, cmd, base_name, output_file, fmt), daemon=True)
         thread.start()
@@ -1578,4 +1617,39 @@ def cleanup_all_copy_files():
         except Exception:
             pass
     # 清理后重置上下文，回退到基础目录
-    _set_thread_download_dir(None)
+    _set_thread_context(None, None, None)
+
+
+def cleanup_user_data(username):
+    """删除用户的全部数据：终止其所有任务（杀进程/移出任务表）并删除三个目录。
+
+    目录：user/<名>/（配置与日志）、temp/<名>/（缓存）、downloads/<名>/（成品）。
+    返回 (终止任务数, 是否全部清理成功)。
+    """
+    killed = 0
+    with cfg.tasks_lock:
+        user_task_ids = [t['id'] for t in cfg.tasks.values() if t.get('user') == username]
+    for task_id in user_task_ids:
+        try:
+            delete_task(task_id)
+            killed += 1
+        except Exception as e:
+            log_error(f"删除用户任务失败: {task_id} - {e}")
+
+    all_ok = True
+    for target_dir in [cfg.user_config_dir(username), cfg.user_temp_dir(username),
+                       os.path.join(cfg.DOWNLOAD_DIR, username)]:
+        if not os.path.exists(target_dir):
+            continue
+        try:
+            shutil.rmtree(target_dir)
+        except Exception as e:
+            all_ok = False
+            log_error(f"删除用户目录失败: {target_dir} - {e}")
+
+    # 释放该用户的去重缓存与过滤规则缓存
+    import dedup
+    dedup.drop_user_cache(username)
+    reload_user_rules(username)
+    log_info(f"已删除用户 {username} 的全部数据（终止任务 {killed} 个，目录清理{'完成' if all_ok else '存在失败项'}）")
+    return killed, all_ok

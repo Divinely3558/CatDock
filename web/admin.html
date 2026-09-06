@@ -1,0 +1,1452 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <link rel="icon" href="../favicon.ico" />
+    <title>CatDock 管理控制台</title>
+    <style>
+      /* ===== 默认主题（墨绿 · 亮色），与下载控制台默认风格一致 ===== */
+      :root {
+        --bg: #f0f7f4;
+        --card: #ffffff;
+        --border: #d1e7dc;
+        --primary-soft: #ecfdf5;
+        --code-bg: #f3f9f6;
+        --input-bg: #fff;
+        --ghost-bg: #fff;
+        --ghost-hover: #f8fafc;
+        --mask: rgba(17, 24, 39, 0.45);
+        --text: #1f2937;
+        --text-2: #6b7280;
+        --text-3: #9ca3af;
+        --radius: 12px;
+        --shadow:
+          0 1px 3px rgba(16, 24, 40, 0.08), 0 1px 2px rgba(16, 24, 40, 0.04);
+        --primary: #059669;
+        --primary-hover: #047857;
+        --green: #059669;
+        --green-soft: #ecfdf5;
+        --amber: #d97706;
+        --amber-soft: #fffbeb;
+        --red: #dc2626;
+        --red-soft: #fef2f2;
+      }
+
+      * {
+        box-sizing: border-box;
+        margin: 0;
+        padding: 0;
+      }
+      body {
+        font-family:
+          -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC",
+          "Hiragino Sans GB", "Microsoft YaHei", sans-serif;
+        background: var(--bg);
+        color: var(--text);
+        font-size: 14px;
+        line-height: 1.6;
+        min-height: 100vh;
+      }
+      input[type="text"],
+      input[type="password"] {
+        width: 100%;
+        padding: 9px 12px;
+        border: 1px solid var(--border);
+        border-radius: 10px;
+        font-size: 14px;
+        font-family: inherit;
+        color: var(--text);
+        background: var(--input-bg);
+        outline: none;
+        transition:
+          border-color 0.15s,
+          box-shadow 0.15s;
+      }
+      input:focus {
+        border-color: var(--primary);
+        box-shadow: 0 0 0 3px rgba(5, 150, 105, 0.14);
+      }
+
+      /* ---------- 顶栏（与下载控制台一致） ---------- */
+      .topbar {
+        background: var(--card);
+        border-bottom: 1px solid var(--border);
+        position: sticky;
+        top: 0;
+        z-index: 10;
+      }
+      .topbar-inner {
+        max-width: 1080px;
+        margin: 0 auto;
+        padding: 12px 20px;
+        display: flex;
+        align-items: center;
+        gap: 12px;
+      }
+      .brand {
+        font-size: 17px;
+        font-weight: 600;
+        user-select: none;
+      }
+      .brand .logo {
+        margin-right: 4px;
+      }
+      .brand .tag {
+        font-size: 11px;
+        font-weight: 600;
+        color: var(--amber);
+        background: var(--amber-soft);
+        border-radius: 6px;
+        padding: 1px 7px;
+        margin-left: 8px;
+      }
+      .topbar .spacer {
+        flex: 1;
+      }
+      .user-chip {
+        font-size: 13px;
+        color: var(--primary);
+        background: var(--primary-soft);
+        padding: 4px 10px;
+        border-radius: 999px;
+        font-weight: 500;
+        cursor: pointer;
+        user-select: none;
+      }
+      .user-chip::after {
+        content: "▾";
+        margin-left: 4px;
+        font-size: 10px;
+        opacity: 0.7;
+      }
+      .user-menu-wrap {
+        position: relative;
+        display: inline-flex;
+      }
+      .user-menu {
+        display: none;
+        position: absolute;
+        right: 0;
+        top: calc(100% + 8px);
+        min-width: 120px;
+        background: var(--card);
+        border: 1px solid var(--border);
+        border-radius: 10px;
+        box-shadow: var(--shadow);
+        padding: 6px;
+        z-index: 30;
+      }
+      .user-menu.show {
+        display: block;
+      }
+      .user-menu-item {
+        display: block;
+        width: 100%;
+        text-align: left;
+        padding: 8px 12px;
+        border: none;
+        border-radius: 8px;
+        background: none;
+        font-size: 13px;
+        font-family: inherit;
+        color: var(--text-2);
+        cursor: pointer;
+        white-space: nowrap;
+      }
+      .user-menu-item:hover {
+        background: var(--ghost-bg);
+        color: var(--primary);
+      }
+      .user-menu-item.danger {
+        color: var(--red);
+      }
+      .user-menu-item.danger:hover {
+        background: var(--red-soft);
+        color: var(--red);
+      }
+
+      /* ---------- 主体（与下载控制台一致） ---------- */
+      .container {
+        max-width: 1080px;
+        margin: 0 auto;
+        padding: 20px;
+        display: grid;
+        grid-template-columns: minmax(0, 1fr);
+        gap: 16px;
+      }
+      .card {
+        background: var(--card);
+        border: 1px solid var(--border);
+        border-radius: var(--radius);
+        box-shadow: var(--shadow);
+        padding: 18px 20px;
+        display: flex;
+        flex-direction: column;
+      }
+      .card-title {
+        font-size: 15px;
+        font-weight: 600;
+        margin-bottom: 14px;
+      }
+      .card .sub {
+        color: var(--text-2);
+        font-size: 12px;
+        margin-bottom: 14px;
+      }
+
+      /* ---------- 命令行参考 ---------- */
+      .cmd-row {
+        display: grid;
+        grid-template-columns: repeat(3, minmax(0, 1fr));
+        gap: 12px;
+      }
+      .cmd-group {
+        display: flex;
+        flex-direction: column;
+      }
+      .cmd-title {
+        font-size: 13px;
+        font-weight: 600;
+        color: var(--text);
+        margin-bottom: 6px;
+      }
+      .cmd-list {
+        background: var(--code-bg);
+        border-radius: 8px;
+        padding: 10px 12px;
+        display: flex;
+        flex-direction: column;
+        gap: 4px;
+        flex: 1;
+      }
+      .cmd-item {
+        display: flex;
+        flex-direction: column;
+        gap: 2px;
+      }
+      .cmd-desc {
+        font-size: 12px;
+        color: var(--text-secondary);
+        line-height: 1.4;
+      }
+      .cmd-list code {
+        font-family: "SF Mono", "Cascadia Code", Consolas, monospace;
+        font-size: 13px;
+        color: var(--primary);
+        background: var(--card);
+        padding: 1px 6px;
+        border-radius: 4px;
+        border: 1px solid var(--border);
+        white-space: nowrap;
+        display: inline-block;
+        align-self: flex-start;
+      }
+
+      /* ---------- 按钮（与下载控制台一致） ---------- */
+      .btn {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        gap: 6px;
+        padding: 9px 16px;
+        border: 1px solid transparent;
+        border-radius: 10px;
+        font-size: 14px;
+        font-weight: 500;
+        font-family: inherit;
+        cursor: pointer;
+        transition:
+          background 0.15s,
+          border-color 0.15s,
+          color 0.15s;
+        white-space: nowrap;
+      }
+      .btn-primary {
+        background: var(--primary);
+        color: #fff;
+      }
+      .btn-primary:hover {
+        background: var(--primary-hover);
+      }
+      .btn-ghost {
+        background: var(--ghost-bg);
+        color: var(--text-2);
+        border-color: var(--border);
+      }
+      .btn-ghost:hover {
+        background: var(--ghost-hover);
+        color: var(--text);
+      }
+      .btn-danger {
+        background: var(--red);
+        color: #fff;
+      }
+      .btn-danger:hover {
+        filter: brightness(1.12);
+      }
+      .btn-block {
+        width: 100%;
+      }
+      .btn.small {
+        padding: 5px 10px;
+        font-size: 12px;
+        border-radius: 8px;
+      }
+      .btn:disabled {
+        opacity: 0.6;
+        cursor: not-allowed;
+      }
+
+      /* ---------- 表格 ---------- */
+      .table-wrap {
+        overflow-x: auto;
+      }
+      table {
+        width: 100%;
+        border-collapse: collapse;
+        font-size: 13px;
+      }
+      th,
+      td {
+        text-align: left;
+        padding: 9px 10px;
+        border-bottom: 1px solid var(--border);
+        white-space: nowrap;
+      }
+      th {
+        color: var(--text-2);
+        font-weight: 600;
+        font-size: 12px;
+      }
+      td.actions {
+        display: flex;
+        gap: 6px;
+      }
+      .badge {
+        display: inline-block;
+        padding: 1px 8px;
+        border-radius: 999px;
+        font-size: 11px;
+        font-weight: 600;
+      }
+      .badge.admin {
+        color: var(--amber);
+        background: var(--amber-soft);
+      }
+      .badge.user {
+        color: var(--green);
+        background: var(--green-soft);
+      }
+      .badge.off {
+        color: var(--red);
+        background: var(--red-soft);
+      }
+      .badge.on {
+        color: var(--text-2);
+        background: var(--code-bg);
+      }
+
+      label.field {
+        display: block;
+        margin-bottom: 13px;
+      }
+      label.field > span {
+        display: block;
+        font-size: 13px;
+        font-weight: 500;
+        margin-bottom: 5px;
+      }
+      label.field > span .req {
+        color: var(--red);
+        margin-left: 2px;
+      }
+      .key-row {
+        display: flex;
+        gap: 8px;
+      }
+      .key-row input {
+        flex: 1;
+        min-width: 0;
+      }
+      .warn-box {
+        background: var(--amber-soft);
+        color: var(--amber);
+        border-radius: 10px;
+        padding: 10px 13px;
+        font-size: 12px;
+        margin-bottom: 13px;
+      }
+
+      /* ---------- 弹层 ---------- */
+      .mask {
+        position: fixed;
+        inset: 0;
+        background: var(--mask);
+        display: none;
+        align-items: center;
+        justify-content: center;
+        z-index: 100;
+        padding: 20px;
+      }
+      .mask.show {
+        display: flex;
+      }
+      .modal {
+        background: var(--card);
+        border: 1px solid var(--border);
+        border-radius: var(--radius);
+        box-shadow: var(--shadow);
+        width: 100%;
+        max-width: 400px;
+        padding: 22px 20px;
+      }
+      .modal h3 {
+        font-size: 15px;
+        font-weight: 700;
+        margin-bottom: 8px;
+      }
+      .modal .msg {
+        color: var(--text-2);
+        font-size: 13px;
+        margin-bottom: 16px;
+        word-break: break-all;
+      }
+      .modal .btns {
+        display: flex;
+        justify-content: flex-end;
+        gap: 9px;
+        margin-top: 6px;
+      }
+
+      .toast {
+        position: fixed;
+        left: 50%;
+        bottom: 34px;
+        transform: translateX(-50%) translateY(20px);
+        background: var(--card);
+        border: 1px solid var(--border);
+        color: var(--text);
+        border-radius: 10px;
+        padding: 9px 18px;
+        font-size: 13px;
+        box-shadow: var(--shadow);
+        opacity: 0;
+        pointer-events: none;
+        transition:
+          opacity 0.2s,
+          transform 0.2s;
+        z-index: 200;
+        max-width: 90vw;
+      }
+      .toast.show {
+        opacity: 1;
+        transform: translateX(-50%) translateY(0);
+      }
+      .toast.err {
+        border-color: var(--red);
+        color: var(--red);
+      }
+
+      /* ---------- 过滤规则编辑器（与下载控制台一致） ---------- */
+      .filter-editor {
+        display: flex;
+        flex-direction: column;
+        gap: 0;
+      }
+      .filter-editor .fe-section {
+        border: 1px solid var(--border);
+        border-radius: 10px;
+        padding: 12px 14px;
+        margin-bottom: 12px;
+      }
+      .filter-editor .fe-head {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        flex-wrap: wrap;
+        margin-bottom: 8px;
+      }
+      .filter-editor .fe-switch {
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+        font-size: 13px;
+        font-weight: 500;
+        cursor: pointer;
+      }
+      .filter-editor .fe-head .hint {
+        margin: 0;
+      }
+      .filter-editor .chips {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 6px;
+        margin-bottom: 8px;
+      }
+      .filter-editor .chips .chip {
+        display: inline-flex;
+        align-items: center;
+        gap: 5px;
+        background: var(--primary-soft);
+        color: var(--primary);
+        border-radius: 999px;
+        padding: 3px 6px 3px 10px;
+        font-size: 12px;
+        word-break: break-all;
+      }
+      .filter-editor .chips .chip button {
+        border: none;
+        background: none;
+        color: inherit;
+        cursor: pointer;
+        font-size: 13px;
+        line-height: 1;
+        padding: 1px 3px;
+        border-radius: 50%;
+      }
+      .filter-editor .chips .chip button:hover {
+        color: var(--red);
+      }
+      .filter-editor .chips .empty-tip {
+        font-size: 12px;
+        color: var(--text-3);
+      }
+      .filter-editor .fe-add {
+        display: flex;
+        gap: 8px;
+      }
+      .filter-editor .fe-add input {
+        flex: 1;
+        min-width: 0;
+      }
+      .filter-editor .dd-rule {
+        display: flex;
+        gap: 6px;
+        margin-bottom: 6px;
+        align-items: center;
+      }
+      .filter-editor .dd-rule input {
+        flex: 1;
+        min-width: 0;
+        font-family: ui-monospace, monospace;
+        font-size: 12px;
+      }
+      .filter-editor .dd-rule .dd-arrow {
+        color: var(--text-3);
+        flex: none;
+      }
+      .filter-editor .dd-rule button {
+        flex: none;
+      }
+      .filter-editor .alert {
+        margin-top: 8px;
+      }
+
+      /* ---------- 响应式适配（与下载控制台一致） ---------- */
+      @media (max-width: 860px) {
+        .btn {
+          padding: 11px 16px;
+        }
+        input[type="text"],
+        input[type="password"] {
+          font-size: 16px;
+        }
+      }
+      @media (max-width: 600px) {
+        .topbar-inner {
+          padding: 10px 12px;
+          gap: 6px;
+        }
+        .brand {
+          font-size: 16px;
+        }
+        .user-chip {
+          max-width: 90px;
+          overflow: hidden;
+          text-overflow: ellipsis;
+          white-space: nowrap;
+        }
+      }
+      @media (max-width: 480px) {
+        .container {
+          padding: 12px;
+          gap: 12px;
+        }
+        .card {
+          padding: 14px;
+        }
+        .key-row {
+          flex-direction: column;
+        }
+        .cmd-row {
+          grid-template-columns: minmax(0, 1fr);
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <div class="topbar">
+      <div class="topbar-inner">
+        <span class="brand"
+          ><span class="logo">🐱</span>CatDock<span class="tag"
+            >管理控制台</span
+          ></span
+        >
+        <span class="spacer"></span>
+        <span class="user-menu-wrap">
+          <span class="user-chip" id="userChip" title="账号菜单">👤</span>
+          <div class="user-menu" id="userMenu">
+            <button class="user-menu-item" id="menuPass">修改密码</button>
+            <button class="user-menu-item" id="menuFilters">过滤模板</button>
+            <button class="user-menu-item danger" id="menuLogout">退出</button>
+          </div>
+        </span>
+      </div>
+    </div>
+
+    <div class="container">
+      <div class="card">
+        <div class="card-title">👥 用户管理</div>
+        <div class="sub">
+          管理下载用户；管理员账户请在容器内使用
+          <code>adminctl</code> 命令行工具管理。
+        </div>
+        <div style="margin-bottom: 12px">
+          <button class="btn btn-primary" id="btnAddUser">➕ 添加用户</button>
+          <button class="btn btn-ghost" id="btnRefresh">🔄 刷新</button>
+        </div>
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>用户名</th>
+                <th>角色</th>
+                <th>状态</th>
+                <th>创建时间</th>
+                <th>操作</th>
+              </tr>
+            </thead>
+            <tbody id="userRows"></tbody>
+          </table>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="card-title">🔑 服务器配置</div>
+        <div class="warn-box">
+          ⚠️ 修改 AUTH_KEY 后，猫抓插件请求体中的
+          <code>key</code> 字段与所有网页登录都要同步更换。
+        </div>
+        <label class="field">
+          <span
+            >新 AUTH_KEY<span class="req">*</span>（至少 8 位，建议 14
+            位以上随机字符串）</span
+          >
+          <div class="key-row">
+            <input
+              type="text"
+              id="newKey"
+              placeholder="输入新的 AUTH_KEY"
+              autocomplete="off"
+            />
+            <button class="btn btn-ghost" id="btnGenKey" type="button">
+              🎲 随机
+            </button>
+          </div>
+        </label>
+        <button class="btn btn-danger btn-block" id="btnSaveKey">
+          保存并全员下线
+        </button>
+      </div>
+
+      <div class="card">
+        <div class="card-title">⌨️ 命令行参考</div>
+        <div class="sub">
+          在容器内执行（docker exec -it catdock bash），以下为全部命令行工具：
+        </div>
+        <div class="cmd-row">
+          <div class="cmd-group">
+            <div class="cmd-title">adminctl — 管理员账户管理</div>
+            <div class="cmd-list">
+              <div class="cmd-item">
+                <span class="cmd-desc">添加管理员</span>
+                <code>adminctl add &lt;用户名&gt;</code>
+              </div>
+              <div class="cmd-item">
+                <span class="cmd-desc">删除管理员（至少保留一个）</span>
+                <code>adminctl del &lt;用户名&gt;</code>
+              </div>
+              <div class="cmd-item">
+                <span class="cmd-desc">修改管理员密码</span>
+                <code>adminctl password &lt;用户名&gt;</code>
+              </div>
+              <div class="cmd-item">
+                <span class="cmd-desc">列出全部用户</span>
+                <code>adminctl list</code>
+              </div>
+            </div>
+          </div>
+          <div class="cmd-group">
+            <div class="cmd-title">userctl — 下载用户管理</div>
+            <div class="cmd-list">
+              <div class="cmd-item">
+                <span class="cmd-desc">添加用户</span>
+                <code>userctl add &lt;用户名&gt;</code>
+              </div>
+              <div class="cmd-item">
+                <span class="cmd-desc">删除用户（含全部数据）</span>
+                <code>userctl del &lt;用户名&gt;</code>
+              </div>
+              <div class="cmd-item">
+                <span class="cmd-desc">修改用户密码</span>
+                <code>userctl password &lt;用户名&gt;</code>
+              </div>
+              <div class="cmd-item">
+                <span class="cmd-desc">禁用用户</span>
+                <code>userctl ban &lt;用户名&gt;</code>
+              </div>
+              <div class="cmd-item">
+                <span class="cmd-desc">解禁用户</span>
+                <code>userctl unban &lt;用户名&gt;</code>
+              </div>
+            </div>
+          </div>
+          <div class="cmd-group">
+            <div class="cmd-title">banip — IP 封禁管理</div>
+            <div class="cmd-list">
+              <div class="cmd-item">
+                <span class="cmd-desc">查看封禁列表</span>
+                <code>banip show</code>
+              </div>
+              <div class="cmd-item">
+                <span class="cmd-desc">封禁 IP</span>
+                <code>banip add &lt;IP&gt;</code>
+              </div>
+              <div class="cmd-item">
+                <span class="cmd-desc">解封 IP</span>
+                <code>banip del &lt;IP&gt;</code>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- 通用弹层（表单 / 确认） -->
+    <div class="mask" id="mask">
+      <div class="modal">
+        <h3 id="modalTitle"></h3>
+        <div class="msg" id="modalMsg"></div>
+        <div id="modalForm" style="margin-bottom: 16px"></div>
+        <div class="btns">
+          <button class="btn btn-ghost" id="modalCancel">取消</button>
+          <button class="btn btn-primary" id="modalOk">确定</button>
+        </div>
+      </div>
+    </div>
+    <div class="toast" id="toast"></div>
+
+    <!-- ================= 过滤规则模板弹窗 ================= -->
+    <div class="mask" id="filterMask">
+      <div class="modal" style="max-width: 520px">
+        <h3>过滤规则模板</h3>
+        <div class="msg">新用户首次登录时复制此模板；已有用户不受影响</div>
+        <div class="filter-editor">
+          <div class="fe-section">
+            <div class="fe-head">
+              <label class="fe-switch"
+                ><input type="checkbox" id="kwEnabled" /> 拦截广告关键字</label
+              >
+              <span class="hint">URL 或文件名包含关键字时整个任务被拦截</span>
+            </div>
+            <div class="chips" id="kwChips"></div>
+            <div class="fe-add">
+              <input
+                type="text"
+                id="kwInput"
+                placeholder="输入关键字，回车或逗号添加，可批量"
+              />
+              <button type="button" class="btn" id="kwAdd">添加</button>
+            </div>
+          </div>
+
+          <div class="fe-section">
+            <div class="fe-head">
+              <label class="fe-switch"
+                ><input type="checkbox" id="ffEnabled" />
+                文件名过滤（删除关键字）</label
+              >
+              <span class="hint">从保存文件名中删除这些关键字，不拦截下载</span>
+            </div>
+            <div class="chips" id="ffChips"></div>
+            <div class="fe-add">
+              <input
+                type="text"
+                id="ffInput"
+                placeholder="输入关键字，回车或逗号添加，可批量"
+              />
+              <button type="button" class="btn" id="ffAdd">添加</button>
+            </div>
+          </div>
+
+          <div class="fe-section">
+            <div class="fe-head">
+              <label class="fe-switch"
+                ><input type="checkbox" id="ddEnabled" />
+                文件名去重（正则规则）</label
+              >
+              <span class="hint">按顺序应用正则替换；默认规则已去除重复段</span>
+            </div>
+            <div id="ddRules"></div>
+            <button type="button" class="btn" id="ddAdd">+ 添加规则</button>
+          </div>
+
+          <button class="btn btn-primary btn-block" id="filterSave">
+            保存过滤模板
+          </button>
+          <div class="alert" id="filterAlert"></div>
+        </div>
+      </div>
+    </div>
+
+    <script>
+      var LS = {
+        token: "catdock_token",
+        user: "catdock_user",
+        role: "catdock_role",
+      };
+      var token = localStorage.getItem(LS.token) || "";
+      var userName = localStorage.getItem(LS.user) || "";
+
+      document.getElementById("userChip").textContent =
+        "👤 " + (userName || "管理员");
+
+      function backToLogin() {
+        localStorage.removeItem(LS.token);
+        localStorage.removeItem(LS.user);
+        localStorage.removeItem(LS.role);
+        location.href = "../login.html";
+      }
+
+      // ---------- API ----------
+      function api(method, path, body) {
+        return fetch(path, {
+          method: method,
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: token ? "Bearer " + token : "",
+          },
+          body: body ? JSON.stringify(body) : undefined,
+        }).then(function (resp) {
+          if (resp.status === 403 || resp.status === 401) {
+            backToLogin();
+            throw new Error("未登录或登录已过期");
+          }
+          return resp.json().then(function (j) {
+            if (!j.success) throw new Error(j.message || "请求失败");
+            return j;
+          });
+        });
+      }
+
+      // ---------- Toast ----------
+      var toastTimer = null;
+      function toast(msg, isErr) {
+        var el = document.getElementById("toast");
+        el.textContent = msg;
+        el.className = "toast show" + (isErr ? " err" : "");
+        clearTimeout(toastTimer);
+        toastTimer = setTimeout(function () {
+          el.className = "toast" + (isErr ? " err" : "");
+        }, 2600);
+      }
+
+      // ---------- 通用弹层 ----------
+      function openModal(spec) {
+        document.getElementById("modalTitle").textContent =
+          spec.title || "提示";
+        document.getElementById("modalMsg").innerHTML = spec.msg || "";
+        var form = document.getElementById("modalForm");
+        form.innerHTML = "";
+        (spec.fields || []).forEach(function (f) {
+          var lab = document.createElement("label");
+          lab.className = "field";
+          var span = document.createElement("span");
+          span.textContent = f.label;
+          if (f.required) span.innerHTML += '<span class="req">*</span>';
+          var inp = document.createElement("input");
+          inp.type = f.type || "text";
+          inp.id = "mf_" + f.id;
+          inp.placeholder = f.placeholder || "";
+          inp.autocomplete = "off";
+          lab.appendChild(span);
+          lab.appendChild(inp);
+          form.appendChild(lab);
+        });
+        var okBtn = document.getElementById("modalOk");
+        okBtn.textContent = spec.okText || "确定";
+        okBtn.className = "btn " + (spec.danger ? "btn-danger" : "btn-primary");
+        document.getElementById("mask").classList.add("show");
+        setTimeout(function () {
+          var first = form.querySelector("input");
+          if (first) first.focus();
+        }, 50);
+        okBtn.onclick = function () {
+          var values = {};
+          for (var i = 0; i < (spec.fields || []).length; i++) {
+            var f = spec.fields[i];
+            values[f.id] = document.getElementById("mf_" + f.id).value.trim();
+          }
+          if (spec.onOk && spec.onOk(values) === false) return;
+          closeModal();
+        };
+        document.getElementById("modalCancel").onclick = closeModal;
+      }
+      function closeModal() {
+        document.getElementById("mask").classList.remove("show");
+      }
+
+      // ---------- 用户列表 ----------
+      function loadUsers() {
+        return api("GET", "users")
+          .then(function (j) {
+            renderUsers(j.data || []);
+          })
+          .catch(function (e) {
+            toast(e.message, true);
+          });
+      }
+      function esc(s) {
+        return String(s == null ? "" : s).replace(/[&<>"']/g, function (c) {
+          return {
+            "&": "&amp;",
+            "<": "&lt;",
+            ">": "&gt;",
+            '"': "&quot;",
+            "'": "&#39;",
+          }[c];
+        });
+      }
+      function renderUsers(users) {
+        var tbody = document.getElementById("userRows");
+        tbody.innerHTML = "";
+        users.forEach(function (u) {
+          var tr = document.createElement("tr");
+          var isAdmin = u.role === "admin";
+          var status = u.disabled
+            ? '<span class="badge off">已禁用</span>'
+            : '<span class="badge on">正常</span>';
+          var role = isAdmin
+            ? '<span class="badge admin">管理员</span>'
+            : '<span class="badge user">用户</span>';
+          var actions = "";
+          if (!isAdmin) {
+            actions =
+              '<button class="btn btn-ghost small" data-act="pwd">改密</button>' +
+              (u.disabled
+                ? '<button class="btn btn-ghost small" data-act="unban">解禁</button>'
+                : '<button class="btn btn-ghost small" data-act="ban">禁用</button>') +
+              '<button class="btn btn-danger small" data-act="del">删除</button>';
+          } else {
+            actions =
+              '<span style="color:var(--text-3);font-size:12px">命令行管理</span>';
+          }
+          tr.innerHTML =
+            "<td><strong>" +
+            esc(u.username) +
+            "</strong></td>" +
+            "<td>" +
+            role +
+            "</td>" +
+            "<td>" +
+            status +
+            "</td>" +
+            "<td>" +
+            esc(u.created_at || "-") +
+            "</td>" +
+            '<td class="actions">' +
+            actions +
+            "</td>";
+          tr.querySelector("td.actions").addEventListener(
+            "click",
+            function (ev) {
+              var btn = ev.target.closest("button[data-act]");
+              if (!btn) return;
+              handleUserAction(btn.getAttribute("data-act"), u);
+            },
+          );
+          tbody.appendChild(tr);
+        });
+      }
+
+      function handleUserAction(act, u) {
+        if (act === "pwd") {
+          openModal({
+            title: "重置用户密码 - " + u.username,
+            fields: [
+              {
+                id: "pwd",
+                label: "新密码",
+                type: "password",
+                required: true,
+                placeholder: "输入新密码",
+              },
+              {
+                id: "pwd2",
+                label: "确认新密码",
+                type: "password",
+                required: true,
+                placeholder: "再次输入",
+              },
+            ],
+            onOk: function (v) {
+              if (!v.pwd) return (toast("密码不能为空", true), false);
+              if (v.pwd !== v.pwd2)
+                return (toast("两次输入的密码不一致", true), false);
+              api("POST", "users/password", {
+                username: u.username,
+                newPassword: v.pwd,
+              })
+                .then(function (j) {
+                  toast(j.message);
+                  loadUsers();
+                })
+                .catch(function (e) {
+                  toast(e.message, true);
+                });
+            },
+          });
+        } else if (act === "ban") {
+          openModal({
+            title: "禁用用户 - " + u.username,
+            msg: "禁用后该用户立即无法登录、已登录的令牌立即失效；可随时解禁。",
+            danger: true,
+            okText: "禁用",
+            onOk: function () {
+              api("POST", "users/ban", { username: u.username })
+                .then(function (j) {
+                  toast(j.message);
+                  loadUsers();
+                })
+                .catch(function (e) {
+                  toast(e.message, true);
+                });
+            },
+          });
+        } else if (act === "unban") {
+          api("POST", "users/unban", { username: u.username })
+            .then(function (j) {
+              toast(j.message);
+              loadUsers();
+            })
+            .catch(function (e) {
+              toast(e.message, true);
+            });
+        } else if (act === "del") {
+          openModal({
+            title: "删除用户 - " + u.username,
+            msg:
+              "将删除该用户<b>全部数据</b>并吊销全部令牌：配置目录（任务记录、下载记录、过滤规则）、" +
+              "下载缓存、已下载文件，<b>删除后不可恢复</b>。",
+            danger: true,
+            okText: "全部删除",
+            onOk: function () {
+              api("POST", "users/delete", { username: u.username })
+                .then(function (j) {
+                  toast(j.message);
+                  loadUsers();
+                })
+                .catch(function (e) {
+                  toast(e.message, true);
+                });
+            },
+          });
+        }
+      }
+
+      document.getElementById("btnRefresh").onclick = function () {
+        loadUsers();
+      };
+      document.getElementById("btnAddUser").onclick = function () {
+        openModal({
+          title: "添加下载用户",
+          fields: [
+            {
+              id: "username",
+              label: "用户名（字母+数字，字母≥4 位）",
+              required: true,
+              placeholder: "如 alice2026",
+            },
+            {
+              id: "pwd",
+              label: "密码",
+              type: "password",
+              required: true,
+              placeholder: "输入密码",
+            },
+            {
+              id: "pwd2",
+              label: "确认密码",
+              type: "password",
+              required: true,
+              placeholder: "再次输入",
+            },
+          ],
+          okText: "添加",
+          onOk: function (v) {
+            if (!v.username || !v.pwd)
+              return (toast("用户名和密码不能为空", true), false);
+            if (v.pwd !== v.pwd2)
+              return (toast("两次输入的密码不一致", true), false);
+            api("POST", "users/add", { username: v.username, password: v.pwd })
+              .then(function (j) {
+                toast(j.message);
+                loadUsers();
+              })
+              .catch(function (e) {
+                toast(e.message, true);
+              });
+          },
+        });
+      };
+
+      // ---------- AUTH_KEY ----------
+      function genRandomKey() {
+        var chars =
+          "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_";
+        var arr = new Uint8Array(24);
+        (window.crypto || window.msCrypto).getRandomValues(arr);
+        var s = "";
+        for (var i = 0; i < arr.length; i++) s += chars[arr[i] % chars.length];
+        return s;
+      }
+      document.getElementById("btnGenKey").onclick = function () {
+        document.getElementById("newKey").value = genRandomKey();
+      };
+      document.getElementById("btnSaveKey").onclick = function () {
+        var key = document.getElementById("newKey").value.trim();
+        if (!key) return (toast("请输入新 AUTH_KEY", true), false);
+        if (key.length < 8) return (toast("AUTH_KEY 至少 8 位", true), false);
+        openModal({
+          title: "确认修改 AUTH_KEY？",
+          msg:
+            "修改后立即写入 admin_config.json 并生效，<b>包括管理员在内的所有登录都会失效</b>，" +
+            "需使用新 KEY 重新登录；猫抓插件也要同步更换 key。用户密码不受影响。",
+          danger: true,
+          okText: "修改并全员下线",
+          onOk: function () {
+            api("POST", "auth-key", { newKey: key })
+              .then(function (j) {
+                toast(j.message + " 即将返回登录页…");
+                setTimeout(backToLogin, 1500);
+              })
+              .catch(function (e) {
+                toast(e.message, true);
+              });
+          },
+        });
+      };
+
+      // ---------- 顶栏账号菜单 ----------
+      var menu = document.getElementById("userMenu");
+      document.getElementById("userChip").onclick = function (ev) {
+        ev.stopPropagation();
+        menu.classList.toggle("show");
+      };
+      document.addEventListener("click", function () {
+        menu.classList.remove("show");
+      });
+      // 修改密码：旧密码 1 遍 + 新密码 2 遍；成功后全部令牌吊销，回登录页
+      document.getElementById("menuPass").onclick = function () {
+        menu.classList.remove("show");
+        openModal({
+          title: "修改密码 - " + (userName || "管理员"),
+          fields: [
+            {
+              id: "old",
+              label: "旧密码",
+              type: "password",
+              required: true,
+              placeholder: "输入当前密码",
+            },
+            {
+              id: "new1",
+              label: "新密码（至少 6 位）",
+              type: "password",
+              required: true,
+              placeholder: "输入新密码",
+            },
+            {
+              id: "new2",
+              label: "确认新密码",
+              type: "password",
+              required: true,
+              placeholder: "再次输入新密码",
+            },
+          ],
+          okText: "保存并重新登录",
+          onOk: function (v) {
+            if (!v.old || !v.new1) {
+              toast("旧密码与新密码不能为空", true);
+              return false;
+            }
+            if (v.new1.length < 6) {
+              toast("新密码至少 6 位", true);
+              return false;
+            }
+            if (v.new1 !== v.new2) {
+              toast("两次输入的新密码不一致", true);
+              return false;
+            }
+            api("POST", "../password", {
+              oldPassword: v.old,
+              newPassword: v.new1,
+            })
+              .then(function (j) {
+                toast(j.message + " 即将返回登录页…");
+                setTimeout(backToLogin, 1500);
+              })
+              .catch(function (e) {
+                toast(e.message, true);
+                return false;
+              });
+          },
+        });
+      };
+      document.getElementById("menuLogout").onclick = function () {
+        fetch("../logout", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: "Bearer " + token,
+          },
+          body: "{}",
+        }).then(backToLogin, backToLogin);
+      };
+
+      // ---------- 过滤规则模板编辑器 ----------
+      var filterState = {
+        keywords: { enabled: false, list: [] },
+        filename_filter: { enabled: false, list: [] },
+        filename_dedup: { enabled: false, rules: [] },
+      };
+
+      function showAlert(el, msg, ok) {
+        el.textContent = msg;
+        el.style.color = ok ? "var(--green, #059669)" : "var(--red)";
+      }
+      function hideAlert(el) {
+        el.textContent = "";
+      }
+
+      function renderChips(key, listId, inputId) {
+        var wrap = document.getElementById(listId);
+        wrap.innerHTML = "";
+        var list = filterState[key].list;
+        if (!list.length) {
+          var tip = document.createElement("span");
+          tip.className = "empty-tip";
+          tip.textContent = "暂无关键字";
+          wrap.appendChild(tip);
+          return;
+        }
+        list.forEach(function (item, idx) {
+          var chip = document.createElement("span");
+          chip.className = "chip";
+          var text = document.createElement("span");
+          text.textContent = item;
+          var del = document.createElement("button");
+          del.type = "button";
+          del.textContent = "✕";
+          del.title = "删除";
+          del.onclick = function () {
+            filterState[key].list.splice(idx, 1);
+            renderChips(key, listId, inputId);
+          };
+          chip.appendChild(text);
+          chip.appendChild(del);
+          wrap.appendChild(chip);
+        });
+      }
+
+      function addKeywords(key, listId, inputId) {
+        var raw = document.getElementById(inputId).value.trim();
+        if (!raw) return;
+        raw
+          .split(/[,，\n]/)
+          .map(function (s) {
+            return s.trim();
+          })
+          .filter(function (s) {
+            return s;
+          })
+          .forEach(function (s) {
+            if (filterState[key].list.indexOf(s) === -1)
+              filterState[key].list.push(s);
+          });
+        document.getElementById(inputId).value = "";
+        renderChips(key, listId, inputId);
+      }
+
+      function renderDdRules() {
+        var wrap = document.getElementById("ddRules");
+        wrap.innerHTML = "";
+        var rules = filterState.filename_dedup.rules;
+        rules.forEach(function (rule, idx) {
+          var row = document.createElement("div");
+          row.className = "dd-rule";
+          var p = document.createElement("input");
+          p.type = "text";
+          p.placeholder = "正则 pattern";
+          p.value = rule.pattern || "";
+          p.oninput = function () {
+            rules[idx].pattern = p.value;
+          };
+          var arrow = document.createElement("span");
+          arrow.className = "dd-arrow";
+          arrow.textContent = "→";
+          var r = document.createElement("input");
+          r.type = "text";
+          r.placeholder = "替换为";
+          r.value = rule.replacement || "";
+          r.oninput = function () {
+            rules[idx].replacement = r.value;
+          };
+          var del = document.createElement("button");
+          del.type = "button";
+          del.className = "btn";
+          del.textContent = "✕";
+          del.title = "删除规则";
+          del.onclick = function () {
+            rules.splice(idx, 1);
+            renderDdRules();
+          };
+          row.appendChild(p);
+          row.appendChild(arrow);
+          row.appendChild(r);
+          row.appendChild(del);
+          wrap.appendChild(row);
+        });
+      }
+
+      function loadFilters() {
+        api("GET", "filters")
+          .then(function (data) {
+            filterState = {
+              keywords: {
+                enabled: !!data.data.keywords.enabled,
+                list: data.data.keywords.list || [],
+              },
+              filename_filter: {
+                enabled: !!data.data.filename_filter.enabled,
+                list: data.data.filename_filter.list || [],
+              },
+              filename_dedup: {
+                enabled: !!data.data.filename_dedup.enabled,
+                rules: data.data.filename_dedup.rules || [],
+              },
+            };
+            document.getElementById("kwEnabled").checked =
+              filterState.keywords.enabled;
+            document.getElementById("ffEnabled").checked =
+              filterState.filename_filter.enabled;
+            document.getElementById("ddEnabled").checked =
+              filterState.filename_dedup.enabled;
+            renderChips("keywords", "kwChips", "kwInput");
+            renderChips("filename_filter", "ffChips", "ffInput");
+            renderDdRules();
+            hideAlert(document.getElementById("filterAlert"));
+          })
+          .catch(function (e) {
+            showAlert(document.getElementById("filterAlert"), e.message, false);
+          });
+      }
+
+      document.getElementById("menuFilters").onclick = function () {
+        var menu = document.getElementById("userMenu");
+        menu.classList.remove("show");
+        document.getElementById("filterMask").classList.add("show");
+        loadFilters();
+      };
+      document
+        .getElementById("filterMask")
+        .addEventListener("click", function (e) {
+          if (e.target === document.getElementById("filterMask"))
+            document.getElementById("filterMask").classList.remove("show");
+        });
+      document.getElementById("kwAdd").onclick = function () {
+        addKeywords("keywords", "kwChips", "kwInput");
+      };
+      document
+        .getElementById("kwInput")
+        .addEventListener("keydown", function (e) {
+          if (e.key === "Enter") {
+            e.preventDefault();
+            addKeywords("keywords", "kwChips", "kwInput");
+          }
+        });
+      document.getElementById("ffAdd").onclick = function () {
+        addKeywords("filename_filter", "ffChips", "ffInput");
+      };
+      document
+        .getElementById("ffInput")
+        .addEventListener("keydown", function (e) {
+          if (e.key === "Enter") {
+            e.preventDefault();
+            addKeywords("filename_filter", "ffChips", "ffInput");
+          }
+        });
+      document.getElementById("ddAdd").onclick = function () {
+        filterState.filename_dedup.rules.push({ pattern: "", replacement: "" });
+        renderDdRules();
+      };
+      document.getElementById("filterSave").onclick = function () {
+        filterState.keywords.enabled =
+          document.getElementById("kwEnabled").checked;
+        filterState.filename_filter.enabled =
+          document.getElementById("ffEnabled").checked;
+        filterState.filename_dedup.enabled =
+          document.getElementById("ddEnabled").checked;
+        try {
+          filterState.filename_dedup.rules.forEach(function (rule) {
+            if ((rule.pattern || "").trim()) new RegExp(rule.pattern.trim());
+          });
+        } catch (err) {
+          showAlert(
+            document.getElementById("filterAlert"),
+            "正则表达式不合法: " + err.message,
+            false,
+          );
+          return;
+        }
+        var btn = document.getElementById("filterSave");
+        btn.disabled = true;
+        api("POST", "filters", filterState)
+          .then(function (data) {
+            showAlert(
+              document.getElementById("filterAlert"),
+              data.message || "已保存",
+              true,
+            );
+            setTimeout(function () {
+              document.getElementById("filterMask").classList.remove("show");
+            }, 1200);
+          })
+          .catch(function (e) {
+            showAlert(document.getElementById("filterAlert"), e.message, false);
+          })
+          .finally(function () {
+            btn.disabled = false;
+          });
+      };
+
+      // ---------- 启动：无令牌直接回登录页；有令牌则拉用户列表验证管理员身份 ----------
+      if (!token) {
+        backToLogin();
+      } else {
+        loadUsers();
+      }
+    </script>
+  </body>
+</html>

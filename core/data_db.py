@@ -11,7 +11,7 @@
   - failed_attempts: 记录每个 IP 在时间窗内的认证失败次数（认证成功/触发封禁后清零）
   - banned_ips:      已封禁的 IP 列表（reason: auto=临时自动封禁, auto_perm=永久自动封禁, manual=手动封禁）
   - ip_ban_stats:    阶梯封禁统计（每 IP 历史触发自动封禁的次数，认证成功清零）
-  - users:           下载用户列表（用户名 + 密码哈希）
+  - users:           用户列表（用户名 + 密码哈希 + 角色 admin/user + 禁用标志）
   - auth_tokens:     访问令牌登记（jti，支撑服务端主动吊销：注销/改密码/删用户失效）
 
 CLI 用法（本文件直接作为脚本运行，或通过 banip 命令调用）：
@@ -22,6 +22,7 @@ CLI 用法（本文件直接作为脚本运行，或通过 banip 命令调用）
 import os
 import re
 import sqlite3
+import string
 import threading
 import time
 import hmac
@@ -29,7 +30,10 @@ import hashlib
 import secrets
 
 # 认证失败达到该次数后自动封禁
-MAX_AUTH_FAILURES = 5
+# IP 级封禁（AUTH_KEY 错误 / 不存在的用户名）：10 次触发
+MAX_AUTH_FAILURES = 10
+# 账号级封禁（密码错误，用户存在但密码不匹配）：5 次触发，自动禁用账号
+MAX_ACCOUNT_FAILURES = 5
 
 # 失败计数时间窗：仅累计最近 N 分钟内的失败，历史失败自动清零，
 # 避免"长期偶发失误累积 + 一次手滑 = 封禁"的误伤
@@ -76,14 +80,6 @@ def _get_conn():
         db_dir = os.path.dirname(DB_PATH)
         if db_dir and not os.path.exists(db_dir):
             os.makedirs(db_dir, exist_ok=True)
-        # 一次性迁移：若 data.db 不存在但旧 banned_ips.db 存在，则改名复用
-        if not os.path.exists(DB_PATH):
-            old_path = os.path.join(db_dir or '.', 'banned_ips.db')
-            if os.path.exists(old_path):
-                try:
-                    os.rename(old_path, DB_PATH)
-                except OSError:
-                    pass
         _db_conn = sqlite3.connect(DB_PATH, check_same_thread=False, timeout=30)
         # WAL 日志模式：读写不互斥（多线程轮询下读不阻塞写、写不阻塞读），
         # 显著降低 ThreadingHTTPServer 高并发时的 database is locked 冲突。
@@ -112,7 +108,9 @@ def _get_conn():
             CREATE TABLE IF NOT EXISTS users (
                 username TEXT PRIMARY KEY,
                 password_hash TEXT NOT NULL,
-                created_at TEXT
+                created_at TEXT,
+                role TEXT NOT NULL DEFAULT 'user',
+                disabled INTEGER NOT NULL DEFAULT 0
             )
         """)
         # IP 阶梯封禁统计：记录每个 IP 历史触发"自动封禁"的次数，
@@ -124,6 +122,14 @@ def _get_conn():
                 ip TEXT PRIMARY KEY,
                 temp_ban_count INTEGER DEFAULT 0,
                 last_ban_time TEXT
+            )
+        """)
+        # 账号级失败计数：密码错误累计达 MAX_ACCOUNT_FAILURES 次后自动禁用账号
+        _db_conn.execute("""
+            CREATE TABLE IF NOT EXISTS account_failures (
+                username TEXT PRIMARY KEY,
+                count INTEGER DEFAULT 0,
+                last_attempt_time TEXT
             )
         """)
         # 访问令牌登记表：支撑服务端主动吊销（POST /logout 单令牌吊销、
@@ -317,6 +323,58 @@ def clear_auth_failure(ip):
         conn.commit()
 
 
+def record_account_failure(username):
+    """记录一次账号级密码错误失败。
+
+    累计达 MAX_ACCOUNT_FAILURES 次后自动禁用该账号（disabled=1）。
+    返回 True 表示已触发自动禁用，False 表示仅累计。
+    """
+    with _db_lock:
+        conn = _get_conn()
+        now = time.strftime('%Y-%m-%d %H:%M:%S')
+        cursor = conn.execute("SELECT count, last_attempt_time FROM account_failures WHERE username = ?", (username,))
+        row = cursor.fetchone()
+        if row:
+            in_window = False
+            try:
+                last = time.strptime(row[1], '%Y-%m-%d %H:%M:%S')
+                in_window = (time.time() - time.mktime(last)) < AUTH_FAILURE_WINDOW_MINUTES * 60
+            except (ValueError, OverflowError):
+                in_window = False
+            count = (row[0] + 1) if in_window else 1
+            conn.execute("UPDATE account_failures SET count = ?, last_attempt_time = ? WHERE username = ?",
+                         (count, now, username))
+        else:
+            count = 1
+            conn.execute("INSERT INTO account_failures (username, count, last_attempt_time) VALUES (?, ?, ?)",
+                         (username, count, now))
+        conn.commit()
+
+        if count >= MAX_ACCOUNT_FAILURES:
+            conn.execute("UPDATE users SET disabled = 1 WHERE username = ?", (username,))
+            conn.execute("DELETE FROM account_failures WHERE username = ?", (username,))
+            conn.commit()
+            return True
+        return False
+
+
+def clear_account_failure(username):
+    """认证成功后清除该账号的失败计数。"""
+    with _db_lock:
+        conn = _get_conn()
+        conn.execute("DELETE FROM account_failures WHERE username = ?", (username,))
+        conn.commit()
+
+
+def get_account_failure_count(username):
+    """获取指定账号的当前失败计数"""
+    with _db_lock:
+        conn = _get_conn()
+        cursor = conn.execute("SELECT count FROM account_failures WHERE username = ?", (username,))
+        row = cursor.fetchone()
+        return row[0] if row else 0
+
+
 def list_banned_ips():
     """返回所有封禁 IP 列表 [(ip, banned_at, reason), ...]"""
     with _db_lock:
@@ -377,39 +435,46 @@ def _verify_password(password, stored):
         return False
 
 
-def add_user(username, password):
-    """添加用户。用户名非法或已存在时抛出 ValueError。"""
+def add_user(username, password, role='user'):
+    """添加用户。用户名非法或已存在时抛出 ValueError。
+
+    role: 'user' 下载用户（默认）/ 'admin' 管理员。
+    """
     ok, reason = validate_username(username)
     if not ok:
         raise ValueError(reason)
     if not password:
         raise ValueError("密码不能为空")
+    if role not in ('user', 'admin'):
+        role = 'user'
     with _db_lock:
         conn = _get_conn()
         cursor = conn.execute("SELECT 1 FROM users WHERE username = ?", (username,))
         if cursor.fetchone() is not None:
             raise ValueError(f"用户已存在: {username}")
         conn.execute(
-            "INSERT INTO users (username, password_hash, created_at) VALUES (?, ?, ?)",
+            "INSERT INTO users (username, password_hash, created_at, role, disabled) "
+            "VALUES (?, ?, ?, ?, 0)",
             (username, _hash_password(password),
-             time.strftime('%Y-%m-%d %H:%M:%S')),
+             time.strftime('%Y-%m-%d %H:%M:%S'), role),
         )
         conn.commit()
 
 
 def del_user(username):
     """删除用户。返回 True 表示已删除；False 表示用户不存在。
-    若删除后无用户剩余，抛出 ValueError（至少保留一个用户）。
+    管理员账户至少保留一个：删除最后一个 role='admin' 时抛出 ValueError。
     """
     with _db_lock:
         conn = _get_conn()
-        cursor = conn.execute("SELECT 1 FROM users WHERE username = ?", (username,))
-        if cursor.fetchone() is None:
+        cursor = conn.execute("SELECT role FROM users WHERE username = ?", (username,))
+        row = cursor.fetchone()
+        if row is None:
             return False
-        # 不允许删除最后一个用户，避免锁死
-        cnt_cursor = conn.execute("SELECT COUNT(*) FROM users")
-        if cnt_cursor.fetchone()[0] <= 1:
-            raise ValueError("至少保留一个用户，不能删除最后一个用户")
+        if row[0] == 'admin':
+            admin_cnt = conn.execute("SELECT COUNT(*) FROM users WHERE role = 'admin'").fetchone()[0]
+            if admin_cnt <= 1:
+                raise ValueError("至少保留一个管理员账户，不能删除最后一个管理员")
         # 同步作废该用户全部令牌：防止删除后重建同名用户时旧令牌"复活"
         conn.execute("UPDATE auth_tokens SET revoked = 1 WHERE username = ?", (username,))
         conn.execute("DELETE FROM users WHERE username = ?", (username,))
@@ -438,7 +503,23 @@ def change_password(username, new_password):
 
 
 def verify_user(username, password):
-    """校验用户名+密码。返回 True/False。"""
+    """校验用户名+密码（被禁用用户一律视为校验失败）。返回 True/False。"""
+    with _db_lock:
+        conn = _get_conn()
+        cursor = conn.execute(
+            "SELECT password_hash FROM users WHERE username = ? AND disabled = 0",
+            (username,))
+        row = cursor.fetchone()
+        if row is None:
+            return False
+        return _verify_password(password, row[0])
+
+
+def verify_user_password(username, password):
+    """仅校验密码是否正确（不看禁用状态）。
+
+    供认证层区分"密码正确但账号被禁用"（不计 IP 封禁）与普通密码错误（计数）。
+    """
     with _db_lock:
         conn = _get_conn()
         cursor = conn.execute(
@@ -458,11 +539,95 @@ def user_exists(username):
 
 
 def user_count():
-    """返回当前用户总数"""
+    """返回当前用户总数（含管理员）"""
     with _db_lock:
         conn = _get_conn()
         cursor = conn.execute("SELECT COUNT(*) FROM users")
         return cursor.fetchone()[0]
+
+
+def download_user_count():
+    """返回下载用户（role='user'）总数，不含管理员"""
+    with _db_lock:
+        conn = _get_conn()
+        return conn.execute("SELECT COUNT(*) FROM users WHERE role = 'user'").fetchone()[0]
+
+
+def admin_count():
+    """返回管理员账户（role='admin'）总数"""
+    with _db_lock:
+        conn = _get_conn()
+        return conn.execute("SELECT COUNT(*) FROM users WHERE role = 'admin'").fetchone()[0]
+
+
+def user_role(username):
+    """返回用户角色 'admin'/'user'；用户不存在返回 None"""
+    with _db_lock:
+        conn = _get_conn()
+        row = conn.execute("SELECT role FROM users WHERE username = ?", (username,)).fetchone()
+        return row[0] if row else None
+
+
+def is_user_active(username):
+    """用户是否存在且未被禁用（令牌校验使用：禁用后令牌立即失效）"""
+    with _db_lock:
+        conn = _get_conn()
+        row = conn.execute(
+            "SELECT 1 FROM users WHERE username = ? AND disabled = 0", (username,)).fetchone()
+        return row is not None
+
+
+def set_user_disabled(username, flag):
+    """设置用户禁用状态。返回 True 表示用户存在并已更新，False 表示用户不存在。
+
+    禁用时同步作废该用户全部令牌（解禁不自动恢复旧令牌，需重新登录）。
+    """
+    with _db_lock:
+        conn = _get_conn()
+        if conn.execute("SELECT 1 FROM users WHERE username = ?", (username,)).fetchone() is None:
+            return False
+        conn.execute("UPDATE users SET disabled = ? WHERE username = ?",
+                     (1 if flag else 0, username))
+        if flag:
+            conn.execute("UPDATE auth_tokens SET revoked = 1 WHERE username = ?", (username,))
+        conn.commit()
+        return True
+
+
+def list_users_full():
+    """返回所有用户 [(username, role, disabled, created_at), ...]"""
+    with _db_lock:
+        conn = _get_conn()
+        cursor = conn.execute(
+            "SELECT username, role, disabled, created_at FROM users ORDER BY created_at ASC")
+        return cursor.fetchall()
+
+
+def ensure_default_admin():
+    """首次启动确保存在管理员账户：无 role='admin' 时创建默认管理员 admin。
+
+    返回 (created, password)：
+    - created=True 时 password 为 14 位随机明文初始密码（仅本次返回，由调用方
+      输出到启动日志一次，库内只存哈希）；
+    - 已存在管理员时返回 (False, None)；若用户名 admin 已被普通用户占用，
+      跳过创建（由调用方提示通过 adminctl add 创建其他管理员）。
+    """
+    with _db_lock:
+        conn = _get_conn()
+        if conn.execute("SELECT COUNT(*) FROM users WHERE role = 'admin'").fetchone()[0] > 0:
+            return False, None
+        # 用户名 admin 已被普通用户占用：跳过自动创建，避免 UNIQUE 冲突
+        if conn.execute("SELECT 1 FROM users WHERE username = 'admin'").fetchone() is not None:
+            return False, None
+        alphabet = string.ascii_letters + string.digits
+        password = ''.join(secrets.choice(alphabet) for _ in range(14))
+        conn.execute(
+            "INSERT INTO users (username, password_hash, created_at, role, disabled) "
+            "VALUES ('admin', ?, ?, 'admin', 0)",
+            (_hash_password(password), time.strftime('%Y-%m-%d %H:%M:%S')),
+        )
+        conn.commit()
+        return True, password
 
 
 # ---------- 访问令牌吊销（auth_tokens 表）----------
@@ -505,6 +670,14 @@ def revoke_user_tokens(username):
     with _db_lock:
         conn = _get_conn()
         conn.execute("UPDATE auth_tokens SET revoked = 1 WHERE username = ?", (username,))
+        conn.commit()
+
+
+def revoke_all_tokens():
+    """作废全部令牌（AUTH_KEY 热更换后全员强制下线；签名密钥同时变更，双保险）"""
+    with _db_lock:
+        conn = _get_conn()
+        conn.execute("UPDATE auth_tokens SET revoked = 1")
         conn.commit()
 
 

@@ -1,17 +1,19 @@
 #!/usr/bin/env python3
 """userctl - catdock 下载用户管理命令行工具
 
-实际逻辑位于 core/data_db.py（data.db 的 users 表）。
+实际逻辑位于 core/data_db.py（data.db 的 users 表，role='user'）。
 
 用法:
-    userctl add <用户名>        添加用户（交互式输入密码）
-    userctl del <用户名>        删除用户（至少保留一个）
+    userctl add <用户名>        添加下载用户（交互式输入密码）
+    userctl del <用户名>        删除下载用户（含其配置/缓存/下载文件）
     userctl password <用户名>   修改用户密码
+    userctl ban <用户名>        禁用用户（立即无法登录、令牌全部失效）
+    userctl unban <用户名>      解禁用户
     userctl --help
 
 用户名规则：仅字母+数字、不能纯数字、字母数量不少于 4 位。
 密码以 pbkdf2 + 随机盐 哈希存储，不留明文。
-首次使用（data.db 无用户）仅允许 userctl add。
+管理员账户（role='admin'）请使用 adminctl 命令管理，本工具不操作管理员。
 """
 import os
 import sys
@@ -51,7 +53,7 @@ def _require_users_exist():
     """data.db 无用户时除 add 外的命令前置检查。返回 True 表示可继续。"""
     try:
         if data_db.user_count() == 0:
-            print("data.db 中尚无用户，请先运行: userctl add <用户名>", file=sys.stderr)
+            print("data.db 中尚无用户，请先运行: adminctl add <用户名> 或 userctl add <用户名>", file=sys.stderr)
             return False
     except Exception as e:
         print(f"读取用户列表失败: {e}", file=sys.stderr)
@@ -93,6 +95,9 @@ def _cmd_del(args):
         print("用法: userctl del <用户名>", file=sys.stderr)
         return 1
     username = args[0].strip()
+    if data_db.user_role(username) == 'admin':
+        print(f"错误: {username} 是管理员账户，请使用 adminctl 命令管理", file=sys.stderr)
+        return 1
     try:
         removed = data_db.del_user(username)
     except ValueError as e:
@@ -104,6 +109,14 @@ def _cmd_del(args):
         return 1
     if removed:
         print(f"已删除用户: {username}")
+        # 与管理网页删除行为一致：同步清理该用户的配置/缓存/下载目录
+        try:
+            from downloader import cleanup_user_data
+            _killed, cleanup_ok = cleanup_user_data(username)
+            if not cleanup_ok:
+                print("警告: 部分用户目录清理失败，请检查容器内 /home/downloader 下残留", file=sys.stderr)
+        except Exception as e:
+            print(f"警告: 用户文件目录清理失败: {e}", file=sys.stderr)
     else:
         print(f"用户不存在: {username}")
     return 0
@@ -116,6 +129,9 @@ def _cmd_password(args):
         print("用法: userctl password <用户名>", file=sys.stderr)
         return 1
     username = args[0].strip()
+    if data_db.user_role(username) == 'admin':
+        print(f"错误: {username} 是管理员账户，请使用 adminctl password 命令", file=sys.stderr)
+        return 1
     if not data_db.user_exists(username):
         print(f"错误: 用户不存在: {username}", file=sys.stderr)
         return 1
@@ -135,13 +151,43 @@ def _cmd_password(args):
     return 0
 
 
+def _cmd_ban(args, flag=True):
+    if not _require_users_exist():
+        return 1
+    if not args:
+        action = "ban" if flag else "unban"
+        print(f"用法: userctl {action} <用户名>", file=sys.stderr)
+        return 1
+    username = args[0].strip()
+    role = data_db.user_role(username)
+    if role is None:
+        print(f"错误: 用户不存在: {username}", file=sys.stderr)
+        return 1
+    if role == 'admin':
+        print("错误: 管理员账户不可禁用，请使用 adminctl 命令管理", file=sys.stderr)
+        return 1
+    try:
+        data_db.set_user_disabled(username, flag)
+    except Exception as e:
+        print(f"操作失败: {e}", file=sys.stderr)
+        print(f"数据库路径: {data_db.DB_PATH}", file=sys.stderr)
+        return 1
+    if flag:
+        print(f"已禁用用户: {username}（立即无法登录，已签发令牌全部失效）")
+    else:
+        print(f"已解禁用户: {username}（需重新登录获取令牌）")
+    return 0
+
+
 def _print_usage():
     print("用法: userctl <子命令> [参数]")
     print("")
     print("子命令:")
     print("  add <用户名>        添加用户（交互式输入密码）")
-    print("  del <用户名>        删除用户（至少保留一个）")
+    print("  del <用户名>        删除用户")
     print("  password <用户名>   修改用户密码")
+    print("  ban <用户名>        禁用用户（无法登录、令牌失效）")
+    print("  unban <用户名>      解禁用户")
     print("")
     print("用户名规则: 仅字母+数字、不能纯数字、字母数量不少于 4 位")
     print("")
@@ -149,6 +195,8 @@ def _print_usage():
     print("  userctl add alice")
     print("  userctl del alice")
     print("  userctl password alice")
+    print("  userctl ban alice")
+    print("  userctl unban alice")
 
 
 def main():
@@ -166,6 +214,10 @@ def main():
         sys.exit(_cmd_del(rest))
     elif subcmd == 'password':
         sys.exit(_cmd_password(rest))
+    elif subcmd == 'ban':
+        sys.exit(_cmd_ban(rest, flag=True))
+    elif subcmd == 'unban':
+        sys.exit(_cmd_ban(rest, flag=False))
     else:
         print(f"未知子命令: {subcmd}", file=sys.stderr)
         _print_usage()

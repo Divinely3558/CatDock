@@ -4,7 +4,7 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <link rel="icon" href="favicon.ico" />
-    <title>CatDock 网页控制台</title>
+    <title>CatDock 登录</title>
     <style>
       /* ===== 亮色模式通用色 ===== */
       :root,
@@ -183,7 +183,7 @@
         text-align: center;
         font-size: 18px;
         font-weight: 600;
-        margin-bottom: 4px;
+        margin-bottom: 15px;
       }
       .login-sub {
         text-align: center;
@@ -423,6 +423,13 @@
       .user-menu-item:hover {
         background: var(--ghost-bg);
         color: var(--primary);
+      }
+      .user-menu-item.danger {
+        color: var(--red);
+      }
+      .user-menu-item.danger:hover {
+        background: var(--red-soft);
+        color: var(--red);
       }
 
       .container {
@@ -681,6 +688,93 @@
       .modal-close:hover {
         color: var(--text);
       }
+
+      /* ---------- 过滤规则编辑器 ---------- */
+      .filter-editor .fe-section {
+        border: 1px solid var(--border);
+        border-radius: 10px;
+        padding: 12px 14px;
+        margin-bottom: 12px;
+      }
+      .filter-editor .fe-head {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        flex-wrap: wrap;
+        margin-bottom: 8px;
+      }
+      .filter-editor .fe-switch {
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+        font-size: 13px;
+        font-weight: 500;
+        cursor: pointer;
+      }
+      .filter-editor .fe-head .hint {
+        margin: 0;
+      }
+      .filter-editor .chips {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 6px;
+        margin-bottom: 8px;
+      }
+      .filter-editor .chips .chip {
+        display: inline-flex;
+        align-items: center;
+        gap: 5px;
+        background: var(--primary-soft);
+        color: var(--primary);
+        border-radius: 999px;
+        padding: 3px 6px 3px 10px;
+        font-size: 12px;
+        word-break: break-all;
+      }
+      .filter-editor .chips .chip button {
+        border: none;
+        background: none;
+        color: inherit;
+        cursor: pointer;
+        font-size: 13px;
+        line-height: 1;
+        padding: 1px 3px;
+        border-radius: 50%;
+      }
+      .filter-editor .chips .chip button:hover {
+        color: var(--red);
+      }
+      .filter-editor .chips .empty-tip {
+        font-size: 12px;
+        color: var(--text-3);
+      }
+      .filter-editor .fe-add {
+        display: flex;
+        gap: 8px;
+      }
+      .filter-editor .fe-add input {
+        flex: 1;
+        min-width: 0;
+      }
+      .filter-editor .dd-rule {
+        display: flex;
+        gap: 6px;
+        margin-bottom: 6px;
+        align-items: center;
+      }
+      .filter-editor .dd-rule input {
+        flex: 1;
+        min-width: 0;
+        font-family: ui-monospace, monospace;
+        font-size: 12px;
+      }
+      .filter-editor .dd-rule .dd-arrow {
+        color: var(--text-3);
+        flex: none;
+      }
+      .filter-editor .dd-rule button {
+        flex: none;
+      }
       .detail-grid {
         display: grid;
         grid-template-columns: 96px 1fr;
@@ -909,24 +1003,17 @@
       <div class="login-card">
         <div class="login-logo">🐱</div>
         <div class="login-title">CatDock 网页控制台</div>
-        <div class="login-sub">m3u8 视频下载服务 · 请登录后使用</div>
 
         <form id="loginForm" autocomplete="off">
           <label class="field">
             <span>认证密钥 (AUTH_KEY)<i class="req">*</i></span>
-            <input
-              type="password"
-              id="loginKey"
-              placeholder="docker-compose 中配置的 AUTH_KEY"
-              required
-            />
+            <input type="password" id="loginKey" required />
           </label>
           <label class="field">
             <span>用户名<i class="req">*</i></span>
             <input
               type="text"
               id="loginUser"
-              placeholder="容器内 userctl add 创建的用户名"
               autocomplete="username"
               required
             />
@@ -936,7 +1023,6 @@
             <input
               type="password"
               id="loginPwd"
-              placeholder="用户密码"
               autocomplete="current-password"
               required
             />
@@ -946,152 +1032,13 @@
           </button>
           <div class="alert alert-error" id="loginAlert"></div>
         </form>
-        <div class="login-foot">
-          登录后仅持有短期访问令牌（2 小时），保存在当前浏览器
-          localStorage；密钥与密码不做持久化，也不会出现在请求 URL 中
-        </div>
       </div>
     </div>
 
     <!-- ================= 主视图 ================= -->
-    <div id="appView" style="display: none">
-      <div class="topbar">
-        <div class="topbar-inner">
-          <span class="user-menu-wrap">
-            <span class="brand" id="brandBtn" title="外观菜单"
-              ><span class="logo">🐱</span>CatDock</span
-            >
-            <div class="user-menu" id="brandMenu">
-              <button class="user-menu-item" id="paletteBtn" title="切换主题色">
-                <span class="btn-icon">🎨</span>主题色
-              </button>
-              <button class="user-menu-item" id="modeBtn" title="切换亮色/暗色">
-                <span class="btn-icon">🌙</span>亮暗切换
-              </button>
-            </div>
-          </span>
-          <span class="health">
-            <span class="dot" id="healthDot"></span
-            ><span id="healthText">检测中…</span>
-          </span>
-          <span class="spacer"></span>
-          <span class="user-menu-wrap">
-            <span class="user-chip" id="userChip" title="账号菜单"></span>
-            <div class="user-menu" id="userMenu">
-              <button class="user-menu-item" id="menuLogout">注销</button>
-              <button class="user-menu-item" id="menuReload">重载配置</button>
-            </div>
-          </span>
-          <span class="topbar-break" aria-hidden="true"></span>
+    <!-- 登录页无主视图 -->
+    <div id="appView" style="display: none"></div>
         </div>
-      </div>
-
-      <div class="container">
-        <!-- 提交任务 -->
-        <div class="card">
-          <div class="card-title">➕ 新建下载任务</div>
-          <form id="dlForm" autocomplete="off">
-            <label class="field">
-              <span>视频 URL<i class="req">*</i></span>
-              <textarea
-                id="fUrl"
-                rows="2"
-                placeholder="粘贴 m3u8 / 直链视频地址"
-                required
-              ></textarea>
-            </label>
-            <label class="field">
-              <span>保存文件名</span>
-              <input
-                type="text"
-                id="fName"
-                placeholder="选填，如：我的视频（不含扩展名）"
-              />
-              <div class="hint">留空时服务端自动命名 download_任务ID</div>
-            </label>
-            <label class="field">
-              <span>输出格式</span>
-              <select id="fFormat">
-                <option value="mp4">MP4</option>
-                <option value="mkv">MKV</option>
-              </select>
-              <div class="hint">
-                选择最终视频的封装格式（猫抓插件使用 config.json
-                中的全局设置，网页可逐任务指定）
-              </div>
-            </label>
-            <details class="adv">
-              <summary>高级选项（Referer / Cookie / UA，一般无需填写）</summary>
-              <label class="field">
-                <span>Referer</span>
-                <input type="text" id="fReferer" placeholder="选填" />
-              </label>
-              <label class="field">
-                <span>Cookie</span>
-                <input type="text" id="fCookie" placeholder="选填" />
-              </label>
-              <label class="field">
-                <span>User-Agent</span>
-                <input type="text" id="fUa" placeholder="选填" />
-              </label>
-            </details>
-            <button type="submit" class="btn btn-primary btn-block" id="dlBtn">
-              ⬇ 添加下载任务
-            </button>
-            <div class="alert" id="dlAlert"></div>
-          </form>
-        </div>
-
-        <!-- 任务列表 -->
-        <div class="card">
-          <div class="card-title">
-            📋 进行中的任务 <span class="count" id="taskCount">0</span>
-          </div>
-          <div class="task-list" id="taskList"></div>
-          <div class="empty" id="emptyState">
-            <span class="icon">📭</span>
-            暂无进行中的任务<br />
-            <span style="font-size: 12px"
-              >任务完成（成功/失败）后会自动移出列表</span
-            >
-          </div>
-        </div>
-
-        <!-- 服务信息 -->
-        <div class="card" style="grid-column: 1 / -1" id="infoCard">
-          <div class="card-title">ℹ️ 服务信息</div>
-          <div id="infoBody">
-            <div class="empty"><span class="icon">⏳</span>加载中…</div>
-          </div>
-        </div>
-      </div>
-    </div>
-
-    <!-- ================= 任务详情弹窗 ================= -->
-    <div class="modal-mask" id="modalMask">
-      <div class="modal">
-        <div class="modal-head">
-          <h3>任务详情</h3>
-          <button class="modal-close" id="modalClose">✕</button>
-        </div>
-        <dl class="detail-grid" id="modalBody"></dl>
-      </div>
-    </div>
-
-    <!-- ================= 操作确认弹窗 ================= -->
-    <div class="modal-mask" id="confirmMask">
-      <div class="modal modal-sm">
-        <div class="modal-head">
-          <h3 id="confirmTitle">确认操作</h3>
-          <button class="modal-close" id="confirmClose">✕</button>
-        </div>
-        <p class="confirm-msg" id="confirmMsg"></p>
-        <div class="confirm-actions">
-          <button class="btn" id="confirmCancel">取消</button>
-          <button class="btn" id="confirmOk">确认</button>
-        </div>
-      </div>
-    </div>
 
     <script>
       (function () {
@@ -1102,6 +1049,7 @@
         var LS = {
           token: "catdock_token",
           user: "catdock_user",
+          role: "catdock_role",
           fmt: "catdock_fmt",
           palette: "catdock_palette",
           mode: "catdock_mode",
@@ -1244,11 +1192,6 @@
               throw new Error("服务器响应格式错误");
             })
             .then(function (data) {
-              if (resp.status === 403) {
-                // 凭证失效：回到登录页
-                backToLogin(data.message || "认证失败，请重新登录");
-                throw new Error(data.message || "认证失败");
-              }
               if (!resp.ok || data.success === false) {
                 throw new Error(
                   data.message || "请求失败 (HTTP " + resp.status + ")",
@@ -1258,49 +1201,7 @@
             });
         }
 
-        // ---------- 登录 / 退出 ----------
-        function loadCreds() {
-          creds.token = localStorage.getItem(LS.token) || "";
-          creds.user = localStorage.getItem(LS.user) || "";
-          // 清理旧版本残留的明文凭证（key/user/pwd 已改为令牌模式）
-          localStorage.removeItem("catdock_key");
-          localStorage.removeItem("catdock_pwd");
-          // 恢复上次选择的输出格式
-          var savedFmt = localStorage.getItem(LS.fmt);
-          if (savedFmt === "mp4" || savedFmt === "mkv")
-            $("fFormat").value = savedFmt;
-        }
-
-        function enterApp() {
-          $("loginView").style.display = "none";
-          $("appView").style.display = "";
-          $("userChip").textContent = "👤 " + creds.user;
-          hideAlert($("loginAlert"));
-          startPolling();
-          refreshTasks();
-        }
-
-        function tryLogin(saved) {
-          return apiGet("tasks")
-            .then(enterApp)
-            .catch(function (e) {
-              if (saved) backToLogin("");
-              else
-                showAlert(
-                  $("loginAlert"),
-                  /成功|ok/.test(e.message) ? "" : e.message,
-                  false,
-                );
-            });
-        }
-
-        function backToLogin(msg) {
-          stopPolling();
-          $("appView").style.display = "none";
-          $("loginView").style.display = "";
-          if (msg) showAlert($("loginAlert"), msg, false);
-        }
-
+        // ---------- 登录 ----------
         $("loginForm").addEventListener("submit", function (e) {
           e.preventDefault();
           var key = $("loginKey").value.trim();
@@ -1313,17 +1214,20 @@
           var btn = $("loginBtn");
           btn.disabled = true;
           btn.textContent = "登录中…";
-          // 登录：两层认证通过后签发短期令牌，明文凭证不落盘、不进 URL
           apiPost("login", { key: key, user: user, password: pwd })
             .then(function (data) {
-              creds.token = data.data.token;
-              creds.user = user;
-              localStorage.setItem(LS.token, creds.token);
-              localStorage.setItem(LS.user, creds.user);
+              localStorage.setItem(LS.token, data.data.token);
+              localStorage.setItem(LS.user, user);
+              localStorage.setItem(LS.role, data.data.role || "user");
               $("loginPwd").value = "";
               $("loginKey").value = "";
               $("loginUser").value = "";
-              enterApp();
+              // 根据角色跳转：管理员 → 管理控制台，用户 → 下载控制台
+              if (data.data.role === "admin") {
+                location.href = "admin/";
+              } else {
+                location.href = "user.html";
+              }
             })
             .catch(function (e) {
               showAlert($("loginAlert"), e.message, false);
@@ -1334,539 +1238,14 @@
             });
         });
 
-        // ---------- 用户菜单（注销 / 重载配置） ----------
-        function closeUserMenu() {
-          $("userMenu").classList.remove("show");
-        }
-        function closeBrandMenu() {
-          $("brandMenu").classList.remove("show");
-        }
-        $("userChip").addEventListener("click", function (e) {
-          e.stopPropagation();
-          closeBrandMenu();
-          $("userMenu").classList.toggle("show");
-        });
-        $("brandBtn").addEventListener("click", function (e) {
-          e.stopPropagation();
-          closeUserMenu();
-          $("brandMenu").classList.toggle("show");
-        });
-        document.addEventListener("click", function (e) {
-          if (!e.target.closest(".user-menu-wrap")) {
-            closeUserMenu();
-            closeBrandMenu();
-          }
-        });
-
-        $("menuLogout").addEventListener("click", function () {
-          closeUserMenu();
-          // 先通知服务端吊销当前令牌（尽力而为，失败也继续清理本地）
-          var done = function () {
-            localStorage.removeItem(LS.token);
-            creds = { token: "", user: "" };
-            $("loginPwd").value = "";
-            backToLogin("");
-          };
-          apiPost("logout", {}).then(done).catch(done);
-        });
-
-        // ---------- 提交下载 ----------
-        $("dlForm").addEventListener("submit", function (e) {
-          e.preventDefault();
-          var body = { url: $("fUrl").value.trim() };
-          if (!body.url) {
-            showAlert($("dlAlert"), "URL 不能为空", false);
-            return;
-          }
-          var name = $("fName").value.trim();
-          var referer = $("fReferer").value.trim();
-          var cookie = $("fCookie").value.trim();
-          var ua = $("fUa").value.trim();
-          var fmt = $("fFormat").value;
-          if (name) body.saveName = name;
-          if (referer) body.referer = referer;
-          if (cookie) body.cookie = cookie;
-          if (ua) body.userAgent = ua;
-          if (fmt) {
-            body.format = fmt;
-            localStorage.setItem(LS.fmt, fmt);
-          }
-
-          var btn = $("dlBtn");
-          btn.disabled = true;
-          btn.textContent = "提交中…";
-          hideAlert($("dlAlert"));
-          apiPost("download", body)
-            .then(function (data) {
-              var msg = data.message || "下载任务已添加";
-              if (data.blocked) {
-                showAlert($("dlAlert"), "🚫 " + msg, false);
-              } else {
-                showAlert(
-                  $("dlAlert"),
-                  "✅ " +
-                    msg +
-                    (data.taskId ? "（任务 ID: " + data.taskId + "）" : ""),
-                  true,
-                );
-                $("fUrl").value = "";
-                refreshTasks();
-              }
-            })
-            .catch(function (err) {
-              showAlert($("dlAlert"), "❌ " + err.message, false);
-            })
-            .finally(function () {
-              btn.disabled = false;
-              btn.textContent = "⬇ 添加下载任务";
-            });
-        });
-
-        // ---------- 任务列表 ----------
-        var STATUS_MAP = {
-          collecting: ["收集中", "badge-collecting"],
-          running: ["下载中", "badge-running"],
-          paused: ["已暂停", "badge-paused"],
-          done: ["已完成", "badge-done"],
-          failed: ["失败", "badge-failed"],
-        };
-
-        function taskActionButtons(t) {
-          var id = esc(t.id);
-          var btns = "";
-          if (t.status === "paused") {
-            btns +=
-              '<button class="icon-btn" data-act="resume" data-id="' +
-              id +
-              '" title="继续下载">▶</button>';
+        // ---------- 启动：已登录则直接跳转对应页面 ----------
+        var savedToken = localStorage.getItem(LS.token);
+        if (savedToken) {
+          if (localStorage.getItem(LS.role) === "admin") {
+            location.href = "admin/";
           } else {
-            btns +=
-              '<button class="icon-btn" data-act="pause" data-id="' +
-              id +
-              '" title="暂停下载">⏸</button>';
+            location.href = "user.html";
           }
-          btns +=
-            '<button class="icon-btn danger" data-act="delete" data-id="' +
-            id +
-            '" title="删除任务及文件">🗑</button>';
-          return '<span class="task-actions">' + btns + "</span>";
-        }
-
-        function refreshTasks() {
-          return apiGet("tasks", true)
-            .then(function (data) {
-              var tasks = data.data || [];
-              $("taskCount").textContent = tasks.length;
-              $("emptyState").style.display = tasks.length ? "none" : "";
-              var list = $("taskList");
-              list.innerHTML = tasks
-                .map(function (t) {
-                  var st = STATUS_MAP[t.status] || [t.status, "badge-running"];
-                  var pct = Math.max(0, Math.min(100, Number(t.progress) || 0));
-                  return (
-                    '<div class="task-item" data-id="' +
-                    esc(t.id) +
-                    '">' +
-                    '<div class="task-row1">' +
-                    '<span class="task-name" title="' +
-                    esc(t.save_name || "") +
-                    '">' +
-                    esc(t.save_name || "(未命名)") +
-                    "</span>" +
-                    '<span class="badge ' +
-                    st[1] +
-                    '">' +
-                    st[0] +
-                    "</span>" +
-                    "</div>" +
-                    '<div class="progress"><div class="progress-bar" style="width:' +
-                    pct +
-                    '%"></div></div>' +
-                    '<div class="task-row2">' +
-                    '<span class="task-id">ID: ' +
-                    esc(t.id) +
-                    "</span>" +
-                    (t.user ? "<span>👤 " + esc(t.user) + "</span>" : "") +
-                    '<span style="flex:1"></span>' +
-                    '<span class="pct">' +
-                    pct +
-                    "%</span>" +
-                    taskActionButtons(t) +
-                    "</div>" +
-                    "</div>"
-                  );
-                })
-                .join("");
-            })
-            .catch(function () {
-              /* 403 已在 handleResp 处理；网络错误静默，等健康检查 */
-            });
-        }
-
-        $("taskList").addEventListener("click", function (e) {
-          var btn = e.target.closest(".icon-btn");
-          if (btn) {
-            e.stopPropagation();
-            handleTaskAction(
-              btn.getAttribute("data-act"),
-              btn.getAttribute("data-id"),
-            );
-            return;
-          }
-          var item = e.target.closest(".task-item");
-          if (item) showDetail(item.getAttribute("data-id"));
-        });
-
-        // ---------- 任务操作（暂停 / 继续 / 删除） ----------
-        function handleTaskAction(act, id) {
-          if (!id) return;
-          if (act === "pause") {
-            taskActionRequest("task/pause", id); // 暂停可逆，直接执行；仅删除弹确认框
-          } else if (act === "resume") {
-            taskActionRequest("task/resume", id);
-          } else if (act === "delete") {
-            showConfirm(
-              "删除任务",
-              "确定要删除该任务吗？<br><b>已下载的文件和临时文件将被一并删除，此操作不可恢复。</b>",
-              true,
-              function () {
-                taskActionRequest("task/delete", id);
-              },
-            );
-          }
-        }
-
-        function taskActionRequest(path, id) {
-          apiPost(path, { taskId: id })
-            .then(function () {
-              refreshTasks(); // 状态徽标变化即是操作反馈，成功无需弹窗
-            })
-            .catch(function (err) {
-              alert("操作失败：" + err.message);
-            });
-        }
-
-        function showConfirm(title, msgHtml, danger, onOk) {
-          $("confirmTitle").textContent = title;
-          $("confirmMsg").innerHTML = msgHtml;
-          $("confirmOk").className =
-            "btn " + (danger ? "btn-danger" : "btn-primary");
-          confirmOkHandler = onOk;
-          $("confirmMask").classList.add("show");
-        }
-
-        var confirmOkHandler = null;
-        function closeConfirm() {
-          $("confirmMask").classList.remove("show");
-          confirmOkHandler = null;
-        }
-        $("confirmOk").addEventListener("click", function () {
-          var handler = confirmOkHandler;
-          closeConfirm();
-          if (handler) handler();
-        });
-        $("confirmCancel").addEventListener("click", closeConfirm);
-        $("confirmClose").addEventListener("click", closeConfirm);
-        $("confirmMask").addEventListener("click", function (e) {
-          if (e.target === $("confirmMask")) closeConfirm();
-        });
-
-        function showDetail(id) {
-          apiGet("tasks/" + encodeURIComponent(id), true)
-            .then(function (data) {
-              var t = data.data || {};
-              var st = STATUS_MAP[t.status] || [t.status, "badge-running"];
-              var urls =
-                t.urls && t.urls.length ? t.urls : t.url ? [t.url] : [];
-              var rows = [
-                ["任务 ID", esc(t.id), true],
-                ["文件名", esc(t.save_name || "(未命名)"), false],
-                [
-                  "状态",
-                  '<span class="badge ' + st[1] + '">' + st[0] + "</span>",
-                  false,
-                ],
-                ["进度", (Number(t.progress) || 0) + "%", false],
-                ["所属用户", esc(t.user || "-"), false],
-                ["重试次数", String(t._retry_count || 0), false],
-                ["链接数", String(urls.length), false],
-              ];
-              var html = rows
-                .map(function (r) {
-                  return (
-                    "<dt>" +
-                    r[0] +
-                    "</dt><dd" +
-                    (r[2] ? ' class="mono"' : "") +
-                    ">" +
-                    r[1] +
-                    "</dd>"
-                  );
-                })
-                .join("");
-              html +=
-                '<dt>全部链接</dt><dd><div class="url-list">' +
-                urls
-                  .map(function (u) {
-                    return '<div class="url-item">' + esc(u) + "</div>";
-                  })
-                  .join("") +
-                "</div></dd>";
-              $("modalBody").innerHTML = html;
-              $("modalMask").classList.add("show");
-            })
-            .catch(function (err) {
-              alert("获取任务详情失败：" + err.message);
-            });
-        }
-
-        $("modalClose").addEventListener("click", function () {
-          $("modalMask").classList.remove("show");
-        });
-        $("modalMask").addEventListener("click", function (e) {
-          if (e.target === $("modalMask"))
-            $("modalMask").classList.remove("show");
-        });
-
-        // ---------- 重载配置 ----------
-        $("menuReload").addEventListener("click", function () {
-          closeUserMenu();
-          if (
-            !confirm(
-              "确定要重新加载服务器配置吗？\n（config.json / filter_rules.json 的修改将立即生效；AUTH_KEY 与 URL 前缀不受影响）",
-            )
-          )
-            return;
-          apiPost("reload", {})
-            .then(function (data) {
-              alert("✅ " + (data.message || "配置已重新加载"));
-              loadConfigInfo();
-            })
-            .catch(function (err) {
-              alert("❌ " + err.message);
-            });
-        });
-
-        // ---------- 健康检查 ----------
-        function checkHealth() {
-          return fetch(BASE + "health", { method: "GET" })
-            .then(function (r) {
-              return r.json();
-            })
-            .then(function (data) {
-              var t = data.success ? "服务正常" : "服务异常";
-              $("healthDot").className = "dot " + (data.success ? "ok" : "bad");
-              $("healthText").textContent = t;
-              $("healthDot").parentNode.setAttribute("title", t);
-            })
-            .catch(function () {
-              $("healthDot").className = "dot bad";
-              $("healthText").textContent = "连接失败";
-              $("healthDot").parentNode.setAttribute("title", "连接失败");
-            });
-        }
-
-        // ---------- 服务信息 ----------
-        function loadConfigInfo() {
-          apiGet("config")
-            .then(function (data) {
-              var c = data.data || {};
-              var on = function (v) {
-                return v ? "on" : "off";
-              };
-              var yn = function (v) {
-                return v ? "启用" : "禁用";
-              };
-              var chk = function (v) {
-                return v ? "✓" : "✗";
-              };
-
-              // 配置概览
-              var items = [
-                ["📡", "API 端口", c.api_port],
-                ["📤", "输出格式", c.output_format],
-                ["🔗", "URL 前缀", c.url_prefix || "(无)"],
-                [
-                  "🛡️",
-                  "SSRF 防护",
-                  yn(c.ssrf_protection),
-                  on(c.ssrf_protection),
-                ],
-                ["📊", "最大并发", c.max_concurrent_tasks],
-                [
-                  "🎬",
-                  "同视频模式",
-                  yn(c.same_video_mode),
-                  on(c.same_video_mode),
-                ],
-                [
-                  "📋",
-                  "规则",
-                  "拦截关键字" +
-                    chk(c.keywords_enabled) +
-                    "(" +
-                    c.ad_keyword_count +
-                    ") 文件名过滤" +
-                    chk(c.filename_filter_enabled) +
-                    " 去重" +
-                    chk(c.filename_dedup_enabled),
-                ],
-                [
-                  "👥",
-                  "用户",
-                  c.user_count > 0 ? c.user_count + " 个" : "未创建",
-                  c.user_count > 0 ? "" : "off",
-                ],
-              ];
-              var html =
-                '<div class="info-grid">' +
-                items
-                  .map(function (it) {
-                    return (
-                      '<div class="info-item"><span class="icon">' +
-                      it[0] +
-                      "</span>" +
-                      '<span class="label">' +
-                      it[1] +
-                      ":</span>" +
-                      '<span class="val ' +
-                      (it[3] || "") +
-                      '">' +
-                      esc(it[2]) +
-                      "</span></div>"
-                    );
-                  })
-                  .join("") +
-                "</div>";
-
-              // 猫抓插件配置
-              var prefix = c.url_prefix || "";
-              var sendUrl =
-                "http://你的容器IP:" + c.api_port + "/" + prefix + "/download";
-              html += '<div class="info-section">';
-              html += '<div class="info-section-title">— 猫抓插件配置 —</div>';
-              html +=
-                '<div style="margin-bottom:8px;font-size:12px;color:var(--text-2);">发送地址：</div>';
-              html += '<div class="info-code">' + esc(sendUrl) + "</div>";
-              html +=
-                '<div style="margin:10px 0 6px;font-size:12px;color:var(--text-2);">请求体：</div>';
-              html +=
-                '<div class="info-code">' +
-                esc(
-                  [
-                    "{",
-                    '  "url": "${url}",',
-                    '  "saveName": "${title}",',
-                    '  "referer": "${referer}",',
-                    '  "cookie": "${cookie}",',
-                    '  "userAgent": "${userAgent}",',
-                    '  "key": "' +
-                      (c.auth_key_masked || "<你的AUTH_KEY>") +
-                      '",',
-                    '  "user": "<你的user>",',
-                    '  "password": "<你的password>"',
-                    "}",
-                  ].join("\n"),
-                ) +
-                "</div>";
-              html += "</div>";
-
-              // API 接口
-              html += '<div class="info-section">';
-              html += '<div class="info-section-title">— API 接口 —</div>';
-              var p = prefix ? "/" + prefix : "";
-              var eps = [
-                ["POST", p + "/download", "添加任务"],
-                ["POST", p + "/reload", "重载配置"],
-              ];
-              html +=
-                '<div class="info-endpoints">' +
-                eps
-                  .map(function (e) {
-                    return (
-                      '<div class="info-endpoint"><span class="method">' +
-                      e[0] +
-                      '</span><span class="path">' +
-                      e[1] +
-                      '</span><span class="desc">' +
-                      e[2] +
-                      "</span></div>"
-                    );
-                  })
-                  .join("") +
-                "</div>";
-              html += "</div>";
-
-              $("infoBody").innerHTML = html;
-            })
-            .catch(function () {
-              $("infoBody").innerHTML =
-                '<div class="empty"><span class="icon">⚠️</span>配置信息加载失败</div>';
-            });
-        }
-
-        // ---------- 轮询（递归 setTimeout：上一次请求结束后才发下一次） ----------
-        // 用 pollingActive 标志驱动递归调度，保证同一时刻只有一个请求在途，
-        // 避免服务卡顿时 setInterval 请求堆积、凭证失效瞬间多个 403 触发 IP 封禁
-        var pollingActive = false;
-
-        function startPolling() {
-          stopPolling();
-          pollingActive = true;
-          loadConfigInfo();
-          scheduleTasks();
-          scheduleHealth();
-        }
-
-        // 任务轮询：refreshTasks 结束（成功/失败/403 跳登录）后再等 3 秒
-        function scheduleTasks() {
-          if (!pollingActive) return;
-          if (document.hidden) {
-            pollTimer = setTimeout(scheduleTasks, 3000);
-            return;
-          }
-          var next = function () {
-            if (pollingActive) pollTimer = setTimeout(scheduleTasks, 3000);
-          };
-          refreshTasks().then(next, next);
-        }
-
-        // 健康检查：checkHealth 结束后再等 10 秒
-        function scheduleHealth() {
-          if (!pollingActive) return;
-          if (document.hidden) {
-            healthTimer = setTimeout(scheduleHealth, 10000);
-            return;
-          }
-          checkHealth().then(
-            function () {
-              if (pollingActive)
-                healthTimer = setTimeout(scheduleHealth, 10000);
-            },
-            function () {
-              if (pollingActive)
-                healthTimer = setTimeout(scheduleHealth, 10000);
-            },
-          );
-        }
-
-        function stopPolling() {
-          pollingActive = false;
-          if (pollTimer) {
-            clearTimeout(pollTimer);
-            pollTimer = null;
-          }
-          if (healthTimer) {
-            clearTimeout(healthTimer);
-            healthTimer = null;
-          }
-        }
-
-        // ---------- 启动 ----------
-        loadCreds();
-        if (creds.token) {
-          // 持有未过期的令牌时静默恢复会话，否则停留在登录页
-          tryLogin(true);
         }
       })();
     </script>

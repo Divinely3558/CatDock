@@ -1,0 +1,187 @@
+#!/usr/bin/env python3
+"""adminctl - catdock 管理员账户管理命令行工具
+
+管理员（role='admin'）可登录管理控制台（/{prefix}/admin/）管理下载用户与 AUTH_KEY。
+默认管理员 admin 在服务首次启动时自动创建（14 位随机密码，见容器启动日志）；
+本工具用于额外管理员的增删改查。
+
+实际逻辑位于 core/data_db.py（data.db 的 users 表）。
+
+用法:
+    adminctl add <用户名>        添加管理员（交互式输入密码）
+    adminctl del <用户名>        删除管理员（至少保留一个）
+    adminctl password <用户名>   修改管理员密码
+    adminctl list                列出全部用户及角色/状态
+    adminctl --help
+
+用户名规则：仅字母+数字、不能纯数字、字母数量不少于 4 位。
+密码以 pbkdf2 + 随机盐 哈希存储，不留明文。
+"""
+import os
+import sys
+import getpass
+
+# 将模块所在目录加入 sys.path，以便导入 data_db 模块
+# 查找顺序：脚本同目录（容器内平铺布局）→ ../core/（仓库源码布局）
+_BASE = os.path.dirname(os.path.realpath(__file__))
+sys.path.insert(0, os.path.join(_BASE, '..', 'core'))
+sys.path.insert(0, _BASE)
+
+import data_db
+
+
+def _prompt_password(label="密码"):
+    """交互式读取并确认密码，返回明文密码或 None（取消）"""
+    try:
+        pwd = getpass.getpass(f"请输入{label}: ")
+    except (EOFError, KeyboardInterrupt):
+        print("\n已取消")
+        return None
+    if not pwd:
+        print("错误: 密码不能为空", file=sys.stderr)
+        return None
+    try:
+        pwd2 = getpass.getpass(f"请再次输入{label}: ")
+    except (EOFError, KeyboardInterrupt):
+        print("\n已取消")
+        return None
+    if pwd != pwd2:
+        print("错误: 两次输入的密码不一致", file=sys.stderr)
+        return None
+    return pwd
+
+
+def _cmd_add(args):
+    if not args:
+        print("用法: adminctl add <用户名>", file=sys.stderr)
+        return 1
+    username = args[0].strip()
+    ok, reason = data_db.validate_username(username)
+    if not ok:
+        print(f"错误: {reason}", file=sys.stderr)
+        return 1
+    password = _prompt_password()
+    if password is None:
+        return 1
+    try:
+        data_db.add_user(username, password, role='admin')
+    except ValueError as e:
+        print(f"错误: {e}", file=sys.stderr)
+        return 1
+    except Exception as e:
+        print(f"添加管理员失败: {e}", file=sys.stderr)
+        print(f"数据库路径: {data_db.DB_PATH}", file=sys.stderr)
+        return 1
+    print(f"已添加管理员: {username}")
+    return 0
+
+
+def _cmd_del(args):
+    if not args:
+        print("用法: adminctl del <用户名>", file=sys.stderr)
+        return 1
+    username = args[0].strip()
+    role = data_db.user_role(username)
+    if role is None:
+        print(f"管理员不存在: {username}", file=sys.stderr)
+        return 1
+    if role != 'admin':
+        print(f"错误: {username} 不是管理员（普通用户请使用 userctl del）", file=sys.stderr)
+        return 1
+    try:
+        data_db.del_user(username)
+    except ValueError as e:
+        print(f"错误: {e}", file=sys.stderr)
+        return 1
+    except Exception as e:
+        print(f"删除管理员失败: {e}", file=sys.stderr)
+        print(f"数据库路径: {data_db.DB_PATH}", file=sys.stderr)
+        return 1
+    print(f"已删除管理员: {username}")
+    return 0
+
+
+def _cmd_password(args):
+    if not args:
+        print("用法: adminctl password <用户名>", file=sys.stderr)
+        return 1
+    username = args[0].strip()
+    if data_db.user_role(username) != 'admin':
+        print(f"错误: 管理员不存在: {username}", file=sys.stderr)
+        return 1
+    password = _prompt_password("新密码")
+    if password is None:
+        return 1
+    try:
+        data_db.change_password(username, password)
+    except ValueError as e:
+        print(f"错误: {e}", file=sys.stderr)
+        return 1
+    except Exception as e:
+        print(f"修改密码失败: {e}", file=sys.stderr)
+        print(f"数据库路径: {data_db.DB_PATH}", file=sys.stderr)
+        return 1
+    print(f"已修改管理员密码: {username}")
+    return 0
+
+
+def _cmd_list(_args):
+    try:
+        users = data_db.list_users_full()
+    except Exception as e:
+        print(f"读取用户列表失败: {e}", file=sys.stderr)
+        print(f"数据库路径: {data_db.DB_PATH}", file=sys.stderr)
+        return 1
+    if not users:
+        print("（无用户）")
+        return 0
+    print(f"{'用户名':<16}{'角色':<8}{'状态':<8}创建时间")
+    for username, role, disabled, created_at in users:
+        role_text = '管理员' if role == 'admin' else '用户'
+        state = '已禁用' if disabled else '正常'
+        print(f"{username:<16}{role_text:<8}{state:<8}{created_at or '-'}")
+    return 0
+
+
+def _print_usage():
+    print("用法: adminctl <子命令> [参数]")
+    print("")
+    print("子命令:")
+    print("  add <用户名>        添加管理员（交互式输入密码）")
+    print("  del <用户名>        删除管理员（至少保留一个）")
+    print("  password <用户名>   修改管理员密码")
+    print("  list                列出全部用户及角色/状态")
+    print("")
+    print("用户名规则: 仅字母+数字、不能纯数字、字母数量不少于 4 位")
+    print("普通下载用户请使用 userctl 管理。")
+    print("")
+    print("示例:")
+    print("  adminctl add boss2026")
+    print("  adminctl list")
+
+
+def main():
+    argv = sys.argv[1:]
+    if not argv or argv[0] in ('-h', '--help', 'help'):
+        _print_usage()
+        sys.exit(0 if argv else 1)
+
+    subcmd = argv[0]
+    rest = argv[1:]
+
+    if subcmd == 'add':
+        sys.exit(_cmd_add(rest))
+    elif subcmd == 'del':
+        sys.exit(_cmd_del(rest))
+    elif subcmd == 'password':
+        sys.exit(_cmd_password(rest))
+    elif subcmd in ('list', 'ls'):
+        sys.exit(_cmd_list(rest))
+    else:
+        print(f"未知子命令: {subcmd}", file=sys.stderr)
+        _print_usage()
+        sys.exit(1)
+
+
+if __name__ == '__main__':
+    main()

@@ -8,6 +8,7 @@ start_server / stop_server / 信号注册。
 """
 import sys
 import os
+import re
 import json
 import hmac
 import time
@@ -23,11 +24,14 @@ import app_config as cfg
 from app_logger import log_info, log_error, debug_print
 import data_db
 from security import is_safe_url, sanitize_url_for_log, check_rate_limit
-from filters import is_ad_content
+from filters import is_ad_content, get_user_rules, save_user_rules
 from task_store import load_tasks
-from dedup import init_dedup_cache
-from downloader import run_download, resume_tasks, pause_task, resume_paused_task, delete_task
-from webui import get_index_html
+from downloader import run_download, resume_tasks, pause_task, resume_paused_task, delete_task, cleanup_user_data
+from webui import get_login_html, get_user_html, get_admin_html
+
+
+# 已警告过的 IP（尝试登录已封禁账号时首次仅提示，再次尝试直接封 IP）
+_banned_account_warned_ips = set()
 
 
 def _record_failure_and_log(client_ip):
@@ -65,14 +69,16 @@ def _b64url_decode(text):
     return base64.urlsafe_b64decode(text + pad)
 
 
-def issue_auth_token(username):
+def issue_auth_token(username, role='user'):
     """为已通过两层认证的用户签发令牌：base64url(payload).base64url(hmac_sha256 签名)
 
-    payload 含唯一 jti 并登记到 data.db 的 auth_tokens 表，支持服务端主动吊销
-    （注销 / 改密码全端下线）。签发时顺带惰性清理已过期的登记行。
+    payload 含唯一 jti 与角色 role 并登记到 data.db 的 auth_tokens 表，支持服务端
+    主动吊销（注销 / 改密码 / 删用户 / 禁用用户 / AUTH_KEY 热更换）。
+    签发时顺带惰性清理已过期的登记行。
     """
     payload = json.dumps({
         'user': username,
+        'role': role,
         'exp': int(time.time()) + TOKEN_TTL_SECONDS,
         'jti': secrets.token_hex(16),
     }, ensure_ascii=False).encode('utf-8')
@@ -81,6 +87,27 @@ def issue_auth_token(username):
     data_db.cleanup_expired_tokens()
     data_db.save_auth_token(claims['jti'], username, claims['exp'])
     return _b64url_encode(payload) + '.' + _b64url_encode(sig)
+
+
+def verify_token_claims(token):
+    """仅校验签名与有效期，返回 claims（含 user/role/jti/exp）；无效返回 None。
+
+    不含吊销/禁用状态校验，供认证层细分失败原因（如账号被禁用不计封禁）。
+    """
+    try:
+        payload_b64, sig_b64 = token.split('.', 1)
+        payload = _b64url_decode(payload_b64)
+        expected = hmac.new(_token_sign_key(), payload, hashlib.sha256).digest()
+        if not hmac.compare_digest(expected, _b64url_decode(sig_b64)):
+            return None
+        data = json.loads(payload.decode('utf-8'))
+        username = data.get('user')
+        exp = data.get('exp')
+        if not username or not isinstance(exp, int) or exp < int(time.time()):
+            return None
+        return data
+    except Exception:
+        return None
 
 
 def get_token_claims(token):
@@ -93,28 +120,19 @@ def get_token_claims(token):
 
 
 def verify_auth_token(token):
-    """校验令牌，返回对应的用户名；无效/过期/已吊销/用户已删除时返回 None"""
-    try:
-        payload_b64, sig_b64 = token.split('.', 1)
-        payload = _b64url_decode(payload_b64)
-        expected = hmac.new(_token_sign_key(), payload, hashlib.sha256).digest()
-        if not hmac.compare_digest(expected, _b64url_decode(sig_b64)):
-            return None
-        data = json.loads(payload.decode('utf-8'))
-        username = data.get('user')
-        exp = data.get('exp')
-        jti = data.get('jti')
-        if not username or not isinstance(exp, int) or exp < int(time.time()):
-            return None
-        # 吊销校验：jti 必须登记在册且未被吊销（改密码/注销/删用户后失效）
-        if not jti or not data_db.is_token_valid(jti):
-            return None
-        # 用户在有效期内被 userctl del 删除后，令牌立即失效
-        if not data_db.user_exists(username):
-            return None
-        return username
-    except Exception:
+    """完整校验令牌（签名/有效期/未吊销/用户存在且未禁用），返回用户名；无效返回 None"""
+    data = verify_token_claims(token)
+    if data is None:
         return None
+    jti = data.get('jti')
+    username = data.get('user')
+    # 吊销校验：jti 必须登记在册且未被吊销（改密码/注销/删用户/禁用/换 KEY 后失效）
+    if not jti or not data_db.is_token_valid(jti):
+        return None
+    # 用户在有效期内被删除或禁用后，令牌立即失效
+    if not username or not data_db.is_user_active(username):
+        return None
+    return username
 
 
 class DownloadHandler(http.server.BaseHTTPRequestHandler):
@@ -215,7 +233,8 @@ class DownloadHandler(http.server.BaseHTTPRequestHandler):
         return None
 
     def _check_auth(self, data=None):
-        """两层认证：第一层 AUTH_KEY（环境变量），第二层 用户名+密码（data.db 的 users 表）
+        """两层认证：第一层 AUTH_KEY（admin_config.json 的 auth_key 字段，支持热更新），
+        第二层 用户名+密码（data.db 的 users 表，区分 admin/user 角色）
 
         凭证传递方式（按优先级）：
         1. Authorization: Bearer <token> 请求头（POST /login 签发，所有业务接口通用）
@@ -225,17 +244,26 @@ class DownloadHandler(http.server.BaseHTTPRequestHandler):
         if not cfg.auth_key:
             return True
 
-        # 方式 1：Bearer 令牌。携带令牌时仅校验令牌本身（签名/有效期/用户存在），
+        # 方式 1：Bearer 令牌。携带令牌时仅校验令牌本身（签名/有效期/吊销/用户启用），
         # 令牌即已通过两层认证的凭证，无效令牌直接拒绝，不回退到明文凭证
         auth_header = self.headers.get('Authorization', '')
         if auth_header.startswith('Bearer '):
             token = auth_header[len('Bearer '):].strip()
+            claims = verify_token_claims(token) if token else None
             username = verify_auth_token(token) if token else None
             if username:
                 # 认证成功：清除该 IP 的失败计数，避免历史偶发失误累积导致误封
                 data_db.clear_auth_failure(self.client_address[0])
                 self.authenticated_user = username
+                self.authenticated_role = (claims.get('role') if claims else None) \
+                    or data_db.user_role(username) or 'user'
                 return True
+            # 签名有效但账号已被禁用：明确提示且不计入 IP 封禁（用户已被管理员禁用）
+            if claims and data_db.user_exists(claims.get('user', '')) \
+                    and not data_db.is_user_active(claims['user']):
+                log_error("认证失败：账号已被禁用")
+                self.send_json({'success': False, 'message': '账号已被禁用，请联系管理员'}, 403)
+                return False
             log_error("认证失败：令牌无效或已过期")
             _record_failure_and_log(self.client_address[0])
             self.send_json({'success': False, 'message': '登录已过期，请重新登录'}, 403)
@@ -249,42 +277,93 @@ class DownloadHandler(http.server.BaseHTTPRequestHandler):
                     return val
             return None
 
-        # 第一层：AUTH_KEY（环境变量），通过 key/auth_key/token 字段传入
+        # 第一层：AUTH_KEY（admin_config.json，管理网页可热更新），通过 key/auth_key/token 字段传入
         # 第一层失败计入 IP 封禁计数（IP 级拦截）
         request_key = _get_field('key', 'auth_key', 'token')
         if request_key is None or not hmac.compare_digest(request_key, cfg.auth_key):
-            log_error(f"认证失败：第一层 AUTH_KEY 校验未通过")
+            log_error("认证失败：第一层 AUTH_KEY 校验未通过")
             # AUTH_KEY 错误，计入认证失败次数（阶梯封禁：首次临时、再次永久）
             _record_failure_and_log(self.client_address[0])
             self.send_json({'success': False, 'message': '认证失败，密钥不正确'}, 403)
             return False
 
         # 未初始化拦截：data.db 中无任何用户时，拒绝所有业务请求（/health 在此之前已放行）。
-        # 不计入 IP 封禁（AUTH_KEY 已正确，属部署未完成而非攻击）；userctl add 后实时生效。
+        # 不计入 IP 封禁（AUTH_KEY 已正确，属部署未完成而非攻击）；userctl/adminctl add 后实时生效。
         if data_db.user_count() == 0:
             log_error(f"系统未初始化（无用户），拒绝请求: {self.path}")
             self.send_json({
                 'success': False,
-                'message': '系统尚未初始化：无可用用户，请在容器内执行 userctl add <用户名> 添加用户后重试'
+                'message': '系统尚未初始化：无可用用户，请在容器内执行 adminctl add 或 userctl add 添加用户后重试'
             }, 503)
             return False
 
         # 第二层：用户名+密码（data.db 的 users 表），通过 user/password 字段传入
-        # key 值 或 账号密码 任一不正确，均计入 IP 封禁计数
-        # （10 分钟内累计 5 次：首次触发临时封禁 30 分钟，再次触发永久封禁）
+        # 分两种失败路径：
+        #   - 用户不存在 → IP 级封禁（10 次触发，防扫描爆破）
+        #   - 用户存在但密码错误 → 账号级封禁（5 次触发，自动禁用该账号）
         request_user = _get_field('user', 'usr')
         request_password = _get_field('password')
-        if not request_user or not request_password or \
-                not data_db.verify_user(request_user, request_password):
-            log_error(f"认证失败：用户名或密码不正确")
+
+        # 用户不存在 → IP 级封禁
+        if not request_user or not data_db.user_exists(request_user):
+            log_error("认证失败：用户名或密码不正确")
             _record_failure_and_log(self.client_address[0])
             self.send_json({'success': False, 'message': '认证失败，用户名或密码不正确'}, 403)
             return False
 
-        # 记录已认证用户，供下载目录分流 (/home/downloader/downloads/<用户名>)
-        # 认证成功：清除该 IP 的失败计数，避免历史偶发失误累积导致误封
+        # 账号已禁用（管理员手动禁用 或 密码错误自动禁用）
+        # 首次尝试：提示警告
+        # 再次尝试：直接封 IP（封禁后连接会被直接断开，无需返回响应）
+        if not data_db.is_user_active(request_user):
+            ip = self.client_address[0]
+            if ip in _banned_account_warned_ips:
+                data_db.add_banned_ip(ip)
+                log_error(f"IP {ip} 反复尝试已封禁账号 {request_user}，已直接封禁 IP")
+                self.send_json({'success': False, 'message': '账号已被封禁'}, 403)
+            else:
+                _banned_account_warned_ips.add(ip)
+                log_error(f"认证失败：账号 {request_user} 已被禁用（IP {ip} 首次尝试，仅提示）")
+                self.send_json({'success': False,
+                                'message': '该账号已被封禁，再次尝试将封禁您的 IP 地址'}, 403)
+            return False
+
+        # 密码错误（用户存在）→ 账号级封禁
+        if not request_password or not data_db.verify_user(request_user, request_password):
+            log_error(f"认证失败：密码不正确（用户: {request_user}）")
+            locked = data_db.record_account_failure(request_user)
+            if locked:
+                log_error(f"账号 {request_user} 因连续 {data_db.MAX_ACCOUNT_FAILURES} 次密码错误已被自动禁用")
+                self.send_json({'success': False,
+                                'message': f'密码错误次数过多，账号已被禁用，请联系管理员'}, 403)
+            else:
+                remaining = data_db.MAX_ACCOUNT_FAILURES - data_db.get_account_failure_count(request_user)
+                self.send_json({'success': False,
+                                'message': f'认证失败，密码不正确（剩余 {remaining} 次机会）'}, 403)
+            return False
+
+        # 记录已认证用户与角色，供下载目录分流与管理员鉴权
+        # 认证成功：清除该 IP 和该账号的失败计数
         data_db.clear_auth_failure(self.client_address[0])
+        data_db.clear_account_failure(request_user)
         self.authenticated_user = request_user
+        self.authenticated_role = data_db.user_role(request_user) or 'user'
+        return True
+
+    def _require_admin(self):
+        """管理员权限校验（在 _check_auth 通过后调用）。返回 True/False 并已发送响应。"""
+        if getattr(self, 'authenticated_role', 'user') != 'admin':
+            log_error(f"非管理员访问管理接口被拒绝: {self.path} (用户: {getattr(self, 'authenticated_user', '?')})")
+            self.send_json({'success': False, 'message': '需要管理员权限'}, 403)
+            return False
+        return True
+
+    def _require_download_user(self):
+        """下载用户身份校验：管理员不参与下载（无个人过滤规则/下载目录隔离需求）。"""
+        if getattr(self, 'authenticated_role', 'user') == 'admin':
+            log_error(f"管理员账户被拒绝执行下载相关操作: {self.path}")
+            self.send_json({'success': False,
+                            'message': '管理员账户不能发起下载，请使用下载用户账号'}, 403)
+            return False
         return True
 
     def get_path(self):
@@ -336,6 +415,16 @@ class DownloadHandler(http.server.BaseHTTPRequestHandler):
             self.wfile.write(b'404 Not Found')
             return
 
+        # /{prefix}/admin（无尾斜杠）重定向到 /{prefix}/admin/（管理网页）
+        if path == '/admin':
+            base = f'/{cfg.url_prefix}' if cfg.url_prefix else ''
+            self.send_response(302)
+            self.send_header('Location', f'{base}/admin/')
+            self.send_header('Content-Length', '0')
+            self.send_header('Connection', 'close')
+            self.end_headers()
+            return
+
         # 网页图标
         if path == '/favicon.png' or path == '/favicon.ico':
             # 查找顺序：同目录（容器内平铺布局）→ ../web/（仓库源码布局）
@@ -358,9 +447,19 @@ class DownloadHandler(http.server.BaseHTTPRequestHandler):
                     debug_print(f"发送图标失败: {e}")
             return
 
-        # 网页控制台：静态页面外壳（不含敏感信息），认证在页面内的 API 调用中完成
-        if path in ('/', '/index.html'):
-            self.send_html(get_index_html())
+        # 登录页：静态外壳，认证在页面内的 API 调用中完成
+        if path in ('/', '/index.html', '/login.html'):
+            self.send_html(get_login_html())
+            return
+
+        # 下载控制台：普通用户页面（/user 和 /user/ 均支持）
+        if path in ('/user', '/user/', '/user.html'):
+            self.send_html(get_user_html())
+            return
+
+        # 管理网页：独立静态外壳（用户管理 / AUTH_KEY），认证在页面内的 API 调用中完成
+        if path in ('/admin/', '/admin/index.html'):
+            self.send_html(get_admin_html())
             return
 
         if path == '/health':
@@ -378,7 +477,6 @@ class DownloadHandler(http.server.BaseHTTPRequestHandler):
         if path == '/config':
             self.send_json({'success': True, 'data': {
                 'api_port': cfg.bound_port or cfg.server_port,
-                'output_format': cfg.output_format,
                 'url_prefix': cfg.url_prefix,
                 'ssrf_protection': cfg.ssrf_protection,
                 'max_concurrent_tasks': cfg.max_concurrent_tasks,
@@ -387,8 +485,42 @@ class DownloadHandler(http.server.BaseHTTPRequestHandler):
                 'ad_keyword_count': len(cfg.ad_keywords),
                 'filename_filter_enabled': cfg.filename_filter_enabled,
                 'filename_dedup_enabled': cfg.filename_dedup_enabled,
-                'user_count': data_db.user_count(),
+                'user_count': data_db.download_user_count(),
                 'auth_key_masked': '***' if cfg.auth_key else '',
+            }})
+        elif path == '/admin/users':
+            if not self._require_admin():
+                return
+            users = [
+                {'username': u, 'role': r, 'disabled': bool(d), 'created_at': c}
+                for (u, r, d, c) in data_db.list_users_full()
+            ]
+            self.send_json({'success': True, 'data': users})
+        elif path == '/admin/filters':
+            # 全局过滤规则模板（config/filter_rules.json），新用户首启时复制
+            if not self._require_admin():
+                return
+            raw = getattr(cfg, 'filters_raw', {}) or {}
+            kw = raw.get('keywords') if isinstance(raw.get('keywords'), dict) else {}
+            ff = raw.get('filename_filter') if isinstance(raw.get('filename_filter'), dict) else {}
+            dd = raw.get('filename_dedup') if isinstance(raw.get('filename_dedup'), dict) else {}
+            self.send_json({'success': True, 'data': {
+                'keywords': {
+                    'enabled': bool(kw.get('enabled', False)),
+                    'list': [str(k) for k in kw.get('list', []) if str(k).strip()],
+                },
+                'filename_filter': {
+                    'enabled': bool(ff.get('enabled', False)),
+                    'list': [str(k) for k in ff.get('list', []) if str(k).strip()],
+                },
+                'filename_dedup': {
+                    'enabled': bool(dd.get('enabled', False)),
+                    'rules': [
+                        {'pattern': str(r.get('pattern', '') or ''),
+                         'replacement': str(r.get('replacement', '') or '')}
+                        for r in dd.get('rules', []) if isinstance(r, dict)
+                    ],
+                },
             }})
         elif path == '/tasks':
             with cfg.tasks_lock:
@@ -404,6 +536,33 @@ class DownloadHandler(http.server.BaseHTTPRequestHandler):
                     self.send_json({'success': True, 'data': self._mask_task(task)})
                 else:
                     self.send_json({'success': False, 'message': '任务不存在'}, 404)
+        elif path == '/filters':
+            # 用户各自的过滤规则（user/<名>/filter_rules.json）
+            if not self._require_download_user():
+                return
+            username = self.authenticated_user
+            raw = get_user_rules(username).get('raw') or {}
+            kw = raw.get('keywords') if isinstance(raw.get('keywords'), dict) else {}
+            ff = raw.get('filename_filter') if isinstance(raw.get('filename_filter'), dict) else {}
+            dd = raw.get('filename_dedup') if isinstance(raw.get('filename_dedup'), dict) else {}
+            self.send_json({'success': True, 'data': {
+                'keywords': {
+                    'enabled': bool(kw.get('enabled', False)),
+                    'list': [str(k) for k in kw.get('list', []) if str(k).strip()],
+                },
+                'filename_filter': {
+                    'enabled': bool(ff.get('enabled', False)),
+                    'list': [str(k) for k in ff.get('list', []) if str(k).strip()],
+                },
+                'filename_dedup': {
+                    'enabled': bool(dd.get('enabled', False)),
+                    'rules': [
+                        {'pattern': str(r.get('pattern', '') or ''),
+                         'replacement': str(r.get('replacement', '') or '')}
+                        for r in dd.get('rules', []) if isinstance(r, dict)
+                    ],
+                },
+            }})
         else:
             self.send_json({'success': False, 'message': '路径不存在'}, 404)
 
@@ -430,8 +589,10 @@ class DownloadHandler(http.server.BaseHTTPRequestHandler):
                 return
 
             self.send_json({'success': True, 'data': {
-                'token': issue_auth_token(self.authenticated_user),
+                'token': issue_auth_token(self.authenticated_user,
+                                          getattr(self, 'authenticated_role', 'user')),
                 'expiresIn': TOKEN_TTL_SECONDS,
+                'role': getattr(self, 'authenticated_role', 'user'),
             }})
         # 注销：吊销当前 Bearer 令牌（服务端 auth_tokens 表置 revoked），
         # 使该令牌在所有设备上立即失效；此后仅清理本地副本
@@ -452,6 +613,153 @@ class DownloadHandler(http.server.BaseHTTPRequestHandler):
             if claims and claims.get('jti'):
                 data_db.revoke_auth_token(claims['jti'])
             self.send_json({'success': True, 'message': '已注销，令牌已失效'})
+        # 修改自己密码：校验旧密码后更新并吊销全部令牌（改密即全端下线）
+        elif path == '/password':
+            try:
+                data = self._read_json_body()
+                if data is None:
+                    return
+
+                if not self._check_auth(data):
+                    return
+
+                if not self._check_rate_limit():
+                    return
+
+                username = self.authenticated_user
+                old_password = self._get_param(data, 'oldPassword', 'old_password', 'oldPwd')
+                new_password = self._get_param(data, 'newPassword', 'new_password', 'newPwd')
+                if not old_password or not new_password:
+                    self.send_json({'success': False, 'message': '旧密码与新密码不能为空'}, 400)
+                    return
+                if len(new_password) < 6:
+                    self.send_json({'success': False, 'message': '新密码至少 6 位'}, 400)
+                    return
+                # 旧密码校验：错误计入 IP 封禁计数（防令牌泄露后暴力试旧密码）
+                if not data_db.verify_user(username, old_password):
+                    log_error(f"修改密码失败：旧密码不正确 (用户: {username})")
+                    _record_failure_and_log(self.client_address[0])
+                    # 返回 400 而非 403：网页端 403 统一按"登录失效"处理会误登出
+                    self.send_json({'success': False, 'message': '旧密码不正确'}, 400)
+                    return
+                data_db.change_password(username, new_password)
+                log_info(f"用户已修改自己的密码: {username}（全部令牌已吊销）")
+                self.send_json({'success': True,
+                                'message': '密码已修改，所有登录已失效，请使用新密码重新登录'})
+            except Exception as e:
+                self.send_json({'success': False, 'message': str(e)}, 500)
+        # 全局过滤规则模板编辑：保存到 config/filter_rules.json，新用户首启时复制
+        elif path == '/admin/filters':
+            try:
+                data = self._read_json_body()
+                if data is None:
+                    return
+
+                if not self._check_auth(data):
+                    return
+
+                if not self._check_rate_limit():
+                    return
+
+                if not self._require_admin():
+                    return
+
+                kw = data.get('keywords') if isinstance(data.get('keywords'), dict) else None
+                ff = data.get('filename_filter') if isinstance(data.get('filename_filter'), dict) else None
+                dd = data.get('filename_dedup') if isinstance(data.get('filename_dedup'), dict) else None
+                if kw is None or ff is None or dd is None:
+                    self.send_json({'success': False, 'message': '缺少 keywords / filename_filter / filename_dedup 字段'}, 400)
+                    return
+
+                kw_list = [str(k).strip() for k in kw.get('list', []) if str(k).strip()]
+                ff_list = [str(k).strip() for k in ff.get('list', []) if str(k).strip()]
+                rules_out = []
+                for rule in dd.get('rules', []):
+                    if not isinstance(rule, dict):
+                        continue
+                    pattern = str(rule.get('pattern', '') or '').strip()
+                    replacement = str(rule.get('replacement', '') or '')
+                    if not pattern:
+                        continue
+                    try:
+                        re.compile(pattern)
+                    except re.error as e:
+                        self.send_json({'success': False,
+                                        'message': f'正则表达式不合法: {pattern} ({e})'}, 400)
+                        return
+                    rules_out.append({'pattern': pattern, 'replacement': replacement})
+
+                new_rules = {
+                    'keywords': {'enabled': bool(kw.get('enabled', False)), 'list': kw_list},
+                    'filename_filter': {'enabled': bool(ff.get('enabled', False)), 'list': ff_list},
+                    'filename_dedup': {'enabled': bool(dd.get('enabled', False)), 'rules': rules_out},
+                }
+                cfg._write_json_atomic(cfg.FILTER_RULES_FILE, new_rules, mode=0o644)
+                cfg.load_filters()
+                log_info(f"管理员已更新过滤规则模板: 拦截 {len(kw_list)} 个 / 过滤 {len(ff_list)} 个 / 去重 {len(rules_out)} 条")
+                self.send_json({'success': True, 'message': '过滤规则模板已保存，新用户将使用此模板'})
+            except Exception as e:
+                self.send_json({'success': False, 'message': str(e)}, 500)
+        # 用户过滤规则编辑：读取见 GET /filters；此处整体保存（原子写回，立即生效）
+        elif path == '/filters':
+            try:
+                data = self._read_json_body()
+                if data is None:
+                    return
+
+                if not self._check_auth(data):
+                    return
+
+                if not self._check_rate_limit():
+                    return
+
+                if not self._require_download_user():
+                    return
+
+                username = self.authenticated_user
+                kw = data.get('keywords') if isinstance(data.get('keywords'), dict) else None
+                ff = data.get('filename_filter') if isinstance(data.get('filename_filter'), dict) else None
+                dd = data.get('filename_dedup') if isinstance(data.get('filename_dedup'), dict) else None
+                if kw is None or ff is None or dd is None:
+                    self.send_json({'success': False, 'message': '缺少 keywords / filename_filter / filename_dedup 字段'}, 400)
+                    return
+
+                kw_list = kw.get('list', [])
+                ff_list = ff.get('list', [])
+                dd_rules = dd.get('rules', [])
+                if not isinstance(kw_list, list) or not isinstance(ff_list, list) or not isinstance(dd_rules, list):
+                    self.send_json({'success': False, 'message': 'list / rules 字段必须为数组'}, 400)
+                    return
+                kw_list = [str(k).strip() for k in kw_list if str(k).strip()]
+                ff_list = [str(k).strip() for k in ff_list if str(k).strip()]
+
+                rules_out = []
+                for rule in dd_rules:
+                    if not isinstance(rule, dict):
+                        continue
+                    pattern = str(rule.get('pattern', '') or '').strip()
+                    replacement = str(rule.get('replacement', '') or '')
+                    if not pattern:
+                        continue
+                    try:
+                        re.compile(pattern)
+                    except re.error as e:
+                        self.send_json({'success': False,
+                                        'message': f'正则表达式不合法: {pattern} ({e})'}, 400)
+                        return
+                    rules_out.append({'pattern': pattern, 'replacement': replacement})
+
+                new_rules = {
+                    'keywords': {'enabled': bool(kw.get('enabled', False)), 'list': kw_list},
+                    'filename_filter': {'enabled': bool(ff.get('enabled', False)), 'list': ff_list},
+                    'filename_dedup': {'enabled': bool(dd.get('enabled', False)), 'rules': rules_out},
+                }
+                save_user_rules(username, new_rules)
+                log_info(f"用户已更新过滤规则: {username}（拦截 {len(kw_list)} 个 / 过滤 {len(ff_list)} 个 / 去重 {len(rules_out)} 条）")
+                self.send_json({'success': True,
+                                'message': '过滤规则已保存，对新增下载任务立即生效'})
+            except Exception as e:
+                self.send_json({'success': False, 'message': str(e)}, 500)
         elif path == '/download':
             try:
                 data = self._read_json_body()
@@ -462,6 +770,10 @@ class DownloadHandler(http.server.BaseHTTPRequestHandler):
                     return
 
                 if not self._check_rate_limit():
+                    return
+
+                # 管理员不参与下载（下载用户专属）
+                if not self._require_download_user():
                     return
 
                 url = self._get_param(data, 'url', 'URL')
@@ -478,7 +790,7 @@ class DownloadHandler(http.server.BaseHTTPRequestHandler):
                 referer = self._get_param(data, 'referer', 'Referer', 'referrer')
                 cookie = self._get_param(data, 'cookie', 'Cookie')
                 user_agent = self._get_param(data, 'userAgent', 'user_agent', 'User-Agent', 'ua')
-                # 网页控制台可逐任务指定输出格式（mp4/mkv），不传时回退到 config.json 全局设置
+                # 网页控制台与猫抓插件均可逐任务指定输出格式（mp4/mkv），不传时默认 mp4
                 output_format = self._get_param(data, 'format', 'output_format', 'outputFormat')
 
                 # 限制最大并发任务数，防止资源耗尽
@@ -489,7 +801,7 @@ class DownloadHandler(http.server.BaseHTTPRequestHandler):
                     self.send_json({'success': False, 'message': f'并发任务数已达上限({cfg.max_concurrent_tasks})，请稍后再试'}, 429)
                     return
 
-                is_ad, keyword = is_ad_content(save_name, url)
+                is_ad, keyword = is_ad_content(save_name, url, user=self.authenticated_user)
                 if is_ad:
                     log_info(f"检测到广告内容，已拦截: {save_name} - 关键字: {keyword}")
                     self.send_json({
@@ -509,7 +821,7 @@ class DownloadHandler(http.server.BaseHTTPRequestHandler):
                         'duplicate': True
                     })
                 else:
-                    # 返回实际使用的输出格式（网页传了 format 时为 per-task 值，否则为全局配置）
+                    # 返回实际使用的输出格式（网页/插件传了 format 时为 per-task 值，否则默认 mp4）
                     _fmt = output_format if output_format in ('mp4', 'mkv') else cfg.output_format
                     self.send_json({
                         'success': True,
@@ -529,32 +841,134 @@ class DownloadHandler(http.server.BaseHTTPRequestHandler):
                 if not self._check_auth(data):
                     return
 
-                # 认证密钥(auth_key)和URL前缀(url_prefix)由环境变量固定，
-                # 重载配置时不覆盖，避免误改配置文件导致服务不可用
                 if not self._check_rate_limit():
                     return
 
-                saved_auth_key = cfg.auth_key
-                saved_url_prefix = cfg.url_prefix
-                try:
-                    cfg.load_config()
-                    # /reload 时重连数据库（关闭旧连接、重新打开、确保表结构）
-                    data_db.reconnect_db()
-                    # 检查用户数（del_user 已防删空，此处防外部替换 data.db 为空库）
-                    _uc = data_db.user_count()
-                    if _uc == 0:
-                        log_error("警告: 重载后 data.db 中无用户，请运行: userctl add <用户名>")
-                    else:
-                        log_info(f"重载完成，当前用户数: {_uc}")
-                finally:
-                    cfg.auth_key = saved_auth_key
-                    cfg.url_prefix = saved_url_prefix
+                if not self._require_admin():
+                    return
 
-                # 端口变更需重启容器才能生效（监听 socket 不会重绑）
-                if cfg.server_port != cfg.bound_port:
-                    log_error(f"警告: 端口已变更为 {cfg.server_port}，但需重启容器才能生效（当前仍监听 {cfg.bound_port}）")
+                # 重载仅作用于管理员热配置（admin_config.json：auth_key）
+                # 与过滤规则（filter_rules.json）；config.json 为系统级配置，
+                # 仅系统管理员修改且重启容器后生效，不随 reload 读取
+                old_auth_key = cfg.auth_key
+                cfg.load_filters()
+                cfg.load_admin_config()
+                # /reload 时重连数据库（关闭旧连接、重新打开、确保表结构）
+                data_db.reconnect_db()
+                # 检查用户数（del_user 已防删空，此处防外部替换 data.db 为空库）
+                _uc = data_db.user_count()
+                if _uc == 0:
+                    log_error("警告: 重载后 data.db 中无用户，请运行: adminctl add <用户名> 或 userctl add <用户名>")
+                else:
+                    log_info(f"重载完成，当前用户数: {_uc}")
+
+                # AUTH_KEY 变更后旧令牌签名立即失效，同时全量吊销登记令牌（双保险）
+                if cfg.auth_key != old_auth_key:
+                    data_db.revoke_all_tokens()
+                    log_info("重载后 AUTH_KEY 已变更，全部令牌已作废，需重新登录")
 
                 self.send_json({'success': True, 'message': '配置已重新加载'})
+            except Exception as e:
+                self.send_json({'success': False, 'message': str(e)}, 500)
+        elif path.startswith('/admin/'):
+            try:
+                data = self._read_json_body()
+                if data is None:
+                    return
+
+                if not self._check_auth(data):
+                    return
+
+                if not self._check_rate_limit():
+                    return
+
+                if not self._require_admin():
+                    return
+
+                if path == '/admin/auth-key':
+                    new_key = self._get_param(data, 'newKey', 'new_key', 'authKey')
+                    if not new_key or len(new_key) < 8:
+                        self.send_json({'success': False, 'message': '新 AUTH_KEY 长度不能少于 8 位'}, 400)
+                        return
+                    cfg.save_auth_key(new_key)
+                    # 令牌签名密钥源自 AUTH_KEY，旧令牌签名即刻失效；登记令牌一并全量吊销
+                    data_db.revoke_all_tokens()
+                    log_info("管理员已热更新 AUTH_KEY，全部令牌已作废，全员需重新登录")
+                    self.send_json({'success': True,
+                                    'message': 'AUTH_KEY 已更新，所有登录已失效，请使用新 KEY 重新登录'})
+                elif path == '/admin/users/add':
+                    username = self._get_param(data, 'username', 'user')
+                    password = self._get_param(data, 'password', 'newPassword')
+                    if not username or not password:
+                        self.send_json({'success': False, 'message': '用户名和密码不能为空'}, 400)
+                        return
+                    try:
+                        data_db.add_user(username, password, role='user')
+                    except ValueError as e:
+                        self.send_json({'success': False, 'message': str(e)}, 400)
+                        return
+                    log_info(f"管理员添加用户: {username}")
+                    self.send_json({'success': True, 'message': f'已添加用户: {username}'})
+                elif path == '/admin/users/delete':
+                    username = self._get_param(data, 'username', 'user')
+                    if not username:
+                        self.send_json({'success': False, 'message': '用户名不能为空'}, 400)
+                        return
+                    role = data_db.user_role(username)
+                    if role is None:
+                        self.send_json({'success': False, 'message': f'用户不存在: {username}'}, 400)
+                        return
+                    if role == 'admin':
+                        self.send_json({'success': False,
+                                        'message': '管理员账户请使用 adminctl 命令行工具管理'}, 400)
+                        return
+                    # 删除用户全部数据：终止其任务 + 删除 user/<名>、temp/<名>、downloads/<名>
+                    killed, cleanup_ok = cleanup_user_data(username)
+                    data_db.del_user(username)
+                    log_info(f"管理员删除用户: {username}（终止任务 {killed} 个，文件清理{'成功' if cleanup_ok else '存在失败'}）")
+                    msg = f'已删除用户: {username}（其全部任务与文件已一并清除）'
+                    self.send_json({'success': True if cleanup_ok else False, 'message': msg})
+                elif path == '/admin/users/password':
+                    username = self._get_param(data, 'username', 'user')
+                    new_password = self._get_param(data, 'newPassword', 'password', 'new_password')
+                    if not username or not new_password:
+                        self.send_json({'success': False, 'message': '用户名和新密码不能为空'}, 400)
+                        return
+                    role = data_db.user_role(username)
+                    if role is None:
+                        self.send_json({'success': False, 'message': f'用户不存在: {username}'}, 400)
+                        return
+                    if role == 'admin':
+                        self.send_json({'success': False,
+                                        'message': '管理员账户请使用 adminctl password 命令修改'}, 400)
+                        return
+                    try:
+                        data_db.change_password(username, new_password)
+                    except ValueError as e:
+                        self.send_json({'success': False, 'message': str(e)}, 400)
+                        return
+                    log_info(f"管理员重置用户密码: {username}")
+                    self.send_json({'success': True, 'message': f'已重置用户密码: {username}'})
+                elif path in ('/admin/users/ban', '/admin/users/unban'):
+                    username = self._get_param(data, 'username', 'user')
+                    if not username:
+                        self.send_json({'success': False, 'message': '用户名不能为空'}, 400)
+                        return
+                    role = data_db.user_role(username)
+                    if role is None:
+                        self.send_json({'success': False, 'message': f'用户不存在: {username}'}, 400)
+                        return
+                    if role == 'admin':
+                        self.send_json({'success': False,
+                                        'message': '管理员账户不可禁用，请使用 adminctl 命令行工具管理'}, 400)
+                        return
+                    flag = (path == '/admin/users/ban')
+                    data_db.set_user_disabled(username, flag)
+                    log_info(f"管理员{'禁用' if flag else '解禁'}用户: {username}")
+                    self.send_json({'success': True,
+                                    'message': f"已{'禁用' if flag else '解禁'}用户: {username}"})
+                else:
+                    self.send_json({'success': False, 'message': '路径不存在'}, 404)
             except Exception as e:
                 self.send_json({'success': False, 'message': str(e)}, 500)
         elif path in ('/task/pause', '/task/resume', '/task/delete'):
@@ -604,7 +1018,6 @@ def start_server(port):
     cfg.bound_port = port
 
     load_tasks()
-    init_dedup_cache()
     resume_tasks()
 
     cfg.server_instance.serve_forever(poll_interval=1)
