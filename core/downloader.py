@@ -397,7 +397,7 @@ def _post_process_direct_download(source_file, final_file, target_format, base_n
             if os.path.exists(fallback_file):
                 os.remove(fallback_file)
             os.rename(source_file, fallback_file)
-            log_info(f"已将源文件改名为 {os.path.basename(fallback_file)} 保留")
+            debug_print(f"已将源文件改名为 {os.path.basename(fallback_file)} 保留")
     except Exception as e:
         log_error(f"兜底改名失败: {e}")
     return True
@@ -677,7 +677,7 @@ def _run_download_with_retry(cmd, task_id, max_retries=5, initial_retry_count=0,
             return 'paused'
 
         if return_code == 0:
-            log_info(f"下载成功")
+            debug_print(f"下载命令执行成功: {base_name}")
             return True
 
         existing_file = find_existing_source_file(base_name)
@@ -1068,9 +1068,9 @@ def cleanup_copy_files(base_name):
             if item_path != keep_file:
                 try:
                     os.remove(item_path)
-                    log_info(f"已清理重复文件: {item_path}")
+                    debug_print(f"已清理重复文件: {item_path}")
                 except Exception as e:
-                    log_info(f"清理重复文件失败: {item_path} - {e}")
+                    debug_print(f"清理重复文件失败: {item_path} - {e}")
     elif copy_files:
         copy_files.sort(reverse=True, key=lambda x: x[0])
         keep_file = copy_files[0][1]
@@ -1082,18 +1082,18 @@ def cleanup_copy_files(base_name):
         try:
             if keep_file != new_path:
                 os.rename(keep_file, new_path)
-                log_info(f"已重命名主文件: {keep_file} -> {new_path}")
+                debug_print(f"已重命名主文件: {keep_file} -> {new_path}")
                 keep_file = new_path
         except Exception as e:
-            log_info(f"重命名主文件失败: {e}")
+            debug_print(f"重命名主文件失败: {e}")
 
         for file_size, item_path in copy_files[1:]:
             if item_path != keep_file:
                 try:
                     os.remove(item_path)
-                    log_info(f"已清理重复文件: {item_path}")
+                    debug_print(f"已清理重复文件: {item_path}")
                 except Exception as e:
-                    log_info(f"清理重复文件失败: {item_path} - {e}")
+                    debug_print(f"清理重复文件失败: {item_path} - {e}")
 
 
 def _finish_task(task_id, success, write_log=True):
@@ -1145,7 +1145,12 @@ def _finish_task(task_id, success, write_log=True):
         debug_print(f"任务已删除: {task_id}, 剩余任务数={len(cfg.tasks)}")
 
     if task_data:
-        log_info(f"任务 {task_id} {'已完成' if success else '失败'}并从任务列表中删除")
+        name = task_data.get('save_name') or task_id
+        if success:
+            log_info(f"下载完成: {name}")
+        else:
+            log_error(f"下载失败: {name}")
+        debug_print(f"任务 {task_id} 结束并从任务列表删除，剩余任务数={len(cfg.tasks)}")
 
 
 def _run_same_video_group_worker(task_id, base_name, output_format=None):
@@ -1404,12 +1409,12 @@ def _run_direct_download_worker(task_id, url, output_file, referer, cookie, user
                         if _post_process_direct_download(
                                 output_file, final_file,
                                 target_format or cfg.output_format, base_name):
-                            log_info(f"下载成功")
+                            debug_print(f"直链下载+后处理成功: {base_name}")
                             _finish_task(task_id, True)
                             return
                         debug_print(f"转封装未产出合格成品，准备重试下载...")
                     else:
-                        log_info(f"下载成功")
+                        debug_print(f"直链下载成功: {base_name}")
                         _finish_task(task_id, True)
                         return
                 else:
@@ -1505,20 +1510,17 @@ def resume_tasks():
     if not interrupted_tasks:
         return
 
-    log_info(f"发现 {len(interrupted_tasks)} 个未完成任务，准备恢复...")
+    log_info(f"检测到 {len(interrupted_tasks)} 个未完成任务，开始恢复")
 
     # 恢复任务前检查网络状态
-    log_info("检查网络状态...")
+    debug_print("检查网络状态...")
     network_ready = _check_network_ready(max_wait=10)
     if not network_ready:
-        log_warning("网络未就绪，尝试等待网络恢复...")
+        debug_print("网络未就绪，尝试等待网络恢复...")
         network_ready = _check_network_ready(max_wait=30)
         if not network_ready:
-            log_warning("网络长时间未就绪，仍然尝试恢复任务（下载会自动重试）")
-    if network_ready:
-        log_info("网络已就绪，开始恢复任务...")
-    else:
-        log_info("开始恢复任务（网络不稳定，下载会自动重试）")
+            log_warning("网络长时间未就绪，仍尝试恢复任务（下载会自动重试）")
+    debug_print(f"网络{'已就绪' if network_ready else '不稳定'}，开始恢复任务")
 
     for task in interrupted_tasks:
         _resume_single_task(task)
@@ -1546,14 +1548,11 @@ def _resume_single_task(task):
 
     url_hit, url_status = is_url_downloaded(url, user=user)
     if url_hit:
-        display_name = save_name or task_id
-        if url_status == 'success':
-            log_info(f"文件{display_name}已下载完成，清理残留任务记录")
-        else:
-            log_info(f"文件{display_name}下载失败，清理残留任务记录")
+        debug_print(f"URL 已在{'成功' if url_status == 'success' else '失败'}日志中，"
+                    f"清理残留任务记录: {save_name or task_id}")
         # URL 已存在于成功/失败日志（is_url_downloaded 命中即证明），
-        # 仅清除残留任务记录，不重复追加日志
-        _finish_task(task_id, True, write_log=False)
+        # 仅清除残留任务记录，不重复追加日志；按真实记录给出结果行
+        _finish_task(task_id, url_status == 'success', write_log=False)
         return
 
     base_name = save_name or f"download_{task_id}"
@@ -1568,7 +1567,7 @@ def _resume_single_task(task):
 
     has_existing, existing_path = has_existing_video(base_name)
     if has_existing:
-        log_info(f"已存在同名视频文件，跳过恢复: {existing_path}")
+        debug_print(f"已存在同名视频文件，跳过恢复: {existing_path}")
         cleanup_copy_files(base_name)
         _finish_task(task_id, True)
         return
@@ -1576,7 +1575,7 @@ def _resume_single_task(task):
     # 检查是否存在 .f4v 直链已下载但未转 mp4 的残留源文件
     f4v_source = os.path.join(get_download_dir(), f"{base_name}.f4v")
     if os.path.exists(f4v_source) and os.path.getsize(f4v_source) >= cfg.MIN_FILE_SIZE:
-        log_info(f"已存在未转 mp4 的 .f4v 源文件，尝试收尾: {f4v_source}")
+        debug_print(f"已存在未转 mp4 的 .f4v 源文件，尝试收尾: {f4v_source}")
         final_file = os.path.join(get_download_dir(), f"{base_name}.mp4")
         ok = _post_process_direct_download(f4v_source, final_file, 'mp4', base_name)
         _finish_task(task_id, ok)
@@ -1585,7 +1584,7 @@ def _resume_single_task(task):
     # 检查是否存在未转换的源文件（下载完成但尚未转换）
     source_file = find_existing_source_file(base_name)
     if source_file and os.path.getsize(source_file) >= cfg.MIN_FILE_SIZE:
-        log_info(f"已存在未转换的源文件，尝试转换: {source_file}")
+        debug_print(f"已存在未转换的源文件，尝试转换: {source_file}")
         output_file = os.path.join(get_download_dir(), f"{base_name}.{cfg.output_format}")
         ok, _ = _finalize_download_outputs(base_name, output_file, cfg.output_format)
         _finish_task(task_id, ok)
@@ -1593,7 +1592,7 @@ def _resume_single_task(task):
 
     has_any, any_path = has_any_existing_file(base_name)
     if has_any:
-        log_info(f"已存在相关文件，跳过恢复并清理: {any_path}")
+        debug_print(f"已存在相关文件，跳过恢复并清理: {any_path}")
         cleanup_copy_files(base_name)
         _finish_task(task_id, True)
         return
@@ -1623,17 +1622,17 @@ def _resume_single_task(task):
         if is_direct_video:
             file_size = os.path.getsize(output_file)
             if file_size >= cfg.MIN_FILE_SIZE:
-                log_info(f"文件已存在且完整，跳过恢复: {output_file}")
+                debug_print(f"文件已存在且完整，跳过恢复: {output_file}")
                 _finish_task(task_id, True)
                 return
             else:
-                log_info(f"文件已存在但过小，继续断点续传: {output_file}")
+                debug_print(f"文件已存在但过小 ({file_size} bytes)，继续断点续传: {output_file}")
         else:
-            log_info(f"文件已存在，跳过恢复: {output_file}")
+            debug_print(f"文件已存在，跳过恢复: {output_file}")
             _finish_task(task_id, True)
             return
 
-    log_info(f"恢复下载: {save_name or task_id} (ID: {task_id})")
+    log_info(f"恢复下载: {save_name or task_id}")
     debug_print(f"启动恢复任务线程: {task_id} (重试次数: {retry_count})")
 
     # 状态置回 running（暂停恢复时由 'paused' 改回）
@@ -1678,7 +1677,9 @@ def pause_task(task_id):
 
     _terminate_proc(proc, graceful=True)
     save_tasks(force=True)
-    log_info(f"任务已暂停: {task.get('save_name') or task_id} (ID: {task_id})")
+    name = task.get('save_name') or task_id
+    log_info(f"已暂停: {name}")
+    debug_print(f"任务已暂停 (ID: {task_id})")
     return True, '任务已暂停'
 
 
@@ -1736,7 +1737,8 @@ def delete_task(task_id):
             except Exception as e:
                 log_error(f"删除任务文件失败: {item_path} - {e}")
 
-    log_info(f"任务已删除: {base_name} (ID: {task_id})，清理文件 {removed} 个")
+    log_info(f"已删除: {base_name}")
+    debug_print(f"任务已删除 (ID: {task_id})，清理文件 {removed} 个")
     return True, f'任务已删除（清理文件 {removed} 个）'
 
 
@@ -1768,10 +1770,8 @@ def run_download(url, save_name=None, referer=None, cookie=None, user_agent=None
         name_hit, name_status = is_filename_downloaded(base_name, user=user)
         if name_hit:
             debug_print(f"[同视频模式] 文件名已下载记录过，跳过下载: {base_name}, status={name_status}")
-            if name_status == 'success':
-                log_info(f"文件{base_name}下载成功")
-            else:
-                log_info(f"文件{base_name}下载失败")
+            reason = "已下载过" if name_status == 'success' else "此前已失败"
+            log_info(f"跳过下载: {base_name}（{reason}）")
             return None, False
 
         # 2) 检查本地文件是否已存在（调用共享检查）
@@ -1779,7 +1779,7 @@ def run_download(url, save_name=None, referer=None, cookie=None, user_agent=None
         if skip:
             suffix = "同名视频文件" if hit_path and is_video_file(os.path.basename(hit_path)) else "相关文件"
             debug_print(f"[同视频模式] {suffix}已存在，跳过下载: {hit_path}")
-            log_info(f"{suffix}已存在，跳过下载: {hit_path}")
+            log_info(f"跳过下载: {base_name}（文件已存在）")
             return None, False
 
         # 3) 加入 / 创建视频组
@@ -1843,8 +1843,9 @@ def run_download(url, save_name=None, referer=None, cookie=None, user_agent=None
             }
         save_tasks()
 
-        debug_print(f"[同视频模式] 启动多链接调度任务: {base_name} (ID: {task_id})")
-        log_info(f"开始下载任务: {base_name} (ID: {task_id})" + (f" 过滤广告 {ad_count} 个" if ad_count > 0 else ""))
+        debug_print(f"[同视频模式] 启动多链接调度任务: {base_name} (ID: {task_id})"
+                    + (f"，文件名过滤 {ad_count} 处" if ad_count > 0 else ""))
+        log_info(f"开始下载: {base_name}")
         # 稍微延迟启动，给短时间内批量提交的同文件名链接留一个收集窗口
         def delayed_start():
             time.sleep(1)
@@ -1858,23 +1859,22 @@ def run_download(url, save_name=None, referer=None, cookie=None, user_agent=None
     if url_hit:
         debug_print(f"URL已在日志中，跳过下载, status={url_status}")
         display_name = save_name or normalized_url
-        if url_status == 'success':
-            log_info(f"文件{display_name}下载成功")
-        else:
-            log_info(f"文件{display_name}下载失败")
+        reason = "已下载过" if url_status == 'success' else "此前已失败"
+        log_info(f"跳过下载: {display_name}（{reason}）")
         return None, False
 
     with cfg.tasks_lock:
         for task_id, task in cfg.tasks.items():
             task_url = task['url'].strip().rstrip('/')
             if task_url == normalized_url:
+                dup_name = task.get('save_name') or task_id
                 if task['status'] == 'running':
                     debug_print(f"检测到重复链接，复用任务: {task_id}")
-                    log_info(f"检测到重复链接，复用任务: {task_id}")
+                    log_info(f"跳过下载: {dup_name}（任务已在下载中）")
                     return task_id, True
                 else:
                     debug_print(f"该URL任务已存在（{task['status']}），跳过下载")
-                    log_info(f"该URL任务已存在（{task['status']}），跳过下载")
+                    log_info(f"跳过下载: {dup_name}（任务已存在:{task['status']}）")
                     return None, False
         debug_print(f"任务列表中无匹配URL，准备创建新任务")
 
@@ -1890,10 +1890,9 @@ def run_download(url, save_name=None, referer=None, cookie=None, user_agent=None
     if skip:
         if hit_path and is_video_file(os.path.basename(hit_path)):
             debug_print(f"已存在同名视频文件: {hit_path}")
-            log_info(f"已存在同名视频文件，跳过下载: {hit_path}")
         else:
             debug_print(f"已存在相关文件（可能是.copy文件）: {hit_path}")
-            log_info(f"已存在相关文件（可能是.copy文件），跳过下载: {hit_path}")
+        log_info(f"跳过下载: {base_name}（文件已存在）")
         return None, False
 
     if is_direct_video:
@@ -1907,17 +1906,20 @@ def run_download(url, save_name=None, referer=None, cookie=None, user_agent=None
         if is_direct_video:
             file_size = os.path.getsize(output_file)
             if file_size < cfg.MIN_FILE_SIZE:
-                log_info(f"文件已存在但过小 ({file_size} bytes)，继续断点续传: {output_file}")
+                debug_print(f"文件已存在但过小 ({file_size} bytes)，继续断点续传: {output_file}")
             else:
-                log_info(f"文件已存在，跳过下载: {output_file}")
+                debug_print(f"文件已存在，跳过下载: {output_file}")
+                log_info(f"跳过下载: {base_name}（文件已存在）")
                 return None, False
         else:
-            log_info(f"文件已存在，跳过下载: {output_file}")
+            debug_print(f"文件已存在，跳过下载: {output_file}")
+            log_info(f"跳过下载: {base_name}（文件已存在）")
             return None, False
     else:
         alternate_output = find_existing_output_file(base_name)
         if alternate_output:
-            log_info(f"已检测到现有输出文件，跳过下载: {alternate_output}")
+            debug_print(f"已检测到现有输出文件，跳过下载: {alternate_output}")
+            log_info(f"跳过下载: {base_name}（文件已存在）")
             return None, False
 
     with cfg.tasks_lock:
@@ -1939,14 +1941,15 @@ def run_download(url, save_name=None, referer=None, cookie=None, user_agent=None
 
     save_tasks()
 
-    log_info(f"开始下载任务: {base_name} (ID: {task_id})" + (f" 过滤广告 {ad_count} 个" if ad_count > 0 else ""))
-    debug_print(f"任务启动: {task_id}, is_direct_video={is_direct_video}, output_file={output_file}")
+    debug_print(f"任务启动: {task_id}, is_direct_video={is_direct_video}, video_ext={video_ext}, "
+                f"output_file={output_file}" + (f"，文件名过滤 {ad_count} 处" if ad_count > 0 else ""))
+    log_info(f"开始下载: {base_name}")
 
     if is_direct_video:
         if needs_convert:
-            log_info(f"检测到直接视频链接 {video_ext}，使用 curl 下载并转为 mp4")
+            debug_print(f"检测到直接视频链接 {video_ext}，使用 curl 下载并转为 mp4")
         else:
-            log_info(f"检测到直接视频链接，使用 curl 直接下载: {video_ext}")
+            debug_print(f"检测到直接视频链接，使用 curl 直接下载: {video_ext}")
         thread = threading.Thread(
             target=_run_direct_download_worker,
             args=(task_id, url, curl_target, referer, cookie, user_agent),
@@ -1959,7 +1962,7 @@ def run_download(url, save_name=None, referer=None, cookie=None, user_agent=None
 
         _user_kws = get_ad_keywords(user)
         if _user_kws:
-            log_info(f"已添加 {len(_user_kws)} 个广告关键字过滤")
+            debug_print(f"已添加 {len(_user_kws)} 个广告关键字过滤")
 
         thread = threading.Thread(target=_run_worker, args=(task_id, cmd, base_name, output_file, fmt), daemon=True)
         thread.start()

@@ -816,7 +816,8 @@ class DownloadHandler(http.server.BaseHTTPRequestHandler):
 
                 is_ad, keyword = is_ad_content(save_name, url, user=self.authenticated_user)
                 if is_ad:
-                    log_info(f"检测到广告内容，已拦截: {save_name} - 关键字: {keyword}")
+                    log_info(f"已拦截广告: {save_name}")
+                    debug_print(f"广告拦截命中关键字: {keyword}，URL: {sanitize_url_for_log(url)[:80]}")
                     self.send_json({
                         'success': False,
                         'message': f'检测到广告内容，已拦截。关键字: {keyword}',
@@ -1008,7 +1009,7 @@ class DownloadHandler(http.server.BaseHTTPRequestHandler):
                 else:
                     ok, message = delete_task(task_id)
 
-                log_info(f"任务操作 {path}: taskId={task_id}, 结果={ok}")
+                debug_print(f"任务操作 {path}: taskId={task_id}, 结果={ok}")
                 self.send_json({'success': ok, 'message': message}, 200 if ok else 400)
             except Exception as e:
                 self.send_json({'success': False, 'message': str(e)}, 500)
