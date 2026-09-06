@@ -132,6 +132,176 @@ def is_direct_video_url(url):
     return ext in DIRECT_VIDEO_EXTS, ext
 
 
+def is_playlist_url(url):
+    """URL 路径扩展名明确为流媒体播放列表（m3u8/mpd），无需内容探测"""
+    import urllib.parse
+    path = urllib.parse.urlsplit(url).path.lower()
+    return os.path.splitext(path)[1] in ('.m3u8', '.mpd')
+
+
+# 明确的流媒体播放列表 / 直链视频 Content-Type 映射
+_CONTENT_TYPE_KIND = {
+    'application/vnd.apple.mpegurl': 'm3u8',
+    'application/x-mpegurl': 'm3u8',
+    'audio/mpegurl': 'm3u8',
+    'video/mp4': '.mp4',
+    'video/quicktime': '.mov',
+    'video/x-flv': '.flv',
+    'video/x-matroska': '.mkv',
+    'video/webm': '.webm',
+    'video/x-msvideo': '.avi',
+    'video/x-ms-wmv': '.wmv',
+    'video/mp2t': '.ts',
+}
+
+
+def _sniff_media_magic(head):
+    """根据响应内容前若干字节的魔数判断媒体类型。
+
+    返回 'mp4'（ISO BMFF：mp4/f4v/mov）/ 'flv' / 'm3u8' / 'avi' / 'mkv' / None。
+    """
+    h = head[:4096].lstrip()
+    if h.startswith(b'FLV'):
+        return 'flv'
+    if len(h) >= 12 and h[4:8] == b'ftyp':
+        return 'mp4'
+    if h.startswith(b'#EXTM3U'):
+        return 'm3u8'
+    if h.startswith(b'RIFF') and len(h) >= 12 and h[8:12] == b'AVI ':
+        return 'avi'
+    if h.startswith(b'\x1a\x45\xdf\xa3'):
+        return 'mkv'
+    return None
+
+
+def _ext_from_content_disposition(header_value):
+    """从 Content-Disposition 头解析文件名扩展名（兼容 filename*= UTF-8'' 形式）"""
+    if not header_value:
+        return None
+    m = re.search(r"filename\*\s*=\s*[^']*'[^']*'([^;]+)", header_value, re.I)
+    if not m:
+        m = re.search(r'filename\s*=\s*"([^"]+)"', header_value, re.I)
+    if not m:
+        m = re.search(r'filename\s*=\s*([^;]+)', header_value, re.I)
+    if not m:
+        return None
+    import urllib.parse
+    name = urllib.parse.unquote(m.group(1).strip())
+    ext = os.path.splitext(name)[1].lower()
+    return ext if ext else None
+
+
+def _parse_last_response_headers(raw_headers):
+    """curl -D - 在跟随多次跳转时会输出多段响应头，取最后一段解析为 dict"""
+    blocks = re.split(rb'(?m)^HTTP/', raw_headers)
+    last = blocks[-1] if blocks else b''
+    headers = {}
+    for line in last.splitlines()[1:]:
+        try:
+            text = line.decode('utf-8', errors='ignore').strip()
+        except Exception:
+            continue
+        if ':' in text:
+            key, val = text.split(':', 1)
+            headers[key.strip().lower()] = val.strip()
+    return headers
+
+
+def _probe_media_url(url, referer=None, cookie=None, user_agent=None):
+    """探测无扩展名 URL 的真实媒体类型（如下载页链接 ?dl_id=295 经
+    Content-Disposition 返回 f4v 文件）。
+
+    一次轻量 GET（Range 前 64KB，--max-time 20s）同时获取最终响应头与内容头，
+    按 魔数 > Content-Disposition 文件名扩展名 > Content-Type 的优先级判定。
+
+    返回:
+      ('direct', ext)  直链视频，ext 为推断扩展名（如 '.f4v'/'.flv'/'.mp4'）
+      ('m3u8', None)   m3u8/mpd 播放列表
+      (None, None)     无法判定（调用方按原逻辑处理）
+    """
+    body_file = os.path.join(get_temp_dir(), f".probe_{uuid.uuid4().hex[:8]}.bin")
+    try:
+        cmd = ['curl', '-s', '-L', '-k', '--max-time', '20',
+               '-r', '0-65535', '-D', '-', '-o', body_file]
+        if referer:
+            cmd.extend(['-H', f'Referer: {referer}'])
+        if cookie:
+            cmd.extend(['-H', f'Cookie: {cookie}'])
+        if user_agent:
+            cmd.extend(['-A', user_agent])
+        cmd.append(url)
+        r = subprocess.run(cmd, capture_output=True, timeout=25)
+        headers = _parse_last_response_headers(r.stdout or b'')
+        cd_ext = _ext_from_content_disposition(headers.get('content-disposition', ''))
+        ct = (headers.get('content-type', '').split(';')[0] or '').strip().lower()
+
+        magic = None
+        try:
+            with open(body_file, 'rb') as f:
+                magic = _sniff_media_magic(f.read(4096))
+        except Exception as e:
+            debug_print(f"[媒体探测] 读取响应内容失败: {e}")
+
+        debug_print(f"[媒体探测] url={sanitize_url_for_log(url)[:80]} "
+                    f"magic={magic} cd_ext={cd_ext} content-type={ct}")
+
+        # 1) 魔数优先：内容是什么最可信
+        if magic == 'm3u8':
+            return 'm3u8', None
+        # 标称 .f4v 的链接统一走 f4v 后处理（ftyp 直接改名 mp4 / FLV remux mp4）
+        if cd_ext == '.f4v':
+            return 'direct', '.f4v'
+        if magic == 'flv':
+            return 'direct', '.flv'
+        if magic == 'mp4':
+            return 'direct', cd_ext if cd_ext in ('.mp4', '.mov', '.m4v', '.mkv') else '.mp4'
+        if magic == 'avi':
+            return 'direct', '.avi'
+        if magic == 'mkv':
+            return 'direct', cd_ext if cd_ext in ('.webm', '.mkv') else '.mkv'
+        # 2) 无魔数（Range 不支持/body 为空等）：靠 Content-Disposition 文件名
+        if cd_ext in DIRECT_VIDEO_EXTS:
+            return 'direct', cd_ext
+        if cd_ext in ('.m3u8', '.mpd'):
+            return 'm3u8', None
+        # 3) 最后靠 Content-Type
+        kind = _CONTENT_TYPE_KIND.get(ct)
+        if kind == 'm3u8':
+            return 'm3u8', None
+        if isinstance(kind, str) and kind.startswith('.'):
+            return 'direct', kind
+        return None, None
+    except Exception as e:
+        debug_print(f"[媒体探测] 探测失败: {e}")
+        return None, None
+    finally:
+        try:
+            if os.path.exists(body_file):
+                os.remove(body_file)
+        except Exception:
+            pass
+
+
+def classify_video_url(url, referer=None, cookie=None, user_agent=None):
+    """判定链接走直链（curl）还是流媒体播放列表（N_m3u8DL-RE）。
+
+    先按 URL 路径扩展名判定；路径无明确扩展名时（如 /?dl_id=295 下载页链接）
+    发一次轻量探测，依据 Content-Disposition / 内容魔数 / Content-Type 判定。
+    返回 (is_direct: bool, ext: str|None)。
+    """
+    is_direct, ext = is_direct_video_url(url)
+    if is_direct:
+        return True, ext
+    if is_playlist_url(url):
+        return False, ext
+    kind, detected_ext = _probe_media_url(url, referer, cookie, user_agent)
+    if kind == 'direct':
+        log_info(f"链接无视频扩展名，探测为直链视频 {detected_ext}: "
+                 f"{sanitize_url_for_log(url)[:100]}")
+        return True, detected_ext
+    return False, None
+
+
 def is_video_file(file_name):
     return os.path.splitext(file_name)[1].lower() in VIDEO_EXTS
 
@@ -139,14 +309,15 @@ def is_video_file(file_name):
 def plan_direct_output(base_name, video_ext, fmt):
     """规划直链视频的 curl 下载目标与最终成品路径。
 
-    .f4v 等扩展名：curl 先下载为 <base_name><ext> 源文件（可断点续传），
-    再无损转封装为用户指定格式 <base_name>.<fmt>；其余直链格式源文件即成品。
+    .f4v：curl 先下载为 <base_name>.f4v 源文件（可断点续传），完成后统一产出
+    <base_name>.mp4（标准 f4v/碎片化 MP4 内容直接改名即可，FLV 内容无损 remux）；
+    其余直链格式源文件即成品。
     返回 (curl_target, final_output, needs_convert)
     """
     download_dir = get_download_dir()
     if video_ext in DIRECT_CONVERT_EXTS:
         source = os.path.join(download_dir, f"{base_name}{video_ext}")
-        final = os.path.join(download_dir, f"{base_name}.{fmt}")
+        final = os.path.join(download_dir, f"{base_name}.mp4")
         return source, final, True
     final = os.path.join(download_dir, f"{base_name}{video_ext}")
     return final, final, False
@@ -164,14 +335,16 @@ def _remux_video(source_file, output_file, target_format, max_tries=3):
 
 
 def _post_process_direct_download(source_file, final_file, target_format, base_name):
-    """直链视频下载完成后的转封装收尾（.f4v 等）。
+    """直链视频下载完成后的收尾（.f4v 等），统一产出 .mp4。
 
-    .f4v 实际内容多为 FLV / 碎片化 MP4，ffmpeg -c copy 即可无损 remux 为
-    用户指定的 mp4/mkv；转封装失败时兜底改名为 .flv 保留（内容通常为 FLV），
-    避免任务彻底失败丢失已下载数据。
+    .f4v 有两种实际内容，按文件头魔数分流：
+      - 标准 f4v / 碎片化 MP4（文件头 ftyp）：本身就是 MP4 容器，直接改名为 .mp4
+        即可播放，无需 ffmpeg；
+      - FLV 内容（文件头 FLV，如爱奇艺 CDN）：ffmpeg -c copy 无损 remux 为 .mp4。
+    remux 失败时兜底改名为 .flv 保留，避免任务彻底失败丢失已下载数据。
     返回 True 表示已有合格成品（或兜底成品）。
     """
-    # 无需转封装：curl 目标即成品
+    # 无需后处理：curl 目标即成品
     if os.path.abspath(source_file) == os.path.abspath(final_file):
         return True
 
@@ -188,7 +361,27 @@ def _post_process_direct_download(source_file, final_file, target_format, base_n
         debug_print(f"[直链后处理] 源文件不存在或过小: {source_file}")
         return False
 
-    if _remux_video(source_file, final_file, target_format):
+    # 嗅探源文件内容魔数
+    magic = None
+    try:
+        with open(source_file, 'rb') as f:
+            magic = _sniff_media_magic(f.read(4096))
+    except Exception as e:
+        debug_print(f"[直链后处理] 读取文件头失败: {e}")
+
+    # 标准 f4v / 碎片化 MP4：直接改名为 .mp4 即可（容器本就兼容）
+    if magic == 'mp4':
+        try:
+            if os.path.exists(final_file):
+                os.remove(final_file)
+            os.rename(source_file, final_file)
+            log_info(f"f4v 为标准 MP4 容器，直接改名为 {os.path.basename(final_file)}")
+            return True
+        except Exception as e:
+            log_error(f"直接改名失败，转用 ffmpeg 转封装: {e}")
+
+    # FLV 内容或魔数未知：ffmpeg 无损转封装为 mp4
+    if _remux_video(source_file, final_file, 'mp4'):
         debug_print(f"[直链后处理] 转封装成功: {source_file} -> {final_file}")
         try:
             os.remove(source_file)
@@ -197,7 +390,7 @@ def _post_process_direct_download(source_file, final_file, target_format, base_n
         return True
 
     # 兜底：转封装失败（编码不被目标容器支持等），源内容通常为 FLV，改名 .flv 保留
-    log_warning(f"转封装为 {target_format} 失败，保留原始下载文件: {source_file}")
+    log_warning(f"转封装为 mp4 失败，保留原始下载文件: {source_file}")
     fallback_file = os.path.splitext(source_file)[0] + '.flv'
     try:
         if os.path.abspath(source_file) != os.path.abspath(fallback_file):
@@ -529,7 +722,7 @@ def _do_single_download_attempt(base_name, url, referer, cookie, user_agent, tas
     """
     fmt = output_format if output_format in ('mp4', 'mkv') else cfg.output_format
     debug_print(f"_do_single_download_attempt: base_name={base_name}, url={sanitize_url_for_log(url)[:100]}...")
-    is_direct_video, video_ext = is_direct_video_url(url)
+    is_direct_video, video_ext = classify_video_url(url, referer, cookie, user_agent)
 
     if is_direct_video:
         # .f4v 等：curl_target 为源文件（.f4v），output_file 为转封装后的成品
@@ -1380,12 +1573,12 @@ def _resume_single_task(task):
         _finish_task(task_id, True)
         return
 
-    # 检查是否存在 .f4v 直链已下载但未转封装的残留源文件
+    # 检查是否存在 .f4v 直链已下载但未转 mp4 的残留源文件
     f4v_source = os.path.join(get_download_dir(), f"{base_name}.f4v")
     if os.path.exists(f4v_source) and os.path.getsize(f4v_source) >= cfg.MIN_FILE_SIZE:
-        log_info(f"已存在未转封装的 .f4v 源文件，尝试转封装: {f4v_source}")
-        final_file = os.path.join(get_download_dir(), f"{base_name}.{cfg.output_format}")
-        ok = _post_process_direct_download(f4v_source, final_file, cfg.output_format, base_name)
+        log_info(f"已存在未转 mp4 的 .f4v 源文件，尝试收尾: {f4v_source}")
+        final_file = os.path.join(get_download_dir(), f"{base_name}.mp4")
+        ok = _post_process_direct_download(f4v_source, final_file, 'mp4', base_name)
         _finish_task(task_id, ok)
         return
 
@@ -1416,10 +1609,10 @@ def _resume_single_task(task):
             except Exception as e:
                 log_error(f"清理临时文件失败: {e}")
 
-    is_direct_video, video_ext = is_direct_video_url(url)
+    is_direct_video, video_ext = classify_video_url(url, referer, cookie, user_agent)
 
     if is_direct_video:
-        # .f4v 等：curl 目标为源文件，成品为转封装后的目标格式
+        # .f4v 等：curl 目标为源文件，成品统一为 .mp4
         curl_target, output_file, needs_convert = plan_direct_output(
             base_name, video_ext, cfg.output_format)
     else:
@@ -1685,7 +1878,7 @@ def run_download(url, save_name=None, referer=None, cookie=None, user_agent=None
                     return None, False
         debug_print(f"任务列表中无匹配URL，准备创建新任务")
 
-    is_direct_video, video_ext = is_direct_video_url(url)
+    is_direct_video, video_ext = classify_video_url(url, referer, cookie, user_agent)
 
     task_id = str(uuid.uuid4())[:8]
     base_name = save_name or f"download_{task_id}"
@@ -1751,7 +1944,7 @@ def run_download(url, save_name=None, referer=None, cookie=None, user_agent=None
 
     if is_direct_video:
         if needs_convert:
-            log_info(f"检测到直接视频链接 {video_ext}，使用 curl 下载并转封装为 {fmt}")
+            log_info(f"检测到直接视频链接 {video_ext}，使用 curl 下载并转为 mp4")
         else:
             log_info(f"检测到直接视频链接，使用 curl 直接下载: {video_ext}")
         thread = threading.Thread(
