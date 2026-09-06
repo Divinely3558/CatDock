@@ -296,8 +296,8 @@ def classify_video_url(url, referer=None, cookie=None, user_agent=None):
         return False, ext
     kind, detected_ext = _probe_media_url(url, referer, cookie, user_agent)
     if kind == 'direct':
-        log_info(f"链接无视频扩展名，探测为直链视频 {detected_ext}: "
-                 f"{sanitize_url_for_log(url)[:100]}")
+        debug_print(f"链接无视频扩展名，探测为直链视频 {detected_ext}: "
+                    f"{sanitize_url_for_log(url)[:100]}")
         return True, detected_ext
     return False, None
 
@@ -375,7 +375,7 @@ def _post_process_direct_download(source_file, final_file, target_format, base_n
             if os.path.exists(final_file):
                 os.remove(final_file)
             os.rename(source_file, final_file)
-            log_info(f"f4v 为标准 MP4 容器，直接改名为 {os.path.basename(final_file)}")
+            debug_print(f"f4v 为标准 MP4 容器，直接改名为 {os.path.basename(final_file)}")
             return True
         except Exception as e:
             log_error(f"直接改名失败，转用 ffmpeg 转封装: {e}")
@@ -794,8 +794,8 @@ def _do_single_download_attempt(base_name, url, referer, cookie, user_agent, tas
                     resolved = _extract_dispatch_url(curl_target)
                     if resolved and resolved not in seen_urls and len(seen_urls) < 4:
                         seen_urls.add(resolved)
-                        log_info(f"检测到 CDN 调度响应，转向真实下载地址: "
-                                 f"{sanitize_url_for_log(resolved)[:120]}")
+                        debug_print(f"检测到 CDN 调度响应，转向真实下载地址: "
+                                    f"{sanitize_url_for_log(resolved)[:120]}")
                         try:
                             os.remove(curl_target)
                         except Exception:
@@ -1418,8 +1418,8 @@ def _run_direct_download_worker(task_id, url, output_file, referer, cookie, user
                     resolved = _extract_dispatch_url(output_file)
                     if resolved and resolved not in seen_urls and len(seen_urls) < 4:
                         seen_urls.add(resolved)
-                        log_info(f"检测到 CDN 调度响应，转向真实下载地址: "
-                                 f"{sanitize_url_for_log(resolved)[:120]}")
+                        debug_print(f"检测到 CDN 调度响应，转向真实下载地址: "
+                                    f"{sanitize_url_for_log(resolved)[:120]}")
                         try:
                             os.remove(output_file)
                         except Exception:
