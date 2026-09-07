@@ -4,7 +4,7 @@
 
 ## ✨ 功能特性
 
-- **🐳 Docker 容器部署**：轻量级 Debian 基础镜像，非 root 用户运行
+- **🐳 Docker 容器部署**：轻量级 Debian 基础镜像，非 root 用户运行；host 网络模式 + dual-stack 监听，直接拿到客户端真实 IP（IPv4/IPv6），避免 bridge NAT 导致误封宿主网关
 - **🔌 猫抓插件支持**：通过数据发送功能远程控制容器下载
 - **📡 HTTP API**：提供下载触发、任务查询、用户管理等接口
 - **🖥️ 三套网页**：登录页 `/{prefix}/login.html`、下载控制台 `/{prefix}/user.html`、管理控制台 `/{prefix}/admin.html`；旧地址（根路径、`/login`、`/user`、`/admin` 及带尾斜杠形式）访问时 302 跳转到对应 `.html` 规范地址；登录后按角色自动跳转，纯静态外壳 + Bearer 令牌调用 API
@@ -108,8 +108,11 @@ services:
       - /youdir/user:/home/downloader/user
       - /youdir/temp:/home/downloader/temp
       - /youdir/downloads:/home/downloader/downloads
-    ports:
-      - 5000:8080
+    # host 网络模式：容器直接使用宿主网络栈，socket 拿到的即为客户端真实 IP
+    # （IPv4 / IPv6），避免 bridge 模式下 docker-proxy NAT 把所有连接记成
+    # 网关 IP 导致真实攻击者被隐藏、误封宿主网关。端口不再经 ports 映射，
+    # 由 API_PORT 环境变量指定（默认 8080）。仅 Linux 支持 host 模式。
+    network_mode: host
     image: ghcr.nju.edu.cn/divinely3558/catdock
     restart: always
     dns:
@@ -119,11 +122,12 @@ services:
       - 119.29.29.29
     environment:
       - URL_PREFIX=qj52lajx # 🔒 必须设置：URL 路径前缀（建议 8 位以上随机字符串）
+      - API_PORT=5000 # 📡 监听端口（host 模式下直接占用宿主端口）
       - SSRF_PROTECTION=true # 🛡️ SSRF防护: true=拦截内网地址, false=允许内网下载
       - MAX_CONCURRENT_TASKS=20 # 📊 最大并发下载任务数
 ```
 
-> `AUTH_KEY` 不通过环境变量配置：它保存在 admin_config.json 的 `auth_key` 字段，首次启动自动随机生成，之后可在管理网页热更新。config.json 为系统级配置（端口/调试/同视频模式等），仅系统管理员修改、重启容器后生效。
+> `AUTH_KEY` 不通过环境变量配置：它保存在 admin_config.json 的 `auth_key` 字段，首次启动自动随机生成，之后可在管理网页热更新。config.json 为系统级配置（调试/同视频模式等），仅系统管理员修改、重启容器后生效。
 
 ### 3. 构建并启动容器
 
@@ -160,7 +164,7 @@ docker logs -f catdock
 
 | 文件                | 说明                                                                         |
 | ------------------- | ---------------------------------------------------------------------------- |
-| `config.json`       | 系统级配置：端口、调试开关、同视频模式等（仅系统管理员修改，重启生效）       |
+| `config.json`       | 系统级配置：调试开关、同视频模式等（仅系统管理员修改，重启生效）       |
 | `admin_config.json` | 管理员热配置：`auth_key` 认证密钥（管理网页修改即时生效）                    |
 | `filter_rules.json` | 全局过滤规则模板（广告拦截 + 文件名过滤/去重），新用户首次使用时自动复制一份 |
 | `data.db`           | SQLite 数据库（封禁 IP + 用户/角色/禁用状态 + 认证失败计数 + 令牌吊销登记）  |
@@ -266,6 +270,7 @@ docker logs -f catdock
 管理员账户登录后自动进入独立的管理网页（不含任何下载功能，管理员账户不能提交下载任务）：
 
 - **用户管理**：查看全部用户（用户名/角色/状态/创建时间）、添加下载用户、删除用户（确认弹窗明确提示配置目录、下载缓存、成品文件将全部删除且不可恢复）、重置用户密码、禁用（ban）/解禁（unban）用户；被禁用用户立即无法登录且已签发令牌全部失效，禁用状态下即使密码正确也返回 403 且不计入 IP 封禁
+- **IP 封禁管理**：查看封禁列表（IP/封禁时间/封禁原因，区分手动添加、自动封禁(临时)、自动封禁(永久)）、手动封禁 IP（校验 IPv4/IPv6 合法性）、解封 IP（同时清除该 IP 的失败计数与阶梯封禁统计）；若管理员自身 IP 被误封导致网页无法访问，需在容器内执行 `banip del <IP>` 解封
 - **AUTH_KEY 热更新**：在「服务器配置」中点击「🎲 随机」自动生成新 KEY（**输入框只读，不支持手填**；密钥固定 14 位，含至少 1 个大写字母、1 个小写字母、1 个数字和 1-3 个符号，使用浏览器密码学随机源生成），保存后立即写回 admin_config.json 并生效，**包括管理员在内的所有用户令牌全部吊销**（全员强制重新登录）；之后把新 KEY 通知各用户即可，用户密码无需改动；猫抓插件请求体中的 `key` 也需同步更换
 - **过滤规则模板**：编辑全局过滤规则模板（config/filter_rules.json），保存即时生效；**新用户**首次使用时自动复制一份作为个人规则，已有用户的个人规则不受影响
 - **修改密码**：管理员修改自己的密码（同网页菜单「修改密码」）
@@ -557,8 +562,9 @@ services:
       - /youdir/user:/home/downloader/user
       - /youdir/temp:/home/downloader/temp
       - /youdir/downloads:/home/downloader/downloads
-    ports:
-      - 5000:8080
+    # host 网络模式：直接使用宿主网络栈，拿到客户端真实 IP（IPv4/IPv6），
+    # 避免 bridge NAT 把所有连接记成网关 IP 导致误封宿主入口。仅 Linux 支持。
+    network_mode: host
     image: ghcr.nju.edu.cn/divinely3558/catdock
     restart: always
     dns:
@@ -568,9 +574,9 @@ services:
       - 119.29.29.29
     environment:
       - URL_PREFIX=qj52lajx # 🔒 必须设置：URL路径前缀
+      - API_PORT=5000 # 📡 监听端口（host 模式直接占用宿主端口）
       - SSRF_PROTECTION=true # 🛡️ SSRF防护开关
-      - MAX_CONCURRENT_TASKS=20 # 📊 最大并发任务数
-      # - API_PORT=8080                        # 可选：覆盖容器内监听端口
+      - MAX_CONCURRENT_TASKS=20 # 📊 最大任务数
 ```
 
 > 四个挂载卷缺一不可：`config`（配置与 data.db）、`user`（每用户任务/日志/个人过滤规则）、`temp`（下载缓存分片）、`downloads`（成品视频）。重建容器（`up -d --build` / 换新镜像）后数据全部保留。
@@ -579,7 +585,7 @@ services:
 
 | 变量名                 | 说明                                    | 默认值 | 是否必填 |
 | ---------------------- | --------------------------------------- | ------ | -------- |
-| `API_PORT`             | 覆盖配置文件中的端口设置                | 8080   | 否       |
+| `API_PORT`             | 服务监听端口（host 模式下直接占用宿主端口） | 8080   | 否       |
 | `URL_PREFIX`           | URL 路径前缀（所有接口必须）            | 空     | **是**   |
 | `SSRF_PROTECTION`      | SSRF 防护开关，`false` 允许内网地址下载 | true   | 否       |
 | `MAX_CONCURRENT_TASKS` | 最大并发下载任务数                      | 20     | 否       |
@@ -610,7 +616,7 @@ services:
 
 ```yaml
 healthcheck:
-  test: ["CMD", "curl", "-f", "http://localhost:8080/qj52lajx/health"]
+  test: ["CMD", "curl", "-f", "http://localhost:5000/qj52lajx/health"]
   interval: 30s
   timeout: 10s
   retries: 3
@@ -740,7 +746,7 @@ healthcheck:
 
 | 文件                | 用途                                                      |
 | ------------------- | --------------------------------------------------------- |
-| `config.json`       | 系统级配置：端口、调试开关、同视频模式（重启容器生效）    |
+| `config.json`       | 系统级配置：调试开关、同视频模式（重启容器生效）    |
 | `admin_config.json` | 管理员热配置：`auth_key` 认证密钥（管理网页修改即时生效） |
 | `filter_rules.json` | 全局过滤规则模板（新用户复制，管理员网页编辑）            |
 
@@ -755,14 +761,13 @@ mkdir -p /youdir/config
 ```bash
 cat > /youdir/config/config.json << 'EOF'
 {
-  "port": 8080,
   "debug": false,
   "same_video_by_filename": false
 }
 EOF
 ```
 
-> SSRF 开关与并发数优先由环境变量 `SSRF_PROTECTION` / `MAX_CONCURRENT_TASKS` 控制；不设置时使用内置默认值（开启 / 20）。
+> SSRF 开关与并发数优先由环境变量 `SSRF_PROTECTION` / `MAX_CONCURRENT_TASKS` 控制；不设置时使用内置默认值（开启 / 20）。监听端口由环境变量 `API_PORT` 控制（host 模式下直接占用宿主端口）。
 
 #### 步骤 3：创建 admin_config.json（管理员热配置）
 
@@ -820,9 +825,10 @@ docker-compose up -d --build
 
 ### config.json 参数说明（系统级，重启容器生效）
 
+> 监听端口已移出 config.json，统一由环境变量 `API_PORT` 控制（host 网络模式下直接占用宿主端口，默认 8080）。
+
 | 参数                     | 说明                                                 | 默认值 |
 | ------------------------ | ---------------------------------------------------- | ------ |
-| `port`                   | 服务监听端口，可被环境变量 `API_PORT` 覆盖           | 8080   |
 | `debug`                  | 是否启用调试模式，开启后会输出详细日志               | false  |
 | `same_video_by_filename` | 是否启用同视频模式（按文件名聚合多链接轮流下载）     | false  |
 | `ssrf_protection`        | 是否启用 SSRF 防护（拦截内网地址），可被环境变量覆盖 | true   |
@@ -1190,6 +1196,8 @@ docker exec -it catdock userctl unban <用户名>      # 解禁用户
 
 ### banip — IP 封禁管理
 
+> 以下操作也可在管理网页 `/{prefix}/admin.html` 的「IP 封禁管理」卡片完成（查看/封禁/解封，校验 IPv4/IPv6 合法性）。CLI 仅作为容器内应急通道，尤其当管理员自身 IP 被误封导致网页无法访问时使用。
+
 ```bash
 docker exec -it catdock banip show                 # 查看封禁列表（区分临时/永久/手动）
 docker exec -it catdock banip add <IP地址>         # 手动封禁（永久，需 banip del 解除）
@@ -1275,7 +1283,7 @@ docker exec catdock getent hosts baidu.com
 
 ### 健康检查接口访问不到
 
-- 确认端口映射 `5000:8080` 未被占用
+- 确认宿主机 `API_PORT`（默认 5000）端口未被占用且防火墙已放行
 - 确认容器内服务已正常启动（查看 `docker logs catdock`）
 - 容器启动时会等待网络就绪，最长 10 分钟内才会开始启动 API
 
@@ -1293,7 +1301,7 @@ docker exec catdock getent hosts baidu.com
 
 1. **猫抓版本**：建议使用猫抓 2.3.8+ 版本以支持 `${cookie}` 标签
 2. **下载参数**：某些网站需要 `referer` 和 `cookie` 才能下载，请确保猫抓正确捕获这些参数
-3. **端口安全**：建议在生产环境修改 HTTP 端口（通过 `API_PORT` 环境变量或 `port` 配置）
+3. **端口安全**：建议在生产环境通过 `API_PORT` 环境变量修改 HTTP 端口
 4. **配置修改**：每用户过滤规则在网页「过滤规则」中编辑后立即生效，无需重载；管理员修改全局过滤模板（`config/filter_rules.json`）或手工改了 `admin_config.json` 后，可通过 `POST /{prefix}/reload` 接口或管理网页「重载配置」热加载（auth_key 也可直接在管理网页「服务器配置」修改，立即生效并全员重新登录）；系统级 `config.json` 不随 reload 生效，任何修改需重启容器
 5. **环境变量修改**：修改 `URL_PREFIX` 等环境变量需要 `docker-compose up -d` 重新创建容器（`URL_PREFIX` 变更会改变访问地址，故不建议生产环境变动）
 6. **文件格式**：下载完成后自动封装为 MP4 或 MKV，格式逐任务选择（网页下拉框 / 请求体 `format` 字段，默认 MP4）

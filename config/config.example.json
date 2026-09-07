@@ -1,5 +1,4 @@
 {
-  "port": 8080,
   "debug": false,
   "same_video_by_filename": false
 }

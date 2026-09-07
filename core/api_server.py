@@ -17,6 +17,7 @@ import hashlib
 import secrets
 import socket
 import signal
+import ipaddress
 import urllib.parse
 import http.server
 
@@ -32,6 +33,23 @@ from webui import get_login_html, get_user_html, get_admin_html
 
 # 已警告过的 IP（尝试登录已封禁账号时首次仅提示，再次尝试直接封 IP）
 _banned_account_warned_ips = set()
+
+
+def _normalize_ip(addr):
+    """规范化客户端 IP。
+
+    dual-stack 监听下，IPv4 客户端在 socket 层呈现为 IPv4-mapped IPv6
+    （如 ::ffff:1.2.3.4）。统一还原为纯 IPv4 字符串，使其与 CLI
+    banip add <IP> / data.db 中存储的 key 一致，避免同一 IP 因表示形式
+    不同而绕过封禁或重复计数。无法解析的原样返回。
+    """
+    try:
+        ip = ipaddress.ip_address(addr)
+        if isinstance(ip, ipaddress.IPv6Address) and ip.ipv4_mapped is not None:
+            return str(ip.ipv4_mapped)
+        return str(ip)
+    except ValueError:
+        return addr
 
 
 def _record_failure_and_log(client_ip):
@@ -166,7 +184,10 @@ class DownloadHandler(http.server.BaseHTTPRequestHandler):
 
     def handle(self):
         # IP 封禁检查：被封禁的 IP 直接断开连接，不返回任何响应
-        client_ip = self.client_address[0]
+        # dual-stack 监听下 IPv4 客户端呈现为 ::ffff:1.2.3.4，统一规范化为纯 IPv4，
+        # 与 banip CLI / data.db 存储 key 一致，避免表示差异导致误判或重复计数
+        client_ip = _normalize_ip(self.client_address[0])
+        self._client_ip = client_ip
         if data_db.is_ip_banned(client_ip):
             try:
                 self.connection.shutdown(socket.SHUT_RDWR)
@@ -253,7 +274,7 @@ class DownloadHandler(http.server.BaseHTTPRequestHandler):
             username = verify_auth_token(token) if token else None
             if username:
                 # 认证成功：清除该 IP 的失败计数，避免历史偶发失误累积导致误封
-                data_db.clear_auth_failure(self.client_address[0])
+                data_db.clear_auth_failure(self._client_ip)
                 self.authenticated_user = username
                 self.authenticated_role = (claims.get('role') if claims else None) \
                     or data_db.user_role(username) or 'user'
@@ -265,7 +286,7 @@ class DownloadHandler(http.server.BaseHTTPRequestHandler):
                 self.send_json({'success': False, 'message': '账号已被禁用，请联系管理员'}, 403)
                 return False
             log_error("认证失败：令牌无效或已过期")
-            _record_failure_and_log(self.client_address[0])
+            _record_failure_and_log(self._client_ip)
             self.send_json({'success': False, 'message': '登录已过期，请重新登录'}, 403)
             return False
 
@@ -283,7 +304,7 @@ class DownloadHandler(http.server.BaseHTTPRequestHandler):
         if request_key is None or not hmac.compare_digest(request_key, cfg.auth_key):
             log_error("认证失败：第一层 AUTH_KEY 校验未通过")
             # AUTH_KEY 错误，计入认证失败次数（阶梯封禁：首次临时、再次永久）
-            _record_failure_and_log(self.client_address[0])
+            _record_failure_and_log(self._client_ip)
             self.send_json({'success': False, 'message': '认证失败，密钥不正确'}, 403)
             return False
 
@@ -307,7 +328,7 @@ class DownloadHandler(http.server.BaseHTTPRequestHandler):
         # 用户不存在 → IP 级封禁
         if not request_user or not data_db.user_exists(request_user):
             log_error("认证失败：用户名或密码不正确")
-            _record_failure_and_log(self.client_address[0])
+            _record_failure_and_log(self._client_ip)
             self.send_json({'success': False, 'message': '认证失败，用户名或密码不正确'}, 403)
             return False
 
@@ -315,7 +336,7 @@ class DownloadHandler(http.server.BaseHTTPRequestHandler):
         # 首次尝试：提示警告
         # 再次尝试：直接封 IP（封禁后连接会被直接断开，无需返回响应）
         if not data_db.is_user_active(request_user):
-            ip = self.client_address[0]
+            ip = self._client_ip
             if ip in _banned_account_warned_ips:
                 data_db.add_banned_ip(ip)
                 log_error(f"IP {ip} 反复尝试已封禁账号 {request_user}，已直接封禁 IP")
@@ -343,7 +364,7 @@ class DownloadHandler(http.server.BaseHTTPRequestHandler):
 
         # 记录已认证用户与角色，供下载目录分流与管理员鉴权
         # 认证成功：清除该 IP 和该账号的失败计数
-        data_db.clear_auth_failure(self.client_address[0])
+        data_db.clear_auth_failure(self._client_ip)
         data_db.clear_account_failure(request_user)
         self.authenticated_user = request_user
         self.authenticated_role = data_db.user_role(request_user) or 'user'
@@ -384,7 +405,7 @@ class DownloadHandler(http.server.BaseHTTPRequestHandler):
         return path
 
     def _check_rate_limit(self):
-        client_ip = self.client_address[0]
+        client_ip = self._client_ip
         allowed, _ = check_rate_limit(client_ip)
         if not allowed:
             self.send_json({'success': False, 'message': '请求过于频繁，请稍后再试'}, 429)
@@ -509,6 +530,14 @@ class DownloadHandler(http.server.BaseHTTPRequestHandler):
                 for (u, r, d, c) in data_db.list_users_full()
             ]
             self.send_json({'success': True, 'data': users})
+        elif path == '/admin/bans':
+            if not self._require_admin():
+                return
+            bans = [
+                {'ip': ip, 'banned_at': banned_at, 'reason': reason}
+                for (ip, banned_at, reason) in data_db.list_banned_ips()
+            ]
+            self.send_json({'success': True, 'data': bans})
         elif path == '/admin/filters':
             # 全局过滤规则模板（config/filter_rules.json），新用户首启时复制
             if not self._require_admin():
@@ -651,7 +680,7 @@ class DownloadHandler(http.server.BaseHTTPRequestHandler):
                 # 旧密码校验：错误计入 IP 封禁计数（防令牌泄露后暴力试旧密码）
                 if not data_db.verify_user(username, old_password):
                     log_error(f"修改密码失败：旧密码不正确 (用户: {username})")
-                    _record_failure_and_log(self.client_address[0])
+                    _record_failure_and_log(self._client_ip)
                     # 返回 400 而非 403：网页端 403 统一按"登录失效"处理会误登出
                     self.send_json({'success': False, 'message': '旧密码不正确'}, 400)
                     return
@@ -981,6 +1010,34 @@ class DownloadHandler(http.server.BaseHTTPRequestHandler):
                     log_info(f"管理员{'禁用用户' if flag else '解禁用户'}: {username}")
                     self.send_json({'success': True,
                                     'message': f"已{'禁用' if flag else '解禁'}用户: {username}"})
+                elif path == '/admin/bans/add':
+                    ip = self._get_param(data, 'ip')
+                    if not ip:
+                        self.send_json({'success': False, 'message': 'IP 地址不能为空'}, 400)
+                        return
+                    ip = ip.strip()
+                    try:
+                        ip = str(ipaddress.ip_address(ip))
+                    except ValueError:
+                        self.send_json({'success': False, 'message': f'无效的 IP 地址: {ip}'}, 400)
+                        return
+                    data_db.add_banned_ip(ip)
+                    log_info(f"管理员手动封禁 IP: {ip}")
+                    self.send_json({'success': True, 'message': f'已封禁 IP: {ip}'})
+                elif path == '/admin/bans/delete':
+                    ip = self._get_param(data, 'ip')
+                    if not ip:
+                        self.send_json({'success': False, 'message': 'IP 地址不能为空'}, 400)
+                        return
+                    ip = ip.strip()
+                    banned = {row[0] for row in data_db.list_banned_ips()}
+                    if ip not in banned:
+                        self.send_json({'success': False, 'message': f'该 IP 不在封禁列表中: {ip}'}, 400)
+                        return
+                    data_db.remove_banned_ip(ip)
+                    log_info(f"管理员解封 IP: {ip}")
+                    self.send_json({'success': True,
+                                    'message': f'已解封 IP: {ip}（失败计数与阶梯封禁统计已一并清除）'})
                 else:
                     self.send_json({'success': False, 'message': '路径不存在'}, 404)
             except Exception as e:
@@ -1021,6 +1078,12 @@ class DownloadHandler(http.server.BaseHTTPRequestHandler):
 
 
 class TimeoutHTTPServer(http.server.ThreadingHTTPServer):
+    # AF_INET6 + 绑定 '::'：Linux 默认 IPV6_V6ONLY=0，单个 socket 同时接收
+    # IPv4 与 IPv6 连接（dual-stack）。IPv4 客户端在 socket 层呈现为
+    # ::ffff:1.2.3.4，由 _normalize_ip 还原为纯 IPv4。
+    address_family = socket.AF_INET6
+    allow_reuse_address = True
+
     def __init__(self, server_address, RequestHandlerClass, bind_and_activate=True):
         super().__init__(server_address, RequestHandlerClass, bind_and_activate)
         self.socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
@@ -1028,7 +1091,7 @@ class TimeoutHTTPServer(http.server.ThreadingHTTPServer):
 
 
 def start_server(port):
-    cfg.server_instance = TimeoutHTTPServer(('0.0.0.0', port), DownloadHandler)
+    cfg.server_instance = TimeoutHTTPServer(('::', port), DownloadHandler)
     cfg.bound_port = port
 
     load_tasks()

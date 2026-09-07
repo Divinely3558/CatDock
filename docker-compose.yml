@@ -7,8 +7,11 @@ services:
       - /youdir/downloads:/home/downloader/downloads
       - /youdir/config:/home/downloader/config
       - /youdir/user:/home/downloader/user
-    ports:
-      - 5000:8080
+    # host 网络模式：容器直接使用宿主网络栈，socket 拿到的即为客户端真实 IP
+    # （IPv4 / IPv6），避免 bridge 模式下 docker-proxy NAT 把所有连接记成
+    # 网关 IP（如 192.168.0.1）导致真实攻击者被隐藏、误封宿主网关。
+    # host 模式下端口不再经 ports 映射，由 API_PORT 环境变量指定（默认 8080）。
+    network_mode: host
     image: ghcr.nju.edu.cn/divinely3558/catdock
     restart: always
     dns:
@@ -19,6 +22,8 @@ services:
     environment:
       # AUTH_KEY 存放在 config/admin_config.json（首启自动生成，管理网页可热更新），无需在此配置
       - URL_PREFIX=qj52lajx
+      # host 模式下容器直接占用宿主端口，原 ports 5000:8080 改由此指定
+      - API_PORT=5000
       # SSRF防护: true=拦截内网地址(公网部署推荐), false=允许内网地址(纯内网/Docker内部下载时设为false)
       - SSRF_PROTECTION=true
       # 最大并发下载任务数，防止资源耗尽

@@ -633,7 +633,34 @@
       </div>
 
       <div class="card">
-        <div class="card-title">🔑 服务器配置</div>
+        <div class="card-title">� IP 封禁管理</div>
+        <div class="sub">
+          被封禁的 IP 将无法访问任何接口；认证连续失败会自动封禁（首次临时 30
+          分钟，再次触发永久封禁）。若管理员自身 IP
+          被误封导致网页无法访问，请在容器内执行
+          <code>banip del &lt;IP&gt;</code> 解封。
+        </div>
+        <div style="margin-bottom: 12px">
+          <button class="btn btn-primary" id="btnAddBan">➕ 封禁 IP</button>
+          <button class="btn btn-ghost" id="btnBanRefresh">🔄 刷新</button>
+        </div>
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>IP 地址</th>
+                <th>封禁时间</th>
+                <th>封禁原因</th>
+                <th>操作</th>
+              </tr>
+            </thead>
+            <tbody id="banRows"></tbody>
+          </table>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="card-title">� 服务器配置</div>
         <div class="warn-box">
           ⚠️ 修改 AUTH_KEY 后，猫抓插件请求体中的
           <code>key</code> 字段与所有网页登录都要同步更换。
@@ -1115,6 +1142,107 @@
         });
       };
 
+      // ---------- IP 封禁列表 ----------
+      var REASON_BADGE = {
+        auto: '<span class="badge on">自动封禁(临时)</span>',
+        auto_perm: '<span class="badge admin">自动封禁(永久)</span>',
+        manual: '<span class="badge off">手动添加</span>',
+      };
+      function loadBans() {
+        return api("GET", "admin/bans")
+          .then(function (j) {
+            renderBans(j.data || []);
+          })
+          .catch(function (e) {
+            toast(e.message, true);
+          });
+      }
+      function renderBans(bans) {
+        var tbody = document.getElementById("banRows");
+        tbody.innerHTML = "";
+        if (!bans.length) {
+          var empty = document.createElement("tr");
+          empty.innerHTML =
+            '<td colspan="4" style="text-align:center;color:var(--text-3)">当前没有被封禁的 IP</td>';
+          tbody.appendChild(empty);
+          return;
+        }
+        bans.forEach(function (b) {
+          var tr = document.createElement("tr");
+          tr.innerHTML =
+            "<td><strong>" +
+            esc(b.ip) +
+            "</strong></td>" +
+            "<td>" +
+            esc(b.banned_at || "-") +
+            "</td>" +
+            "<td>" +
+            (REASON_BADGE[b.reason] || esc(b.reason)) +
+            "</td>" +
+            '<td class="actions">' +
+            '<button class="btn btn-danger small" data-act="del">解封</button>' +
+            "</td>";
+          tr.querySelector("td.actions").addEventListener(
+            "click",
+            function (ev) {
+              var btn = ev.target.closest("button[data-act]");
+              if (!btn) return;
+              handleBanAction(btn.getAttribute("data-act"), b);
+            },
+          );
+          tbody.appendChild(tr);
+        });
+      }
+      function handleBanAction(act, b) {
+        if (act === "del") {
+          openModal({
+            title: "解封 IP - " + b.ip,
+            msg: "解封后该 IP 恢复访问，同时清除其认证失败计数与阶梯封禁统计。",
+            danger: true,
+            okText: "解封",
+            onOk: function () {
+              api("POST", "admin/bans/delete", { ip: b.ip })
+                .then(function (j) {
+                  toast(j.message);
+                  loadBans();
+                })
+                .catch(function (e) {
+                  toast(e.message, true);
+                });
+            },
+          });
+        }
+      }
+
+      document.getElementById("btnBanRefresh").onclick = function () {
+        loadBans();
+      };
+      document.getElementById("btnAddBan").onclick = function () {
+        openModal({
+          title: "封禁 IP",
+          fields: [
+            {
+              id: "ip",
+              label: "IP 地址（IPv4 / IPv6）",
+              required: true,
+              placeholder: "如 192.168.1.100",
+            },
+          ],
+          okText: "封禁",
+          onOk: function (v) {
+            if (!v.ip) return (toast("IP 地址不能为空", true), false);
+            api("POST", "admin/bans/add", { ip: v.ip })
+              .then(function (j) {
+                toast(j.message);
+                loadBans();
+              })
+              .catch(function (e) {
+                toast(e.message, true);
+              });
+          },
+        });
+      };
+
       // ---------- AUTH_KEY ----------
       // 生成 14 位随机密钥：至少 1 个大写、1 个小写、1 个数字、1-3 个符号
       function genRandomKey() {
@@ -1476,6 +1604,7 @@
         backToLogin();
       } else {
         loadUsers();
+        loadBans();
       }
     </script>
   </body>
