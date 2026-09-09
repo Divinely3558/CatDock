@@ -20,7 +20,7 @@ WORKDIR /home/downloader
 
 # 容器内保持平铺布局：core/ 模块与 web/cli/config 资源统一平铺到 /home/downloader/
 COPY core/main.py core/api_server.py core/downloader.py core/app_config.py core/app_logger.py core/task_store.py core/dedup.py core/filters.py core/security.py core/data_db.py core/webui.py /home/downloader/
-COPY web/login.html web/user.html web/admin.html web/favicon.ico cli/banip cli/userctl cli/adminctl config/config.example.json config/admin_config.example.json config/filter_rules.json bin/N_m3u8DL-RE /home/downloader/
+COPY web/login.html web/user.html web/admin.html web/favicon.ico web/VERSION cli/banip cli/userctl cli/adminctl config/config.example.json config/admin_config.example.json config/filter_rules.json bin/N_m3u8DL-RE /home/downloader/
 RUN chmod +x /home/downloader/N_m3u8DL-RE /home/downloader/main.py /home/downloader/banip /home/downloader/userctl /home/downloader/adminctl && \
     ln -sf /home/downloader/banip /usr/local/bin/banip && \
     ln -sf /home/downloader/userctl /usr/local/bin/userctl && \

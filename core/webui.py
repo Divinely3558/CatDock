@@ -9,13 +9,20 @@
 """
 import os
 
+import app_config as cfg
+
 _LOGIN_HTML_CACHE = None
 _USER_HTML_CACHE = None
 _ADMIN_HTML_CACHE = None
 
 
+def _version_display():
+    """版本号展示文案：空则显示「未知」。"""
+    return cfg.version if cfg.version else "未知"
+
+
 def _read_html(filename):
-    """读取 HTML 文件（带缓存）
+    """读取 HTML 文件（带缓存），并注入 __VERSION__ 占位符。
 
     查找顺序：同目录（容器内平铺布局）→ ../web/（仓库源码布局）
     """
@@ -24,7 +31,8 @@ def _read_html(filename):
     if not os.path.isfile(html_path):
         html_path = os.path.join(base, '..', 'web', filename)
     with open(html_path, 'r', encoding='utf-8') as f:
-        return f.read()
+        html = f.read()
+    return html.replace('__VERSION__', _version_display())
 
 
 def get_login_html():

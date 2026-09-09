@@ -521,6 +521,7 @@ class DownloadHandler(http.server.BaseHTTPRequestHandler):
                 'filename_dedup_enabled': cfg.filename_dedup_enabled,
                 'user_count': data_db.download_user_count(),
                 'auth_key_masked': '***' if cfg.auth_key else '',
+                'version': cfg.version,
             }})
         elif path == '/admin/users':
             if not self._require_admin():
@@ -635,6 +636,65 @@ class DownloadHandler(http.server.BaseHTTPRequestHandler):
                                           getattr(self, 'authenticated_role', 'user')),
                 'expiresIn': TOKEN_TTL_SECONDS,
                 'role': getattr(self, 'authenticated_role', 'user'),
+            }})
+        # 切换用户：当前用户已持有效 Bearer 令牌（无需 AUTH_KEY），
+        # 输入目标账户用户名+密码，校验通过后吊销当前令牌并为目标账户签发新令牌。
+        # 允许跨角色切换（用户↔管理员），只要知道目标账户密码。
+        elif path == '/switch-user':
+            data = self._read_json_body()
+            if data is None:
+                return
+
+            if not self._check_auth(data):
+                return
+
+            if not self._check_rate_limit():
+                return
+
+            target_user = self._get_param(data, 'username', 'user')
+            target_password = self._get_param(data, 'password')
+            if not target_user or not target_password:
+                self.send_json({'success': False, 'message': '用户名和密码不能为空'}, 400)
+                return
+
+            # 目标用户不存在
+            if not data_db.user_exists(target_user):
+                self.send_json({'success': False, 'message': '目标用户不存在'}, 403)
+                return
+
+            # 目标用户被禁用
+            if not data_db.is_user_active(target_user):
+                self.send_json({'success': False, 'message': '目标账号已被禁用'}, 403)
+                return
+
+            # 校验目标密码（密码错误计入目标账号失败计数，连续错误会自动禁用目标账号）
+            if not data_db.verify_user(target_user, target_password):
+                locked = data_db.record_account_failure(target_user)
+                if locked:
+                    self.send_json({'success': False,
+                                    'message': '密码错误次数过多，目标账号已被禁用'}, 403)
+                else:
+                    remaining = data_db.MAX_ACCOUNT_FAILURES - data_db.get_account_failure_count(target_user)
+                    self.send_json({'success': False,
+                                    'message': f'密码不正确（剩余 {remaining} 次机会）'}, 403)
+                return
+
+            # 密码正确：清除目标账号失败计数
+            data_db.clear_account_failure(target_user)
+
+            # 吊销当前令牌（切换后旧令牌立即失效）
+            auth_header = self.headers.get('Authorization', '')
+            token = auth_header[len('Bearer '):].strip()
+            claims = get_token_claims(token)
+            if claims and claims.get('jti'):
+                data_db.revoke_auth_token(claims['jti'])
+
+            # 为目标账户签发新令牌
+            target_role = data_db.user_role(target_user) or 'user'
+            self.send_json({'success': True, 'data': {
+                'token': issue_auth_token(target_user, target_role),
+                'expiresIn': TOKEN_TTL_SECONDS,
+                'role': target_role,
             }})
         # 注销：吊销当前 Bearer 令牌（服务端 auth_tokens 表置 revoked），
         # 使该令牌在所有设备上立即失效；此后仅清理本地副本

@@ -93,6 +93,8 @@ debug_mode = False
 same_video_by_filename_enabled = False
 ssrf_protection = True
 max_concurrent_tasks = 20
+# 版本号：来自 web/version 文件（镜像构建时拷入），空则显示「未知」
+version = ""
 
 # ---- same_video_by_filename 模式内存结构 ----
 # key: base_name (过滤后的标准文件名)
@@ -215,6 +217,31 @@ def load_filters():
     })
 
 
+def load_version():
+    """读取版本号（web/VERSION 文件），写入模块全局 version。
+
+    查找顺序：同目录（容器内平铺布局）→ ../web/（仓库源码布局）。
+    文件不存在或内容为空时，version 保持空字符串，由调用方决定显示文案。
+    """
+    global version
+    base = os.path.dirname(os.path.abspath(__file__))
+    candidates = [
+        os.path.join(base, 'VERSION'),
+        os.path.join(base, '..', 'web', 'VERSION'),
+    ]
+    for p in candidates:
+        if os.path.isfile(p):
+            try:
+                with open(p, 'r', encoding='utf-8') as f:
+                    v = f.read().strip()
+                if v:
+                    version = v
+                    return
+            except Exception:
+                pass
+    version = ""
+
+
 def load_config():
     """加载系统级配置（config.json + 环境变量）、过滤规则与管理员热配置。
 
@@ -226,6 +253,9 @@ def load_config():
       - filter_rules.json  过滤规则，/reload 热加载。
     """
     from app_logger import log_error, debug_print
+
+    # 版本号（web/version），与系统配置无关，仅用于展示一致性
+    load_version()
 
     # 系统级默认值（本函数内全部使用局部变量，末尾 globals().update 一次性写回）
     url_prefix = ""

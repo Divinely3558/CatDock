@@ -66,6 +66,7 @@ def main():
 ║                       下载器启动成功                   ║
 ╚════════════════════════════════════════════════════════╝
 
+  🏷️ 版本: {cfg.version or '未知'}
   📡 API 端口: {port}
   🔗 URL前缀: {cfg.url_prefix}
   🛡️ SSRF防护: {'启用' if cfg.ssrf_protection else '关闭'}

@@ -1016,6 +1016,7 @@
             <span class="user-chip" id="userChip" title="账号菜单"></span>
             <div class="user-menu" id="userMenu">
               <button class="user-menu-item" id="menuPass">修改密码</button>
+              <button class="user-menu-item" id="menuSwitch">切换用户</button>
               <button class="user-menu-item" id="menuFilters">过滤规则</button>
               <button class="user-menu-item danger" id="menuLogout">
                 退出
@@ -1157,6 +1158,30 @@
             保存并重新登录
           </button>
           <div class="alert" id="passAlert"></div>
+        </form>
+      </div>
+    </div>
+
+    <!-- ================= 切换用户弹窗 ================= -->
+    <div class="modal-mask" id="switchMask">
+      <div class="modal modal-sm">
+        <div class="modal-head">
+          <h3>切换用户</h3>
+          <button class="modal-close" id="switchClose">✕</button>
+        </div>
+        <form id="switchForm" autocomplete="off">
+          <label class="field">
+            <span>目标用户名<i class="req">*</i></span>
+            <input type="text" id="sUser" required autocomplete="username" />
+          </label>
+          <label class="field">
+            <span>目标密码<i class="req">*</i></span>
+            <input type="password" id="sPwd" required autocomplete="current-password" />
+          </label>
+          <button type="submit" class="btn btn-primary btn-block" id="switchBtn">
+            切换并登录
+          </button>
+          <div class="alert" id="switchAlert"></div>
         </form>
       </div>
     </div>
@@ -1513,6 +1538,57 @@
             })
             .finally(function () {
               btn.disabled = false;
+            });
+        });
+
+        // ---------- 切换用户 ----------
+        $("menuSwitch").addEventListener("click", function () {
+          closeUserMenu();
+          $("sUser").value = "";
+          $("sPwd").value = "";
+          hideAlert($("switchAlert"));
+          $("switchMask").classList.add("show");
+          $("sUser").focus();
+        });
+        $("switchClose").addEventListener("click", function () {
+          $("switchMask").classList.remove("show");
+        });
+        $("switchMask").addEventListener("click", function (e) {
+          if (e.target === $("switchMask"))
+            $("switchMask").classList.remove("show");
+        });
+        $("switchForm").addEventListener("submit", function (e) {
+          e.preventDefault();
+          var sUser = $("sUser").value.trim();
+          var sPwd = $("sPwd").value;
+          if (!sUser || !sPwd) {
+            showAlert($("switchAlert"), "请填写用户名和密码", false);
+            return;
+          }
+          var btn = $("switchBtn");
+          btn.disabled = true;
+          btn.textContent = "切换中…";
+          apiPost("switch-user", { username: sUser, password: sPwd })
+            .then(function (data) {
+              // 切换成功：旧令牌已被服务端吊销，本地替换为新令牌
+              localStorage.setItem(LS.token, data.data.token);
+              localStorage.setItem(LS.user, sUser);
+              localStorage.setItem(LS.role, data.data.role || "user");
+              creds = { token: data.data.token, user: sUser };
+              $("switchMask").classList.remove("show");
+              // 按目标角色跳转：管理员 → 管理控制台，用户 → 刷新当前页
+              if (data.data.role === "admin") {
+                location.href = "admin.html";
+              } else {
+                location.reload();
+              }
+            })
+            .catch(function (e) {
+              showAlert($("switchAlert"), e.message, false);
+            })
+            .finally(function () {
+              btn.disabled = false;
+              btn.textContent = "切换并登录";
             });
         });
 
@@ -2008,6 +2084,7 @@
 
               // 配置概览
               var items = [
+                ["🏷️", "版本", c.version || "未知"],
                 ["📡", "API 端口", c.api_port],
                 ["🔗", "URL 前缀", c.url_prefix || "(无)"],
                 [
