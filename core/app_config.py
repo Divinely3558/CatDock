@@ -4,7 +4,7 @@
 集中管理：
   - 文件路径常量
   - 全局可变状态（tasks / video_groups / 各功能开关）
-  - load_config() 加载系统级 config.json / 环境变量 + 过滤规则 filter_rules.json
+  - load_config() 加载系统级环境变量（docker-compose.yml）+ 过滤规则 filter_rules.json
     + 管理员热配置 admin_config.json（auth_key）
   - 安全相关常量（SSRF 网段、限流、请求体上限、脱敏表）
 
@@ -33,13 +33,19 @@ TEMP_DIR = "/home/downloader/temp"
 USER_DIR = "/home/downloader/user"
 FFMPEG_PATH = "/usr/bin/ffmpeg"
 N_M3U8DL = "/home/downloader/N_m3u8DL-RE"
-CONFIG_FILE = "/home/downloader/config/config.json"
+# 系统配置目录（挂载卷 /home/downloader/config）：data.db、admin_config.json、
+# filter_rules.json 均存放在此；系统级开关（URL_PREFIX/API_PORT/DEBUG 等）
+# 全部由 docker-compose.yml 环境变量提供，不再读取 config.json
+CONFIG_DIR = "/home/downloader/config"
 # admin_config.json：用户管理员可热更新的配置（auth_key），
-# 与系统级 config.json 分离——普通管理员无权修改 config.json
-ADMIN_CONFIG_FILE = "/home/downloader/config/admin_config.json"
+# 与系统级环境变量分离——普通管理员无权修改系统配置
+ADMIN_CONFIG_FILE = os.path.join(CONFIG_DIR, 'admin_config.json')
 # 全局 filter_rules.json 仅作为新用户首启的过滤规则模板；
 # 下载用户实际读取 user/<名>/filter_rules.json（各自独立）
-FILTER_RULES_FILE = "/home/downloader/config/filter_rules.json"
+FILTER_RULES_FILE = os.path.join(CONFIG_DIR, 'filter_rules.json')
+# 调试模式运行时状态文件（/tmp 非挂载卷，容器重启即清空）：
+# debug 命令经 SIGUSR1/SIGUSR2 通知服务切换后写此文件，供 CLI 查询当前状态
+DEBUG_STATE_FILE = '/tmp/catdock_debug.state'
 
 
 def user_config_dir(username):
@@ -242,72 +248,82 @@ def load_version():
     version = ""
 
 
+def _env_flag(name, default=False):
+    """读取布尔型环境变量：true/1/yes/on 为真，false/0/no/off 为假；
+    未设置或值无法识别时返回 default。"""
+    val = os.environ.get(name, '').strip().lower()
+    if val in ('true', '1', 'yes', 'on'):
+        return True
+    if val in ('false', '0', 'no', 'off'):
+        return False
+    return default
+
+
+def write_debug_state(enabled):
+    """将调试模式当前状态写入运行时状态文件（/tmp，重启即清空）。
+
+    由服务进程在启动重置与 SIGUSR1/SIGUSR2 信号处理时调用；
+    写入失败不影响调试开关本身（内存状态为准）。
+    """
+    try:
+        with open(DEBUG_STATE_FILE, 'w', encoding='utf-8') as f:
+            f.write('on' if enabled else 'off')
+    except OSError:
+        pass
+
+
+def read_debug_state():
+    """读取调试模式运行时状态；状态文件不存在/不可读时视为关闭。"""
+    try:
+        with open(DEBUG_STATE_FILE, 'r', encoding='utf-8') as f:
+            return f.read().strip().lower() == 'on'
+    except OSError:
+        return False
+
+
 def load_config():
-    """加载系统级配置（config.json + 环境变量）、过滤规则与管理员热配置。
+    """加载系统级配置（环境变量）、过滤规则与管理员热配置。
 
     配置分层约定：
-      - config.json        系统级配置（端口/调试/SSRF/并发等），仅系统管理员通过
-                           命令行或直接编辑文件修改，重启容器后生效，/reload 不读取；
-      - admin_config.json  用户管理员可热更新的配置（auth_key），
-                           管理网页修改即时写回并生效；
-      - filter_rules.json  过滤规则，/reload 热加载。
+      - 环境变量          系统级配置（URL_PREFIX/API_PORT/SAME_VIDEO_BY_FILENAME/
+                          SSRF_PROTECTION/MAX_CONCURRENT_TASKS），在 docker-compose.yml
+                          中配置，修改后重启容器生效，/reload 不读取；
+      - 调试模式          运行时开关（不持久化），容器内 `debug yes/no` 命令经
+                          SIGUSR1/SIGUSR2 信号即时切换，重启后恢复默认关闭；
+      - admin_config.json 用户管理员可热更新的配置（auth_key），
+                          管理网页修改即时写回并生效；
+      - filter_rules.json 过滤规则，/reload 热加载。
     """
-    from app_logger import log_error, debug_print
+    from app_logger import debug_print
 
-    # 版本号（web/version），与系统配置无关，仅用于展示一致性
+    # 版本号（web/VERSION），与系统配置无关，仅用于展示一致性
     load_version()
 
-    # 系统级默认值（本函数内全部使用局部变量，末尾 globals().update 一次性写回）
-    url_prefix = ""
+    # 系统级配置一律来自环境变量（本函数内全部使用局部变量，末尾 globals().update 一次性写回）
+    # URL_PREFIX：规范化去首尾空格与斜杠，避免值带尾斜杠导致所有请求 404 并累积封禁计数
+    url_prefix = os.environ.get('URL_PREFIX', '').strip().strip('/')
+    # 监听端口：main.py 读取 API_PORT 环境变量，未设置时用此默认值
     server_port = 8080
+    # 调试模式为纯运行时开关：每次启动重置为关闭，并刷新 /tmp 状态文件
+    # （运行期由 debug 命令经 SIGUSR1/SIGUSR2 切换，不读环境变量、不持久化）
     debug_mode = False
-    same_video_by_filename_enabled = False
-    ssrf_protection = True
+    write_debug_state(False)
+    same_video_by_filename_enabled = _env_flag('SAME_VIDEO_BY_FILENAME', False)
+    ssrf_protection = _env_flag('SSRF_PROTECTION', True)
+
+    # 最大并发下载任务数：未设置或非法时回退默认 20
     max_concurrent_tasks = 20
+    env_max = os.environ.get('MAX_CONCURRENT_TASKS', '').strip()
+    if env_max.isdigit() and int(env_max) > 0:
+        max_concurrent_tasks = int(env_max)
 
-    try:
-        with open(CONFIG_FILE, 'r', encoding='utf-8-sig') as f:
-            config = json.load(f)
-
-        # 优先从环境变量读取 url_prefix，环境变量优先级高于配置文件
-        # 规范化：去首尾空格与斜杠，避免配置值带尾斜杠导致所有请求 404 并累积封禁计数
-        env_url_prefix = os.environ.get('URL_PREFIX', '').strip()
-        if env_url_prefix:
-            url_prefix = env_url_prefix.strip('/')
-            debug_print("[启动] URL前缀来源: 环境变量")
-        else:
-            url_prefix = str(config.get('url_prefix', '')).strip().strip('/')
-            debug_print("[启动] URL前缀来源: 配置文件")
-
-        server_port = int(config.get('port', 8080))
-
-        debug_mode = bool(config.get('debug', False))
-
-        same_video_by_filename_enabled = bool(config.get('same_video_by_filename', False))
-
-        # SSRF 防护开关：环境变量优先（SSRF_PROTECTION=false 可关闭）
-        env_ssrf = os.environ.get('SSRF_PROTECTION', '').lower()
-        if env_ssrf in ('false', '0', 'no', 'off'):
-            ssrf_protection = False
-        elif env_ssrf in ('true', '1', 'yes', 'on'):
-            ssrf_protection = True
-        else:
-            ssrf_protection = bool(config.get('ssrf_protection', True))
-
-        # 最大并发任务数：环境变量优先
-        env_max = os.environ.get('MAX_CONCURRENT_TASKS', '')
-        if env_max.isdigit() and int(env_max) > 0:
-            max_concurrent_tasks = int(env_max)
-        else:
-            max_concurrent_tasks = int(config.get('max_concurrent_tasks', 20))
-    except Exception as e:
-        log_error(f"系统配置加载失败: {e}")
-        url_prefix = ""
-        server_port = 8080
+    debug_print(f"[启动] 系统配置(环境变量): 同视频模式={'启用' if same_video_by_filename_enabled else '关闭'}, "
+                f"SSRF防护={'启用' if ssrf_protection else '关闭'}, 最大并发={max_concurrent_tasks}；"
+                f"调试模式运行时开关(debug yes/no)，当前关闭")
 
     # 安全校验：URL_PREFIX 必须设置（AUTH_KEY 为空时由 main.py 首启自动生成并写回）
     if not url_prefix:
-        raise RuntimeError("URL_PREFIX 未设置，请在环境变量或配置文件中指定")
+        raise RuntimeError("URL_PREFIX 未设置，请在 docker-compose.yml 环境变量中指定")
 
     # 把加载结果写回模块属性（load_config 内的局部变量 -> 全局状态）
     globals().update({
@@ -319,8 +335,8 @@ def load_config():
         'max_concurrent_tasks': max_concurrent_tasks,
     })
 
-    # 数据库路径：与 config.json 同级目录（data.db 承载封禁 IP + 用户）
-    data_db.set_db_path(os.path.join(os.path.dirname(CONFIG_FILE), 'data.db'))
+    # 数据库路径：config 目录下（data.db 承载封禁 IP + 用户）
+    data_db.set_db_path(os.path.join(CONFIG_DIR, 'data.db'))
 
     # 过滤规则（filter_rules.json）与管理员热配置（admin_config.json：
     # auth_key，普通管理员可经管理网页热更新）

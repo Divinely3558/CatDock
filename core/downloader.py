@@ -1746,7 +1746,7 @@ def delete_task(task_id):
 
 def run_download(url, save_name=None, referer=None, cookie=None, user_agent=None, user=None, output_format=None):
     normalized_url = url.strip().rstrip('/')
-    # 解析本次任务的输出格式：网页可逐任务指定，不传时回退到 config.json 全局设置
+    # 解析本次任务的输出格式：网页可逐任务指定，不传时回退到全局默认（mp4）
     fmt = output_format if output_format in ('mp4', 'mkv') else cfg.output_format
     # per-user 目录：下载 /home/downloader/downloads/<用户名>，缓存 /home/downloader/temp/<用户名>
     if not user:

@@ -16,12 +16,13 @@
 - **👥 多用户隔离**：任务列表按登录用户过滤；配置/日志/缓存/成品分别存入 `user/<用户名>`、`temp/<用户名>`、`downloads/<用户名>` 独立目录
 - **🛠️ 管理员体系**：管理员/下载用户两种角色；首启自动创建默认管理员 `admin`（14 位随机密码，见启动日志）；管理网页可增删用户、改密、禁用、热更新 AUTH_KEY、编辑过滤规则模板；管理员账户增删通过容器内 `adminctl` 命令
 - **🔑 AUTH_KEY 热更新**：`AUTH_KEY` 存于 admin_config.json（首启自动随机生成），管理网页修改后立即写回文件并生效、全员强制重新登录，无需重启容器
-- **🗂️ 配置分层**：系统级配置（config.json，仅系统管理员经命令行/文件修改，重启容器生效）与管理员热配置（admin_config.json，管理网页修改即时生效）相互独立
+- **🗂️ 配置分层**：系统级配置（URL_PREFIX/API_PORT/SSRF 防护/并发数/同视频模式等）全部通过 docker-compose.yml 环境变量注入，修改后重启容器生效；管理员热配置（admin_config.json）由管理网页修改即时生效，两者相互独立
 - **🚫 用户禁用**：`userctl ban/unban` 或管理网页可禁用用户，被禁用户立即无法登录、已签发令牌全部失效
 - **🔐 修改密码**：网页菜单「修改密码」（旧密码 1 遍 + 新密码 2 遍），成功后该用户全部令牌吊销并回到登录页；CLI 等价命令 `userctl password` / `adminctl password`
-- **🚨 分级封禁**：AUTH_KEY 错误或用户不存在按 **IP 级**计数（10 分钟内 10 次 → 临时封禁 30 分钟，再次触发永久封禁）；密码错误按 **账号级**计数（10 分钟内 5 次 → 自动禁用该账号）；`banip` CLI 管理 IP 封禁
+- **� 切换用户**：网页菜单「切换用户」输入目标账号用户名+密码即可换号（无需重新输入 AUTH_KEY，支持用户 ↔ 管理员跨角色），校验通过后吊销当前令牌、签发目标账号新令牌并按角色自动跳转；用户端与管理端共用同一套弹窗
+- **� 分级封禁**：AUTH_KEY 错误或用户不存在按 **IP 级**计数（10 分钟内 10 次 → 临时封禁 30 分钟，再次触发永久封禁）；密码错误按 **账号级**计数（10 分钟内 5 次 → 自动禁用该账号）；`banip` CLI 管理 IP 封禁
 - **🔍 每用户过滤规则**：广告拦截关键字 / 文件名关键字过滤 / 正则去重三套机制各自独立开关，用户在网页菜单「过滤规则」中自助编辑（chips 增删 + 正则前端校验），保存即时生效；管理员可编辑全局模板，新用户首次使用自动复制
-- **🔐 敏感配置隔离**：`URL_PREFIX` 仅通过 Docker 环境变量注入（生产地址恒定），config.json / admin_config.json 不入 git
+- **🔐 敏感配置隔离**：系统级配置全部通过 Docker 环境变量注入（生产地址恒定），admin_config.json 不入 git
 - **📋 任务持久化**：任务按用户自动保存到 `user/<用户名>/tasks.json`，任务完成立即清除记录；重启后自动恢复未完成任务
 - **🎥 逐任务输出格式**：下载请求可带 `format` 字段指定 mp4/mkv（默认 mp4），网页新建任务时下拉选择
 - **📹 直接视频下载**：支持 mp4、mkv、ts、flv、f4v、avi、webm、mov、wmv 等格式的直链下载（curl 断点续传）；`.f4v` 下载后直接改名为 `.mp4`（标准碎片化 MP4 容器，无需转码）
@@ -30,7 +31,7 @@
 - **🔄 断点续传**：m3u8 分片与直链断点在重启/重建后保留并自动续传，网络中断自动重试
 - **🛡️ 重复下载防护**：检测 URL 是否已下载过，避免重复下载
 - **🎬 同视频模式**：按文件名判定同一视频，多链接轮流切换下载（每轮 5 次后放弃）
-- **🐞 调试模式**：支持开启调试日志，便于问题排查
+- **🐞 调试模式**：容器内 `debug yes/no` 命令经 SIGUSR1/SIGUSR2 信号即时切换详细日志（运行时开关，不写配置文件、重启恢复关闭），便于问题排查
 - **⏱️ 请求超时处理**：30 秒请求超时保护，防止连接阻塞
 - **🚪 优雅关闭**：支持 SIGTERM/SIGINT 信号，安全停止服务
 - **🌏 东八区时间**：日志时间戳统一使用北京时间（UTC+8）
@@ -66,7 +67,8 @@ catdock/
 ├── cli/                 # 🔧 命令行工具（容器内加入 PATH，可直接执行）
 │   ├── banip            # 🔧 IP 封禁管理 CLI（show/add/del）
 │   ├── userctl          # 👤 下载用户管理 CLI（add/del/password/ban/unban）
-│   └── adminctl         # 🛠️ 管理员账户管理 CLI（add/del/password/list）
+│   ├── adminctl         # 🛠️ 管理员账户管理 CLI（add/del/password/list）
+│   └── debug            # 🐞 调试模式运行时开关（yes/no/show，经 SIGUSR1/SIGUSR2 切换）
 ├── web/                 # 🖥️ 前端资源（容器内平铺到 /home/downloader/）
 │   ├── login.html       # 🔑 登录页（按角色自动跳转）
 │   ├── user.html        # 🖥️ 下载控制台（普通用户）
@@ -75,8 +77,7 @@ catdock/
 ├── sh/                  # 📜 Shell 脚本
 │   ├── entrypoint.sh    # 🚀 容器启动脚本
 │   └── deploy.sh        # 📦 镜像构建/推送/清理脚本（本地使用）
-├── config/              # ⚙️ 配置模板
-│   ├── config.example.json  # ⚙️ 系统级配置模板（真实 config.json 运行时挂载）
+├── config/              # ⚙️ 配置模板（系统级开关走 docker-compose 环境变量，无配置文件）
 │   ├── admin_config.example.json # 🔑 管理员热配置模板（真实 admin_config.json 运行时挂载）
 │   └── filter_rules.json    # 🔍 过滤规则配置（广告拦截 + 文件名过滤）
 ├── bin/                 # 📥 第三方二进制
@@ -125,9 +126,10 @@ services:
       - API_PORT=5000 # 📡 监听端口（host 模式下直接占用宿主端口）
       - SSRF_PROTECTION=true # 🛡️ SSRF防护: true=拦截内网地址, false=允许内网下载
       - MAX_CONCURRENT_TASKS=20 # 📊 最大并发下载任务数
+      - SAME_VIDEO_BY_FILENAME=true # 🎬 同视频模式: true=同名视频多链接轮流调度（默认开启）, false=普通下载模式
 ```
 
-> `AUTH_KEY` 不通过环境变量配置：它保存在 admin_config.json 的 `auth_key` 字段，首次启动自动随机生成，之后可在管理网页热更新。config.json 为系统级配置（调试/同视频模式等），仅系统管理员修改、重启容器后生效。
+> `AUTH_KEY` 不通过环境变量配置：它保存在 admin_config.json 的 `auth_key` 字段，首次启动自动随机生成，之后可在管理网页热更新。系统级开关（同视频模式/SSRF 防护/并发数等）全部通过 docker-compose.yml 环境变量配置，修改后重启容器生效；调试模式为运行时开关，用容器内 `debug yes/no` 命令即时切换（重启恢复关闭）。
 
 ### 3. 构建并启动容器
 
@@ -164,7 +166,6 @@ docker logs -f catdock
 
 | 文件                | 说明                                                                         |
 | ------------------- | ---------------------------------------------------------------------------- |
-| `config.json`       | 系统级配置：调试开关、同视频模式等（仅系统管理员修改，重启生效）       |
 | `admin_config.json` | 管理员热配置：`auth_key` 认证密钥（管理网页修改即时生效）                    |
 | `filter_rules.json` | 全局过滤规则模板（广告拦截 + 文件名过滤/去重），新用户首次使用时自动复制一份 |
 | `data.db`           | SQLite 数据库（封禁 IP + 用户/角色/禁用状态 + 认证失败计数 + 令牌吊销登记）  |
@@ -261,7 +262,7 @@ docker logs -f catdock
 - **登录**：输入 `AUTH_KEY`（admin_config.json 的 `auth_key`，首启自动生成）与用户名/密码，换取 2 小时有效期的访问令牌；登录响应返回用户角色，**管理员自动跳转到管理控制台**，普通用户进入下载控制台；浏览器仅保存令牌与用户名（明文密钥/密码不落盘），「退出」会吊销服务端令牌并回到登录页，令牌过期后需重新登录
 - **新建下载**（下载控制台）：粘贴视频 URL、填写保存文件名（选填）、选择输出格式（MP4/MKV，默认 MP4），支持折叠的高级选项（Referer / Cookie / User-Agent）
 - **任务列表**：每 3 秒自动刷新，仅显示**当前登录用户自己的任务**；显示文件名、状态徽章（收集中 / 下载中 / 已暂停）、进度条；点击任务可弹出详情（任务 ID、全部链接、重试次数等），可暂停 / 继续 / 删除任务；任务完成（成功或失败）后自动从列表移除
-- **用户菜单**（右上角）：修改密码（旧密码 1 遍 + 新密码 2 遍，成功后全部令牌吊销并回到登录页）、过滤规则编辑、主题切换、退出
+- **用户菜单**（右上角）：切换用户（输入目标账号用户名+密码即可换号，无需重新输入 AUTH_KEY，支持用户 ↔ 管理员跨角色，成功后按角色自动跳转）、修改密码（旧密码 1 遍 + 新密码 2 遍，成功后全部令牌吊销并回到登录页）、过滤规则编辑、主题切换、退出
 - **猫抓配置弹窗**：一键查看当前前缀对应的猫抓发送地址与请求体模板（含 `key`/`user`/`password`/`format` 占位）
 - 页面均为纯静态外壳（不含任何敏感信息），所有数据操作均在 `Authorization: Bearer` 请求头中携带访问令牌调用 API
 
@@ -274,7 +275,7 @@ docker logs -f catdock
 - **AUTH_KEY 热更新**：在「服务器配置」中点击「🎲 随机」自动生成新 KEY（**输入框只读，不支持手填**；密钥固定 14 位，含至少 1 个大写字母、1 个小写字母、1 个数字和 1-3 个符号，使用浏览器密码学随机源生成），保存后立即写回 admin_config.json 并生效，**包括管理员在内的所有用户令牌全部吊销**（全员强制重新登录）；之后把新 KEY 通知各用户即可，用户密码无需改动；猫抓插件请求体中的 `key` 也需同步更换
 - **过滤规则模板**：编辑全局过滤规则模板（config/filter_rules.json），保存即时生效；**新用户**首次使用时自动复制一份作为个人规则，已有用户的个人规则不受影响
 - **修改密码**：管理员修改自己的密码（同网页菜单「修改密码」）
-- **命令行参考**：页面内附 `adminctl` / `userctl` / `banip` 全部命令速查
+- **命令行参考**：页面内附 `adminctl` / `userctl` / `banip` / `debug` 全部命令速查（桌面端 4 组并排展示，平板 2×2，手机单列）
 - **管理员账户增删**：管理网页不提供入口，仅通过容器内 `adminctl` CLI 完成（见命令行工具章节），至少保留一个管理员；管理控制台固定墨绿亮色主题，无主题切换
 
 ## 📡 API 接口
@@ -289,6 +290,7 @@ docker logs -f catdock
 | `/{prefix}/health`               | GET      | 健康检查                                                                                                           | 否            |
 | `/{prefix}/login`                | POST     | 登录并签发访问令牌（有效期 2 小时）                                                                                | 两层凭证      |
 | `/{prefix}/logout`               | POST     | 退出并吊销当前访问令牌                                                                                             | 令牌          |
+| `/{prefix}/switch-user`          | POST     | 切换到目标账号（校验目标用户名+密码，吊销当前令牌并签发新令牌，支持跨角色）                                        | 令牌          |
 | `/{prefix}/password`             | POST     | 修改自己的密码（旧密码 + 新密码，成功后该用户令牌全部吊销）                                                        | 令牌          |
 | `/{prefix}/config`               | GET      | 获取运行配置摘要（端口/前缀/开关/用户数，AUTH_KEY 脱敏）                                                           | 令牌          |
 | `/{prefix}/download`             | POST     | 添加下载任务（仅下载用户，管理员不可下载）                                                                         | 令牌/两层凭证 |
@@ -457,6 +459,34 @@ curl -X POST -H "Authorization: Bearer <token>" http://容器IP:5000/{prefix}/lo
 
 > **吊销机制**：令牌签名依赖 AUTH_KEY 且签发时登记唯一 `jti` 到 `auth_tokens` 表，每次业务请求校验签名与吊销状态。除网页「注销」外，以下操作也会批量作废令牌：`userctl password` 修改密码、禁用用户（`userctl ban` / 管理网页）、删除用户（防止重建同名用户后旧令牌复活）——该用户全部令牌失效；管理网页热更新 AUTH_KEY 或管理员执行 `/reload` 导致 KEY 变化——**全员**令牌失效（签名同时失效，双保险）。已过期的登记行会在下次签发令牌时自动清理。
 
+### POST /{prefix}/switch-user
+
+切换登录账号（网页菜单「切换用户」调用）：当前已持有效 Bearer 令牌时，**无需 AUTH_KEY**，提交目标账号的用户名+密码，校验通过后吊销当前令牌并为目标账号签发新令牌。支持**跨角色切换**（普通用户 ↔ 管理员，只要知道目标账号密码）；网页切换成功后按目标角色自动跳转（管理员 → 管理控制台，普通用户 → 下载控制台）。
+
+请求体：
+
+```json
+{
+  "username": "<目标用户名>",
+  "password": "<目标用户密码>"
+}
+```
+
+响应（成功）：
+
+```json
+{
+  "success": true,
+  "data": {
+    "token": "<新访问令牌>",
+    "role": "admin 或 user",
+    "expiresIn": 7200
+  }
+}
+```
+
+> 目标用户不存在或已被禁用返回 403；密码错误返回 403 并计入**目标账号**的账号级失败计数（10 分钟内 5 次会自动禁用目标账号，与登录接口同一套计数）。
+
 ### GET /{prefix}/tasks
 
 在请求头携带访问令牌：`Authorization: Bearer <token>`
@@ -533,7 +563,7 @@ curl -X POST -H "Authorization: Bearer <管理员令牌>" http://容器IP:5000/{
 }
 ```
 
-> 重载内容：admin_config.json（`auth_key`）与全局过滤规则模板 config/filter_rules.json，并重连 data.db。若重载后 `auth_key` 发生变化（文件被外部修改），全员令牌会被自动吊销，需用新 KEY 重新登录。系统级 config.json 不随 `/reload` 重载，任何修改需重启容器后生效。日常使用中管理网页的保存操作本身即时生效，通常无需手动调用本接口。
+> 重载内容：admin_config.json（`auth_key`）与全局过滤规则模板 config/filter_rules.json，并重连 data.db。若重载后 `auth_key` 发生变化（文件被外部修改），全员令牌会被自动吊销，需用新 KEY 重新登录。系统级开关（docker-compose 环境变量）不随 `/reload` 重载，修改后需重建容器生效。日常使用中管理网页的保存操作本身即时生效，通常无需手动调用本接口。
 
 ### GET /{prefix}/health
 
@@ -577,20 +607,24 @@ services:
       - API_PORT=5000 # 📡 监听端口（host 模式直接占用宿主端口）
       - SSRF_PROTECTION=true # 🛡️ SSRF防护开关
       - MAX_CONCURRENT_TASKS=20 # 📊 最大任务数
+      - SAME_VIDEO_BY_FILENAME=true # 🎬 同视频模式：true=同名视频多链接轮流调度（默认开启）
 ```
 
 > 四个挂载卷缺一不可：`config`（配置与 data.db）、`user`（每用户任务/日志/个人过滤规则）、`temp`（下载缓存分片）、`downloads`（成品视频）。重建容器（`up -d --build` / 换新镜像）后数据全部保留。
 
 ### 环境变量
 
-| 变量名                 | 说明                                    | 默认值 | 是否必填 |
-| ---------------------- | --------------------------------------- | ------ | -------- |
-| `API_PORT`             | 服务监听端口（host 模式下直接占用宿主端口） | 8080   | 否       |
-| `URL_PREFIX`           | URL 路径前缀（所有接口必须）            | 空     | **是**   |
-| `SSRF_PROTECTION`      | SSRF 防护开关，`false` 允许内网地址下载 | true   | 否       |
-| `MAX_CONCURRENT_TASKS` | 最大并发下载任务数                      | 20     | 否       |
+| 变量名                   | 说明                                              | 默认值                                   | 是否必填 |
+| ------------------------ | ------------------------------------------------- | ---------------------------------------- | -------- |
+| `API_PORT`               | 服务监听端口（host 模式下直接占用宿主端口）       | 8080                                     | 否       |
+| `URL_PREFIX`             | URL 路径前缀（所有接口必须）                      | 空                                       | **是**   |
+| `SSRF_PROTECTION`        | SSRF 防护开关，`false` 允许内网地址下载           | true                                     | 否       |
+| `MAX_CONCURRENT_TASKS`   | 最大并发下载任务数                                | 20                                       | 否       |
+| `SAME_VIDEO_BY_FILENAME` | 同视频模式：`true` 同名视频的多个链接聚合轮流调度 | false（docker-compose.yml 示例默认开启） | 否       |
 
-> **配置位置**：`URL_PREFIX` 仅通过环境变量设置（保证生产访问地址恒定，未设置时程序拒绝启动）；`AUTH_KEY` 保存在 admin_config.json 的 `auth_key` 字段（首启自动随机生成，管理网页可热更新，无需重启容器）。
+> 布尔型环境变量取值：`true/1/yes/on` 为开，`false/0/no/off` 为关；未设置或无法识别时使用默认值。
+
+> **配置位置**：系统级开关全部通过 docker-compose.yml 环境变量设置（`URL_PREFIX` 保证生产访问地址恒定，未设置时程序拒绝启动），修改后需 `docker-compose up -d` 重建容器生效；`AUTH_KEY` 保存在 admin_config.json 的 `auth_key` 字段（首启自动随机生成，管理网页可热更新，无需重启容器）。调试模式不属于环境变量：容器内 `debug yes/no` 命令运行时即时切换，不写任何文件，重启容器后恢复默认关闭。
 >
 > **两层认证**：系统采用两层认证机制——第一层 `AUTH_KEY`（admin_config.json，管理网页热更新后全员重新登录），第二层用户名+密码（管理员或 `userctl add` 创建的用户，密码可用 `userctl password` 修改，改后该用户全部令牌失效）。推荐先调用 `POST /{prefix}/login` 换取访问令牌，业务接口在 `Authorization: Bearer <token>` 请求头携带令牌即可；POST 接口同时兼容请求体传 `key`/`user`/`password`（猫抓插件等第三方调用方）。
 
@@ -692,9 +726,9 @@ healthcheck:
 3. **已存在视频**：检查该用户 downloads 目录中是否已存在完整视频文件
 4. **.copy 文件**：检查是否存在重复的 `.copy` 文件
 
-### 同视频模式（same_video_by_filename）
+### 同视频模式（SAME_VIDEO_BY_FILENAME）
 
-开启 `same_video_by_filename: true` 后，系统按文件名判定同一视频：
+在 docker-compose.yml 中设置环境变量 `SAME_VIDEO_BY_FILENAME=true`（示例文件默认开启）并重启容器后，系统按文件名判定同一视频：
 
 - **聚合链接**：同一文件名的多个不同下载链接自动聚合为一个视频组
 - **轮流切换**：每个链接尝试 1 次后切换下一个，所有链接失败算一个"失败回合"
@@ -740,13 +774,12 @@ healthcheck:
 
 > 以下章节的 JSON 结构、正则语法与示例同时适用于全局模板和每用户规则（文件结构完全一致）。
 
-### 配置文件参考（系统级 config.json）
+### 配置文件参考（环境变量 + admin_config.json）
 
-`config` 挂载卷中的系统级与管理员配置：
+系统级开关（`URL_PREFIX`/`API_PORT`/`SSRF_PROTECTION`/`MAX_CONCURRENT_TASKS`/`SAME_VIDEO_BY_FILENAME`）全部在 docker-compose.yml 的 `environment` 中配置（见「环境变量」小节），~~不再使用 config.json 配置文件~~。`config` 挂载卷中仅保存以下文件（首启自动生成）：
 
 | 文件                | 用途                                                      |
 | ------------------- | --------------------------------------------------------- |
-| `config.json`       | 系统级配置：调试开关、同视频模式（重启容器生效）    |
 | `admin_config.json` | 管理员热配置：`auth_key` 认证密钥（管理网页修改即时生效） |
 | `filter_rules.json` | 全局过滤规则模板（新用户复制，管理员网页编辑）            |
 
@@ -756,20 +789,9 @@ healthcheck:
 mkdir -p /youdir/config
 ```
 
-#### 步骤 2：创建 config.json（系统级配置）
+> 系统级开关无需创建任何配置文件：在 docker-compose.yml 的 `environment` 中设置即可（SSRF 防护、并发数、同视频模式不设置时使用内置默认值：开启 / 20 / 关闭；监听端口由 `API_PORT` 控制，host 模式下直接占用宿主端口，默认 8080）。调试模式为运行时开关，用容器内 `debug yes/no` 命令切换。
 
-```bash
-cat > /youdir/config/config.json << 'EOF'
-{
-  "debug": false,
-  "same_video_by_filename": false
-}
-EOF
-```
-
-> SSRF 开关与并发数优先由环境变量 `SSRF_PROTECTION` / `MAX_CONCURRENT_TASKS` 控制；不设置时使用内置默认值（开启 / 20）。监听端口由环境变量 `API_PORT` 控制（host 模式下直接占用宿主端口）。
-
-#### 步骤 3：创建 admin_config.json（管理员热配置）
+#### 步骤 2：创建 admin_config.json（管理员热配置）
 
 ```bash
 cat > /youdir/config/admin_config.json << 'EOF'
@@ -781,7 +803,7 @@ EOF
 
 > `auth_key` 可省略或保留 `CHANGE_ME` 占位符——首次启动时程序会自动生成随机密钥并写回文件，启动日志中可见；之后建议在管理网页中修改（热更新，无需重启容器）。
 
-#### 步骤 4：创建 filter_rules.json（全局模板）
+#### 步骤 3：创建 filter_rules.json（全局模板）
 
 ```bash
 cat > /youdir/config/filter_rules.json << 'EOF'
@@ -807,7 +829,7 @@ cat > /youdir/config/filter_rules.json << 'EOF'
 EOF
 ```
 
-#### 步骤 5：修改 docker-compose.yml 添加挂载
+#### 步骤 4：修改 docker-compose.yml 添加挂载与环境变量
 
 ```yaml
 volumes:
@@ -817,22 +839,25 @@ volumes:
   - /youdir/downloads:/home/downloader/downloads
 ```
 
-#### 步骤 6：重启容器
+#### 步骤 5：重启容器
 
 ```bash
 docker-compose up -d --build
 ```
 
-### config.json 参数说明（系统级，重启容器生效）
+### 系统级开关说明（docker-compose 环境变量，重启容器生效）
 
-> 监听端口已移出 config.json，统一由环境变量 `API_PORT` 控制（host 网络模式下直接占用宿主端口，默认 8080）。
+~~系统级开关原通过 config.json 配置~~，现已全部迁移到 docker-compose.yml 环境变量，完整列表见「[环境变量](#环境变量)」小节：
 
-| 参数                     | 说明                                                 | 默认值 |
-| ------------------------ | ---------------------------------------------------- | ------ |
-| `debug`                  | 是否启用调试模式，开启后会输出详细日志               | false  |
-| `same_video_by_filename` | 是否启用同视频模式（按文件名聚合多链接轮流下载）     | false  |
-| `ssrf_protection`        | 是否启用 SSRF 防护（拦截内网地址），可被环境变量覆盖 | true   |
-| `max_concurrent_tasks`   | 最大并发下载任务数，可被环境变量覆盖                 | 20     |
+| 环境变量                 | 说明                                             | 默认值                                   |
+| ------------------------ | ------------------------------------------------ | ---------------------------------------- |
+| `URL_PREFIX`             | URL 路径前缀（**必填**，所有接口路径都带此前缀） | 空                                       |
+| `API_PORT`               | 服务监听端口（host 模式下直接占用宿主端口）      | 8080                                     |
+| `SAME_VIDEO_BY_FILENAME` | 同视频模式（按文件名聚合多链接轮流下载）         | false（docker-compose.yml 示例默认开启） |
+| `SSRF_PROTECTION`        | SSRF 防护（拦截内网地址）                        | true                                     |
+| `MAX_CONCURRENT_TASKS`   | 最大并发下载任务数                               | 20                                       |
+
+> 调试模式**不是**环境变量也不是配置文件：容器内执行 `debug yes`（或 `debug y`）即时开启详细日志，`debug no`（`debug n`）关闭，`debug show` 查看状态。开关为纯运行时状态（经 SIGUSR1/SIGUSR2 信号切换），不写任何文件，容器重启后恢复默认关闭。
 
 ### admin_config.json 参数说明（管理员热配置，即时生效）
 
@@ -840,7 +865,7 @@ docker-compose up -d --build
 | ---------- | ----------------------------------------------------------------------------------------- | -------- |
 | `auth_key` | 第一层认证密钥：留空或 `CHANGE_ME` 时首启自动随机生成并写回；管理网页热更新后全员令牌失效 | 随机生成 |
 
-> ⚠️ 配置分层：`auth_key` 存于 admin_config.json（管理网页可热更新），普通管理员无权修改 config.json；`url_prefix` 不在配置文件中，仅通过 Docker 环境变量 `URL_PREFIX` 注入，保证生产访问地址恒定。输出格式（mp4/mkv）为逐任务参数（下载请求 `format` 字段 / 网页下拉框），不属于全局配置。
+> ⚠️ 配置分层：`auth_key` 存于 admin_config.json（管理网页可热更新），普通管理员无权修改系统级配置；系统级开关（`URL_PREFIX`/`API_PORT`/`SSRF_PROTECTION`/`MAX_CONCURRENT_TASKS`/`SAME_VIDEO_BY_FILENAME`）仅通过 Docker 环境变量注入，保证生产访问地址恒定。输出格式（mp4/mkv）为逐任务参数（下载请求 `format` 字段 / 网页下拉框），不属于全局配置。
 
 ### filter_rules.json 参数说明
 
@@ -1170,10 +1195,10 @@ docker-compose up -d --build
 ### adminctl — 管理员账户管理
 
 ```bash
-docker exec -it catdock adminctl add <用户名>        # 创建管理员（交互式输入密码）
-docker exec -it catdock adminctl password <用户名>   # 重置管理员密码（该账户全部令牌失效）
-docker exec -it catdock adminctl del <用户名>        # 删除管理员（至少保留一个管理员）
 docker exec -it catdock adminctl list                # 列出全部用户（用户名/角色/状态/创建时间）
+docker exec -it catdock adminctl add <用户名>        # 创建管理员（交互式输入密码）
+docker exec -it catdock adminctl del <用户名>        # 删除管理员（至少保留一个管理员）
+docker exec -it catdock adminctl password <用户名>   # 重置管理员密码（该账户全部令牌失效）
 ```
 
 - 首启自动创建默认管理员 `admin`（14 位随机初始密码，仅在启动日志显示一次，请尽快登录修改）
@@ -1209,6 +1234,20 @@ docker exec -it catdock banip del <IP地址>         # 解封（同时清零失�
 - **IP 级**（AUTH_KEY 错误、用户不存在、无效令牌）：累计 **10** 次 → 第 1 次触发临时封禁 30 分钟（`自动封禁(临时)`，到期自动解封并清零计数），解封后再次触发升级为永久封禁（`自动封禁(永久)`，仅 `banip del` 可解除）
 - **账号级**（用户存在但密码错误）：累计 **5** 次 → 自动禁用该账号（需 `userctl unban` / 管理网页解禁或重置密码）
 - URL 前缀错误返回 404 **不**计数；账号已禁用导致的 403 不计数；认证成功自动清零该 IP 与该账号的计数
+
+### debug — 调试模式开关
+
+调试模式为**纯运行时开关**：即时生效、不写任何配置文件、不需要重启容器，容器重启后恢复默认关闭。
+
+```bash
+docker exec -it catdock debug show     # 查看当前状态（yes/no 可简写为 y/n）
+docker exec -it catdock debug yes      # 开启调试模式（输出类型探测/命令执行/任务ID/路径等详细过程日志）
+docker exec -it catdock debug no       # 关闭调试模式（仅输出关键下载结果）
+```
+
+- 原理：命令扫描 `/proc` 找到运行中的服务进程，发送 SIGUSR1（开启）/ SIGUSR2（关闭）信号切换，状态记录在 `/tmp` 运行时文件中
+- 调试模式下日志量显著增加，排查完问题建议执行 `debug no` 关闭
+- 不带参数执行 `debug`（或 `debug --help`）显示用法帮助
 
 ## 🛠️ 故障排查
 
@@ -1302,14 +1341,14 @@ docker exec catdock getent hosts baidu.com
 1. **猫抓版本**：建议使用猫抓 2.3.8+ 版本以支持 `${cookie}` 标签
 2. **下载参数**：某些网站需要 `referer` 和 `cookie` 才能下载，请确保猫抓正确捕获这些参数
 3. **端口安全**：建议在生产环境通过 `API_PORT` 环境变量修改 HTTP 端口
-4. **配置修改**：每用户过滤规则在网页「过滤规则」中编辑后立即生效，无需重载；管理员修改全局过滤模板（`config/filter_rules.json`）或手工改了 `admin_config.json` 后，可通过 `POST /{prefix}/reload` 接口或管理网页「重载配置」热加载（auth_key 也可直接在管理网页「服务器配置」修改，立即生效并全员重新登录）；系统级 `config.json` 不随 reload 生效，任何修改需重启容器
+4. **配置修改**：每用户过滤规则在网页「过滤规则」中编辑后立即生效，无需重载；管理员修改全局过滤模板（`config/filter_rules.json`）或手工改了 `admin_config.json` 后，可通过 `POST /{prefix}/reload` 接口或管理网页「重载配置」热加载（auth_key 也可直接在管理网页「服务器配置」修改，立即生效并全员重新登录）；系统级开关（docker-compose 环境变量）不随 reload 生效，修改后需 `docker-compose up -d` 重建容器
 5. **环境变量修改**：修改 `URL_PREFIX` 等环境变量需要 `docker-compose up -d` 重新创建容器（`URL_PREFIX` 变更会改变访问地址，故不建议生产环境变动）
 6. **文件格式**：下载完成后自动封装为 MP4 或 MKV，格式逐任务选择（网页下拉框 / 请求体 `format` 字段，默认 MP4）
 7. **URL 前缀**：`URL_PREFIX` 为必填项，所有 API 接口（含健康检查）路径都必须添加前缀，未带前缀返回 404
 8. **两层认证 + 用户 + 令牌**：`AUTH_KEY`（admin_config.json 的 `auth_key` 字段，首启随机生成、管理网页可热更新）与用户名/密码（管理员或 `userctl add` 创建的用户）均为必填。先调用 `POST /{prefix}/login`（请求体传 `key`/`user`/`password`）换取 2 小时有效期的访问令牌，业务接口在 `Authorization: Bearer <token>` 请求头携带令牌；POST 接口同时兼容请求体传 `key`/`user`/`password`（猫抓插件等第三方）。凭证不支持通过 URL 查询参数传递，否则返回 403
 9. **任务持久化**：任务列表按用户自动保存到 `user/<用户名>/tasks.json`，容器重启后自动恢复未完成任务（分片保留续传）
 10. **重复下载**：同一用户的同一 URL 不会重复下载（按用户隔离检测下载历史和已存在文件；不同用户互不影响）
-11. **调试模式**：开启 `debug: true` 可查看详细日志，便于排查问题
+11. **调试模式**：容器内执行 `debug yes` 即时开启详细日志（`debug no` 关闭、`debug show` 查看状态），运行时开关不写配置、重启容器后恢复关闭，便于排查问题
 12. **时区**：容器内所有日志和时间统一使用北京时间（UTC+8 / Asia/Shanghai）
 13. **SSRF 防护**：默认启用，拦截内网地址下载；如需下载内网/Docker 网络资源，设置 `SSRF_PROTECTION=false`
 14. **速率限制**：每 IP 60 秒内最多 60 次请求，超限返回 429

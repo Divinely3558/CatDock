@@ -205,7 +205,7 @@
       /* ---------- 命令行参考 ---------- */
       .cmd-row {
         display: grid;
-        grid-template-columns: repeat(3, minmax(0, 1fr));
+        grid-template-columns: repeat(4, minmax(0, 1fr));
         gap: 12px;
       }
       .cmd-group {
@@ -239,15 +239,18 @@
       }
       .cmd-list code {
         font-family: "SF Mono", "Cascadia Code", Consolas, monospace;
-        font-size: 13px;
+        font-size: 12px;
         color: var(--primary);
         background: var(--card);
-        padding: 1px 6px;
+        padding: 1px 5px;
         border-radius: 4px;
         border: 1px solid var(--border);
         white-space: nowrap;
         display: inline-block;
         align-self: flex-start;
+        max-width: 100%;
+        overflow: hidden;
+        text-overflow: ellipsis;
       }
 
       /* ---------- 按钮（与下载控制台一致） ---------- */
@@ -559,6 +562,10 @@
         input[type="password"] {
           font-size: 16px;
         }
+        /* 中屏（平板/窄窗口）：4 个命令组改为 2×2，手机端（≤480px）单列 */
+        .cmd-row {
+          grid-template-columns: repeat(2, minmax(0, 1fr));
+        }
       }
       @media (max-width: 600px) {
         .topbar-inner {
@@ -704,6 +711,10 @@
             <div class="cmd-title">adminctl — 管理员账户管理</div>
             <div class="cmd-list">
               <div class="cmd-item">
+                <span class="cmd-desc">列出全部用户</span>
+                <code>adminctl list</code>
+              </div>
+              <div class="cmd-item">
                 <span class="cmd-desc">添加管理员</span>
                 <code>adminctl add &lt;用户名&gt;</code>
               </div>
@@ -714,10 +725,6 @@
               <div class="cmd-item">
                 <span class="cmd-desc">修改管理员密码</span>
                 <code>adminctl password &lt;用户名&gt;</code>
-              </div>
-              <div class="cmd-item">
-                <span class="cmd-desc">列出全部用户</span>
-                <code>adminctl list</code>
               </div>
             </div>
           </div>
@@ -760,6 +767,23 @@
               <div class="cmd-item">
                 <span class="cmd-desc">解封 IP</span>
                 <code>banip del &lt;IP&gt;</code>
+              </div>
+            </div>
+          </div>
+          <div class="cmd-group">
+            <div class="cmd-title">debug — 调试模式开关</div>
+            <div class="cmd-list">
+              <div class="cmd-item">
+                <span class="cmd-desc">查看当前状态（yes/no 可简写为 y/n）</span>
+                <code>debug show</code>
+              </div>
+              <div class="cmd-item">
+                <span class="cmd-desc">开启调试模式（输出详细过程日志）</span>
+                <code>debug yes</code>
+              </div>
+              <div class="cmd-item">
+                <span class="cmd-desc">关闭调试模式（仅输出关键下载结果）</span>
+                <code>debug no</code>
               </div>
             </div>
           </div>

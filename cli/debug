@@ -1,0 +1,146 @@
+#!/usr/bin/env python3
+"""debug - catdock 调试模式运行时开关
+
+调试模式开启后服务输出详细过程日志（类型探测/命令执行/任务ID/路径等），
+关闭时仅输出关键下载结果。
+
+本开关为纯运行时状态：通过扫描 /proc 找到运行中的服务进程并发送
+SIGUSR1（开启）/ SIGUSR2（关闭）信号即时切换，不写入任何配置文件，
+容器重启后恢复默认关闭。
+
+用法:
+    debug yes / debug y    开启调试模式
+    debug no  / debug n    关闭调试模式
+    debug show             查看当前状态
+    debug                  不带参数显示用法帮助
+    debug --help
+"""
+import os
+import sys
+import time
+import signal
+
+# 将模块所在目录加入 sys.path，以便导入 app_config 模块
+# 查找顺序：脚本同目录（容器内平铺布局）→ ../core/（仓库源码布局）
+_BASE = os.path.dirname(os.path.realpath(__file__))
+sys.path.insert(0, os.path.join(_BASE, '..', 'core'))
+sys.path.insert(0, _BASE)
+
+import app_config as cfg
+
+
+def _find_server_pid():
+    """扫描 /proc 查找运行中的 catdock 服务进程（python ... main.py）。
+
+    未找到时返回 None。仅匹配 python 解释器且命令行含 main.py 的进程，
+    排除自身 PID。
+    """
+    self_pid = os.getpid()
+    try:
+        entries = os.listdir('/proc')
+    except OSError:
+        return None
+    for name in entries:
+        if not name.isdigit():
+            continue
+        pid = int(name)
+        if pid == self_pid:
+            continue
+        try:
+            with open(f'/proc/{pid}/cmdline', 'rb') as f:
+                raw = f.read()
+        except OSError:
+            continue
+        parts = [p.decode('utf-8', 'ignore') for p in raw.split(b'\x00') if p]
+        if not parts:
+            continue
+        exe = os.path.basename(parts[0]).lower()
+        if exe.startswith('python') and any(p.endswith('main.py') for p in parts[1:]):
+            return pid
+    return None
+
+
+def _cmd_show():
+    pid = _find_server_pid()
+    state = cfg.read_debug_state()
+    if not pid:
+        print("未检测到运行中的 catdock 服务；调试模式默认为关闭")
+        return 0
+    print(f"调试模式: {'开启' if state else '关闭'}（服务 PID {pid}）")
+    print("开启: debug yes（或 debug y）；关闭: debug no（或 debug n）")
+    return 0
+
+
+def _cmd_set(enable):
+    pid = _find_server_pid()
+    if not pid:
+        print("错误: 未检测到运行中的 catdock 服务进程", file=sys.stderr)
+        print("调试开关为运行时开关，请在容器内（服务运行中）执行本命令", file=sys.stderr)
+        return 1
+    try:
+        os.kill(pid, signal.SIGUSR1 if enable else signal.SIGUSR2)
+    except OSError as e:
+        print(f"错误: 向服务进程(PID {pid})发送信号失败: {e}", file=sys.stderr)
+        return 1
+
+    # 等待服务处理信号并刷新 /tmp 状态文件，确认切换生效
+    for _ in range(30):
+        time.sleep(0.1)
+        if cfg.read_debug_state() == enable:
+            break
+    state = cfg.read_debug_state()
+    if state != enable:
+        print(f"警告: 信号已发送但状态未确认，当前调试模式: {'开启' if state else '关闭'}",
+              file=sys.stderr)
+        print("可执行 debug show 查看当前状态", file=sys.stderr)
+        return 1
+    print(f"调试模式已{'开启' if enable else '关闭'}（服务 PID {pid}）")
+    if enable:
+        print("提示: 调试模式为运行时开关，重启容器后恢复默认关闭")
+    return 0
+
+
+def _print_usage():
+    print("用法: debug <yes|y|no|n|show>")
+    print("")
+    print("子命令:")
+    print("  yes / y    开启调试模式（输出详细过程日志）")
+    print("  no  / n    关闭调试模式（仅输出关键下载结果）")
+    print("  show       查看当前状态")
+    print("")
+    print("不带参数显示本用法帮助。")
+    print("调试模式为运行时开关：即时生效，不写配置文件，重启容器后恢复默认关闭。")
+    print("")
+    print("示例:")
+    print("  debug yes")
+    print("  debug n")
+    print("  debug show")
+
+
+def main():
+    argv = sys.argv[1:]
+    if not argv:
+        _print_usage()
+        sys.exit(1)
+
+    subcmd = argv[0].strip().lower()
+
+    if subcmd in ('-h', '--help', 'help'):
+        _print_usage()
+        sys.exit(0)
+
+    if subcmd in ('show', 'status', 's'):
+        sys.exit(_cmd_show())
+
+    if subcmd in ('yes', 'y'):
+        sys.exit(_cmd_set(True))
+    if subcmd in ('no', 'n'):
+        sys.exit(_cmd_set(False))
+
+    print(f"未知子命令: {argv[0]}", file=sys.stderr)
+    _print_usage()
+    sys.exit(1)
+
+
+if __name__ == '__main__':
+    main()

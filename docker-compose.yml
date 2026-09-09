@@ -28,3 +28,5 @@ services:
       - SSRF_PROTECTION=true
       # 最大并发下载任务数，防止资源耗尽
       - MAX_CONCURRENT_TASKS=20
+      # 同视频按文件名聚合: true=同名视频的多个链接自动调度尝试(多CDN/分片场景，默认开启)，false=普通下载模式
+      - SAME_VIDEO_BY_FILENAME=true

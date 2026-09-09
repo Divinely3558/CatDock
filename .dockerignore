@@ -42,9 +42,6 @@ downlocal
 # 抓取 cookie（敏感）
 cookies.txt
 
-# 敏感配置文件（含真实密码，禁止入镜像；模板 config.example.json 需保留）
-config.json
-
 # 本地部署与编辑器配置
 deploy.sh
 .markdownlint.json

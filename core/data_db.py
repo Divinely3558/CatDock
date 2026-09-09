@@ -42,8 +42,8 @@ AUTH_FAILURE_WINDOW_MINUTES = 10
 # 自动封禁时长：auto 封禁在 N 分钟后自动解封（manual 手动封禁仍为永久）
 BAN_DURATION_MINUTES = 30
 
-# 数据库文件路径：固定为容器内 config.json 同级目录
-# 服务端会通过 set_db_path() 覆盖为 CONFIG_FILE 同级，CLI 直接使用此默认路径
+# 数据库文件路径：固定为容器内 config 目录（/home/downloader/config）
+# 服务端会通过 set_db_path() 覆盖为 CONFIG_DIR 下路径，CLI 直接使用此默认路径
 DB_PATH = '/home/downloader/config/data.db'
 
 # 用户名规则：仅字母+数字、不能全数字、字母字符数不少于 4
@@ -59,7 +59,7 @@ _db_conn = None
 def set_db_path(path):
     """设置数据库文件路径，并重置连接以便下次访问时使用新路径。
 
-    服务端在 load_config 中调用，确保 .db 与 config.json 同级。
+    服务端在 load_config 中调用，确保 .db 位于 config 目录。
     """
     global DB_PATH, _db_conn
     with _db_lock:

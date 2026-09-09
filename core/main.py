@@ -25,7 +25,7 @@ from api_server import start_server, register_signal_handlers
 
 def main():
     cfg.load_config()
-    # 首启初始化 AUTH_KEY：config.json 为空/占位符时生成随机密钥并写回，
+    # 首启初始化 AUTH_KEY：admin_config.json 为空/占位符时生成随机密钥并写回，
     # 之后可在管理网页热更新（无需重启容器）
     _initial_auth_key = None
     if not cfg.auth_key or cfg.auth_key == cfg.AUTH_KEY_PLACEHOLDER:

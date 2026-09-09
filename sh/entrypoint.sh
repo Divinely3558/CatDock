@@ -9,25 +9,12 @@ echo "======================================"
 # 确保目录存在（user/ 为每用户配置目录：tasks.json / 日志 / filter_rules.json）
 mkdir -p /home/downloader/config /home/downloader/user /home/downloader/temp /home/downloader/downloads
 
-# 默认配置文件路径（镜像内置模板，含占位密码；运行时配置由挂载卷覆盖）
-DEFAULT_CONFIG="/home/downloader/config.example.json"
-TARGET_CONFIG="/home/downloader/config/config.json"
+# 系统级配置（URL_PREFIX/API_PORT/DEBUG 等）全部由 docker-compose.yml 环境变量提供，
+# 不再使用 config.json；此处仅初始化管理员热配置与过滤规则模板
 DEFAULT_ADMIN_CONFIG="/home/downloader/admin_config.example.json"
 TARGET_ADMIN_CONFIG="/home/downloader/config/admin_config.json"
 DEFAULT_FILTER_RULES="/home/downloader/filter_rules.json"
 TARGET_FILTER_RULES="/home/downloader/config/filter_rules.json"
-
-# 如果目标配置文件不存在，复制默认配置
-if [ ! -f "$TARGET_CONFIG" ]; then
-    if [ -f "$DEFAULT_CONFIG" ]; then
-        cp "$DEFAULT_CONFIG" "$TARGET_CONFIG"
-        echo "已复制默认配置到: $TARGET_CONFIG"
-    else
-        echo "警告: 默认配置文件不存在"
-    fi
-else
-    echo "使用已存在的配置文件: $TARGET_CONFIG"
-fi
 
 # 如果目标管理员配置文件不存在，复制默认配置（auth_key 占位符首启自动生成）
 if [ ! -f "$TARGET_ADMIN_CONFIG" ]; then

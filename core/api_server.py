@@ -951,8 +951,8 @@ class DownloadHandler(http.server.BaseHTTPRequestHandler):
                     return
 
                 # 重载仅作用于管理员热配置（admin_config.json：auth_key）
-                # 与过滤规则（filter_rules.json）；config.json 为系统级配置，
-                # 仅系统管理员修改且重启容器后生效，不随 reload 读取
+                # 与过滤规则（filter_rules.json）；系统级开关由 docker-compose
+                # 环境变量提供，修改后需重启容器生效，不随 reload 读取
                 old_auth_key = cfg.auth_key
                 cfg.load_filters()
                 cfg.load_admin_config()
@@ -1171,9 +1171,32 @@ def stop_server(_signum=None, _frame=None):
     sys.exit(0)
 
 
+def _set_debug_mode(enabled):
+    """切换调试模式（运行时开关，由 SIGUSR1/SIGUSR2 信号触发）。
+
+    状态仅保存在进程内存与 /tmp 状态文件中，容器重启后恢复默认关闭。
+    """
+    cfg.debug_mode = enabled
+    cfg.write_debug_state(enabled)
+    log_info(f"调试模式已{'开启' if enabled else '关闭'}"
+             f"（运行时开关，重启容器后恢复默认关闭）")
+
+
+def _sig_debug_on(_signum, _frame):
+    _set_debug_mode(True)
+
+
+def _sig_debug_off(_signum, _frame):
+    _set_debug_mode(False)
+
+
 def register_signal_handlers():
     try:
         signal.signal(signal.SIGTERM, stop_server)
         signal.signal(signal.SIGINT, stop_server)
+        # 调试模式运行时开关：容器内 debug 命令扫描 /proc 找到服务进程后发送
+        # SIGUSR1=开启（debug yes/y），SIGUSR2=关闭（debug no/n）
+        signal.signal(signal.SIGUSR1, _sig_debug_on)
+        signal.signal(signal.SIGUSR2, _sig_debug_off)
     except Exception:
         pass
