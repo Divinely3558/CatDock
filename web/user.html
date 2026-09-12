@@ -586,18 +586,6 @@
         border-color: var(--red);
         color: var(--red);
       }
-      .confirm-msg {
-        font-size: 13px;
-        color: var(--text-2);
-        line-height: 1.7;
-        margin: 0 0 18px;
-        word-break: break-all;
-      }
-      .confirm-actions {
-        display: flex;
-        gap: 10px;
-        justify-content: flex-end;
-      }
       .progress {
         height: 6px;
         background: var(--border);
@@ -642,19 +630,6 @@
       }
 
       /* ---------- 弹窗 ---------- */
-      .modal-mask {
-        position: fixed;
-        inset: 0;
-        background: var(--mask);
-        display: none;
-        align-items: center;
-        justify-content: center;
-        padding: 20px;
-        z-index: 100;
-      }
-      .modal-mask.show {
-        display: flex;
-      }
       .modal {
         background: var(--card);
         border-radius: var(--radius);
@@ -663,30 +638,6 @@
         max-height: 85vh;
         overflow-y: auto;
         padding: 22px 24px;
-      }
-      .modal-sm {
-        max-width: 420px;
-      }
-      .modal-head {
-        display: flex;
-        align-items: center;
-        margin-bottom: 16px;
-      }
-      .modal-head h3 {
-        font-size: 16px;
-        flex: 1;
-      }
-      .modal-close {
-        border: none;
-        background: none;
-        font-size: 20px;
-        color: var(--text-3);
-        cursor: pointer;
-        line-height: 1;
-        padding: 4px;
-      }
-      .modal-close:hover {
-        color: var(--text);
       }
 
       /* ---------- 通用弹层（与管理端 admin.html 共用同一套结构/逻辑） ---------- */
@@ -1048,10 +999,6 @@
           white-space: pre-wrap;
           word-break: break-all;
         }
-        .modal-mask {
-          padding: 10px;
-          align-items: flex-end;
-        }
         .modal {
           padding: 16px;
           max-height: 88vh;
@@ -1184,57 +1131,23 @@
       </div>
     </div>
 
-    <!-- ================= 任务详情弹窗 ================= -->
-    <div class="modal-mask" id="modalMask">
-      <div class="modal">
-        <div class="modal-head">
-          <h3>任务详情</h3>
-          <button class="modal-close" id="modalClose">✕</button>
-        </div>
+    <!-- ================= 任务详情弹窗（外框风格与管理端 admin.html 一致） ================= -->
+    <div class="mask" id="modalMask">
+      <div class="modal" style="max-width: 560px; max-height: 85vh; overflow-y: auto">
+        <h3>任务详情</h3>
         <dl class="detail-grid" id="modalBody"></dl>
       </div>
     </div>
 
-    <!-- ================= 操作确认弹窗 ================= -->
-    <div class="modal-mask" id="confirmMask">
-      <div class="modal modal-sm">
-        <div class="modal-head">
-          <h3 id="confirmTitle">确认操作</h3>
-          <button class="modal-close" id="confirmClose">✕</button>
-        </div>
-        <p class="confirm-msg" id="confirmMsg"></p>
-        <div class="confirm-actions">
-          <button class="btn" id="confirmCancel">取消</button>
+    <!-- ================= 操作确认弹窗（外框风格与管理端 admin.html 一致） ================= -->
+    <div class="mask" id="confirmMask">
+      <div class="modal">
+        <h3 id="confirmTitle">确认操作</h3>
+        <p class="msg" id="confirmMsg"></p>
+        <div class="btns">
+          <button class="btn btn-ghost" id="confirmCancel">取消</button>
           <button class="btn" id="confirmOk">确认</button>
         </div>
-      </div>
-    </div>
-
-    <!-- ================= 修改密码弹窗 ================= -->
-    <div class="modal-mask" id="passMask">
-      <div class="modal modal-sm">
-        <div class="modal-head">
-          <h3>修改密码</h3>
-          <button class="modal-close" id="passClose">✕</button>
-        </div>
-        <form id="passForm" autocomplete="off">
-          <label class="field">
-            <span>旧密码<i class="req">*</i></span>
-            <input type="password" id="pOld" required />
-          </label>
-          <label class="field">
-            <span>新密码<i class="req">*</i>（至少 6 位）</span>
-            <input type="password" id="pNew" required />
-          </label>
-          <label class="field">
-            <span>确认新密码<i class="req">*</i></span>
-            <input type="password" id="pNew2" required />
-          </label>
-          <button type="submit" class="btn btn-primary btn-block" id="passBtn">
-            保存并重新登录
-          </button>
-          <div class="alert" id="passAlert"></div>
-        </form>
       </div>
     </div>
 
@@ -1252,13 +1165,11 @@
     </div>
     <div class="toast" id="toast"></div>
 
-    <!-- ================= 过滤规则弹窗 ================= -->
-    <div class="modal-mask" id="filterMask">
-      <div class="modal">
-        <div class="modal-head">
-          <h3>我的过滤规则</h3>
-          <button class="modal-close" id="filterClose">✕</button>
-        </div>
+    <!-- ================= 过滤规则弹窗（结构与管理端 admin.html 过滤模板一致） ================= -->
+    <div class="mask" id="filterMask">
+      <div class="modal" style="max-width: 520px; max-height: 85vh; overflow-y: auto">
+        <h3>我的过滤规则</h3>
+        <div class="msg">仅对您自己的下载任务生效，保存后立即生效</div>
         <div class="filter-editor">
           <div class="fe-section">
             <div class="fe-head">
@@ -1609,59 +1520,67 @@
           apiPost("logout", {}).then(done).catch(done);
         });
 
-        // ---------- 修改密码 ----------
+        // ---------- 修改密码（弹层代码与管理端 admin.html 完全一致） ----------
         $("menuPass").addEventListener("click", function () {
           closeUserMenu();
-          $("pOld").value = "";
-          $("pNew").value = "";
-          $("pNew2").value = "";
-          hideAlert($("passAlert"));
-          $("passMask").classList.add("show");
-          $("pOld").focus();
-        });
-        $("passClose").addEventListener("click", function () {
-          $("passMask").classList.remove("show");
-        });
-        $("passMask").addEventListener("click", function (e) {
-          if (e.target === $("passMask"))
-            $("passMask").classList.remove("show");
-        });
-        $("passForm").addEventListener("submit", function (e) {
-          e.preventDefault();
-          var oldPwd = $("pOld").value;
-          var newPwd = $("pNew").value;
-          if (!oldPwd || !newPwd) {
-            showAlert($("passAlert"), "请填写完整", false);
-            return;
-          }
-          if (newPwd.length < 6) {
-            showAlert($("passAlert"), "新密码至少 6 位", false);
-            return;
-          }
-          if (newPwd !== $("pNew2").value) {
-            showAlert($("passAlert"), "两次输入的新密码不一致", false);
-            return;
-          }
-          var btn = $("passBtn");
-          btn.disabled = true;
-          apiPost("password", {
-            oldPassword: oldPwd,
-            newPassword: newPwd,
-          })
-            .then(function (data) {
-              $("passMask").classList.remove("show");
-              // 改密即全端下线：本地清理后回到登录页
-              localStorage.removeItem(LS.token);
-              localStorage.removeItem(LS.role);
-              creds = { token: "", user: "" };
-              backToLogin();
-            })
-            .catch(function (e) {
-              showAlert($("passAlert"), e.message, false);
-            })
-            .finally(function () {
-              btn.disabled = false;
-            });
+          openModal({
+            title: "修改密码 - " + (creds.user || "用户"),
+            fields: [
+              {
+                id: "old",
+                label: "旧密码",
+                type: "password",
+                required: true,
+                placeholder: "输入当前密码",
+              },
+              {
+                id: "new1",
+                label: "新密码（至少 6 位）",
+                type: "password",
+                required: true,
+                placeholder: "输入新密码",
+              },
+              {
+                id: "new2",
+                label: "确认新密码",
+                type: "password",
+                required: true,
+                placeholder: "再次输入新密码",
+              },
+            ],
+            okText: "保存并重新登录",
+            onOk: function (v) {
+              if (!v.old || !v.new1) {
+                toast("旧密码与新密码不能为空", true);
+                return false;
+              }
+              if (v.new1.length < 6) {
+                toast("新密码至少 6 位", true);
+                return false;
+              }
+              if (v.new1 !== v.new2) {
+                toast("两次输入的新密码不一致", true);
+                return false;
+              }
+              apiPost("password", {
+                oldPassword: v.old,
+                newPassword: v.new1,
+              })
+                .then(function (data) {
+                  // 改密即全端下线：本地清理后回到登录页
+                  localStorage.removeItem(LS.token);
+                  localStorage.removeItem(LS.user);
+                  localStorage.removeItem(LS.role);
+                  creds = { token: "", user: "" };
+                  toast((data.message || "密码已修改") + "，即将返回登录页…");
+                  setTimeout(backToLogin, 1500);
+                })
+                .catch(function (e) {
+                  toast(e.message, true);
+                  return false;
+                });
+            },
+          });
         });
 
         // ---------- 切换用户（弹层代码与管理端 admin.html 完全一致） ----------
@@ -1850,9 +1769,6 @@
           closeUserMenu();
           $("filterMask").classList.add("show");
           loadFilters();
-        });
-        $("filterClose").addEventListener("click", function () {
-          $("filterMask").classList.remove("show");
         });
         $("filterMask").addEventListener("click", function (e) {
           if (e.target === $("filterMask"))
@@ -2089,7 +2005,7 @@
               refreshTasks(); // 状态徽标变化即是操作反馈，成功无需弹窗
             })
             .catch(function (err) {
-              alert("操作失败：" + err.message);
+              toast("操作失败：" + err.message, true);
             });
         }
 
@@ -2113,7 +2029,6 @@
           if (handler) handler();
         });
         $("confirmCancel").addEventListener("click", closeConfirm);
-        $("confirmClose").addEventListener("click", closeConfirm);
         $("confirmMask").addEventListener("click", function (e) {
           if (e.target === $("confirmMask")) closeConfirm();
         });
@@ -2163,13 +2078,10 @@
               $("modalMask").classList.add("show");
             })
             .catch(function (err) {
-              alert("获取任务详情失败：" + err.message);
+              toast("获取任务详情失败：" + err.message, true);
             });
         }
 
-        $("modalClose").addEventListener("click", function () {
-          $("modalMask").classList.remove("show");
-        });
         $("modalMask").addEventListener("click", function (e) {
           if (e.target === $("modalMask"))
             $("modalMask").classList.remove("show");
