@@ -6,92 +6,9 @@
     <link rel="icon" href="favicon.ico" />
     <title>CatDock 管理控制台</title>
     <style>
-      /* ===== 默认主题（墨绿 · 亮色），与下载控制台默认风格一致 ===== */
-      :root {
-        --bg: #f0f7f4;
-        --card: #ffffff;
-        --border: #d1e7dc;
-        --primary-soft: #ecfdf5;
-        --code-bg: #f3f9f6;
-        --input-bg: #fff;
-        --ghost-bg: #fff;
-        --ghost-hover: #f8fafc;
-        --mask: rgba(17, 24, 39, 0.45);
-        --text: #1f2937;
-        --text-2: #6b7280;
-        --text-3: #9ca3af;
-        --radius: 12px;
-        --shadow:
-          0 1px 3px rgba(16, 24, 40, 0.08), 0 1px 2px rgba(16, 24, 40, 0.04);
-        --primary: #059669;
-        --primary-hover: #047857;
-        --green: #059669;
-        --green-soft: #ecfdf5;
-        --amber: #d97706;
-        --amber-soft: #fffbeb;
-        --red: #dc2626;
-        --red-soft: #fef2f2;
-      }
-
-      * {
-        box-sizing: border-box;
-        margin: 0;
-        padding: 0;
-      }
-      body {
-        font-family:
-          -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC",
-          "Hiragino Sans GB", "Microsoft YaHei", sans-serif;
-        background: var(--bg);
-        color: var(--text);
-        font-size: 14px;
-        line-height: 1.6;
-        min-height: 100vh;
-      }
-      input[type="text"],
-      input[type="password"] {
-        width: 100%;
-        padding: 9px 12px;
-        border: 1px solid var(--border);
-        border-radius: 10px;
-        font-size: 14px;
-        font-family: inherit;
-        color: var(--text);
-        background: var(--input-bg);
-        outline: none;
-        transition:
-          border-color 0.15s,
-          box-shadow 0.15s;
-      }
-      input:focus {
-        border-color: var(--primary);
-        box-shadow: 0 0 0 3px rgba(5, 150, 105, 0.14);
-      }
+      /*__SHARED_CSS__*/
 
       /* ---------- 顶栏（与下载控制台一致） ---------- */
-      .topbar {
-        background: var(--card);
-        border-bottom: 1px solid var(--border);
-        position: sticky;
-        top: 0;
-        z-index: 10;
-      }
-      .topbar-inner {
-        max-width: 1080px;
-        margin: 0 auto;
-        padding: 12px 20px;
-        display: flex;
-        align-items: center;
-        gap: 12px;
-      }
-      .brand {
-        font-size: 17px;
-        font-weight: 600;
-        user-select: none;
-      }
-      .brand .logo {
-        margin-right: 4px;
-      }
       .brand .tag {
         font-size: 11px;
         font-weight: 600;
@@ -108,69 +25,9 @@
         margin-left: 6px;
         letter-spacing: 0.3px;
       }
-      .topbar .spacer {
-        flex: 1;
-      }
       .user-chip {
-        font-size: 13px;
         color: var(--primary);
         background: var(--primary-soft);
-        padding: 4px 10px;
-        border-radius: 999px;
-        font-weight: 500;
-        cursor: pointer;
-        user-select: none;
-      }
-      .user-chip::after {
-        content: "▾";
-        margin-left: 4px;
-        font-size: 10px;
-        opacity: 0.7;
-      }
-      .user-menu-wrap {
-        position: relative;
-        display: inline-flex;
-      }
-      .user-menu {
-        display: none;
-        position: absolute;
-        right: 0;
-        top: calc(100% + 8px);
-        min-width: 120px;
-        background: var(--card);
-        border: 1px solid var(--border);
-        border-radius: 10px;
-        box-shadow: var(--shadow);
-        padding: 6px;
-        z-index: 30;
-      }
-      .user-menu.show {
-        display: block;
-      }
-      .user-menu-item {
-        display: block;
-        width: 100%;
-        text-align: left;
-        padding: 8px 12px;
-        border: none;
-        border-radius: 8px;
-        background: none;
-        font-size: 13px;
-        font-family: inherit;
-        color: var(--text-2);
-        cursor: pointer;
-        white-space: nowrap;
-      }
-      .user-menu-item:hover {
-        background: var(--ghost-bg);
-        color: var(--primary);
-      }
-      .user-menu-item.danger {
-        color: var(--red);
-      }
-      .user-menu-item.danger:hover {
-        background: var(--red-soft);
-        color: var(--red);
       }
 
       /* ---------- 主体（与下载控制台一致） ---------- */
@@ -181,15 +38,6 @@
         display: grid;
         grid-template-columns: minmax(0, 1fr);
         gap: 16px;
-      }
-      .card {
-        background: var(--card);
-        border: 1px solid var(--border);
-        border-radius: var(--radius);
-        box-shadow: var(--shadow);
-        padding: 18px 20px;
-        display: flex;
-        flex-direction: column;
       }
       .card-title {
         font-size: 15px;
@@ -234,7 +82,7 @@
       }
       .cmd-desc {
         font-size: 12px;
-        color: var(--text-secondary);
+        color: var(--text-2);
         line-height: 1.4;
       }
       .cmd-list code {
@@ -254,58 +102,10 @@
       }
 
       /* ---------- 按钮（与下载控制台一致） ---------- */
-      .btn {
-        display: inline-flex;
-        align-items: center;
-        justify-content: center;
-        gap: 6px;
-        padding: 9px 16px;
-        border: 1px solid transparent;
-        border-radius: 10px;
-        font-size: 14px;
-        font-weight: 500;
-        font-family: inherit;
-        cursor: pointer;
-        transition:
-          background 0.15s,
-          border-color 0.15s,
-          color 0.15s;
-        white-space: nowrap;
-      }
-      .btn-primary {
-        background: var(--primary);
-        color: #fff;
-      }
-      .btn-primary:hover {
-        background: var(--primary-hover);
-      }
-      .btn-ghost {
-        background: var(--ghost-bg);
-        color: var(--text-2);
-        border-color: var(--border);
-      }
-      .btn-ghost:hover {
-        background: var(--ghost-hover);
-        color: var(--text);
-      }
-      .btn-danger {
-        background: var(--red);
-        color: #fff;
-      }
-      .btn-danger:hover {
-        filter: brightness(1.12);
-      }
-      .btn-block {
-        width: 100%;
-      }
       .btn.small {
         padding: 5px 10px;
         font-size: 12px;
         border-radius: 8px;
-      }
-      .btn:disabled {
-        opacity: 0.6;
-        cursor: not-allowed;
       }
 
       /* ---------- 表格 ---------- */
@@ -357,20 +157,6 @@
         background: var(--code-bg);
       }
 
-      label.field {
-        display: block;
-        margin-bottom: 13px;
-      }
-      label.field > span {
-        display: block;
-        font-size: 13px;
-        font-weight: 500;
-        margin-bottom: 5px;
-      }
-      label.field > span .req {
-        color: var(--red);
-        margin-left: 2px;
-      }
       .key-row {
         display: flex;
         gap: 8px;
@@ -389,19 +175,6 @@
       }
 
       /* ---------- 弹层 ---------- */
-      .mask {
-        position: fixed;
-        inset: 0;
-        background: var(--mask);
-        display: none;
-        align-items: center;
-        justify-content: center;
-        z-index: 100;
-        padding: 20px;
-      }
-      .mask.show {
-        display: flex;
-      }
       .modal {
         background: var(--card);
         border: 1px solid var(--border);
@@ -427,130 +200,6 @@
         justify-content: flex-end;
         gap: 9px;
         margin-top: 6px;
-      }
-
-      .toast {
-        position: fixed;
-        left: 50%;
-        bottom: 34px;
-        transform: translateX(-50%) translateY(20px);
-        background: var(--card);
-        border: 1px solid var(--border);
-        color: var(--text);
-        border-radius: 10px;
-        padding: 9px 18px;
-        font-size: 13px;
-        box-shadow: var(--shadow);
-        opacity: 0;
-        pointer-events: none;
-        transition:
-          opacity 0.2s,
-          transform 0.2s;
-        z-index: 200;
-        max-width: 90vw;
-      }
-      .toast.show {
-        opacity: 1;
-        transform: translateX(-50%) translateY(0);
-      }
-      .toast.err {
-        border-color: var(--red);
-        color: var(--red);
-      }
-
-      /* ---------- 过滤规则编辑器（与下载控制台一致） ---------- */
-      .filter-editor {
-        display: flex;
-        flex-direction: column;
-        gap: 0;
-      }
-      .filter-editor .fe-section {
-        border: 1px solid var(--border);
-        border-radius: 10px;
-        padding: 12px 14px;
-        margin-bottom: 12px;
-      }
-      .filter-editor .fe-head {
-        display: flex;
-        align-items: center;
-        gap: 10px;
-        flex-wrap: wrap;
-        margin-bottom: 8px;
-      }
-      .filter-editor .fe-switch {
-        display: inline-flex;
-        align-items: center;
-        gap: 6px;
-        font-size: 13px;
-        font-weight: 500;
-        cursor: pointer;
-      }
-      .filter-editor .fe-head .hint {
-        margin: 0;
-      }
-      .filter-editor .chips {
-        display: flex;
-        flex-wrap: wrap;
-        gap: 6px;
-        margin-bottom: 8px;
-      }
-      .filter-editor .chips .chip {
-        display: inline-flex;
-        align-items: center;
-        gap: 5px;
-        background: var(--primary-soft);
-        color: var(--primary);
-        border-radius: 999px;
-        padding: 3px 6px 3px 10px;
-        font-size: 12px;
-        word-break: break-all;
-      }
-      .filter-editor .chips .chip button {
-        border: none;
-        background: none;
-        color: inherit;
-        cursor: pointer;
-        font-size: 13px;
-        line-height: 1;
-        padding: 1px 3px;
-        border-radius: 50%;
-      }
-      .filter-editor .chips .chip button:hover {
-        color: var(--red);
-      }
-      .filter-editor .chips .empty-tip {
-        font-size: 12px;
-        color: var(--text-3);
-      }
-      .filter-editor .fe-add {
-        display: flex;
-        gap: 8px;
-      }
-      .filter-editor .fe-add input {
-        flex: 1;
-        min-width: 0;
-      }
-      .filter-editor .dd-rule {
-        display: flex;
-        gap: 6px;
-        margin-bottom: 6px;
-        align-items: center;
-      }
-      .filter-editor .dd-rule input {
-        flex: 1;
-        min-width: 0;
-        font-family: ui-monospace, monospace;
-        font-size: 12px;
-      }
-      .filter-editor .dd-rule .dd-arrow {
-        color: var(--text-3);
-        flex: none;
-      }
-      .filter-editor .dd-rule button {
-        flex: none;
-      }
-      .filter-editor .alert {
-        margin-top: 8px;
       }
 
       /* ---------- 响应式适配（与下载控制台一致） ---------- */
@@ -598,15 +247,36 @@
         }
       }
     </style>
+    <script>
+      /*__SHARED_JS__*/
+    </script>
   </head>
   <body>
     <div class="topbar">
       <div class="topbar-inner">
-        <span class="brand"
-          ><span class="logo">🐱</span>CatDock<span class="tag"
-            >管理控制台</span
-          ></span
-        >
+        <span class="user-menu-wrap">
+          <span class="brand" id="brandBtn" title="外观菜单"
+            ><span class="logo">🐱</span>CatDock<span class="tag"
+              >管理控制台</span
+            ></span
+          >
+          <div class="user-menu" id="brandMenu">
+            <button
+              class="user-menu-item"
+              data-theme-palette
+              title="切换主题色"
+            >
+              <span class="btn-icon">🎨</span>主题色
+            </button>
+            <button
+              class="user-menu-item"
+              data-theme-mode
+              title="切换亮色/暗色"
+            >
+              <span class="btn-icon">🌙</span>亮暗切换
+            </button>
+          </div>
+        </span>
         <span class="brand-version">v __VERSION__</span>
         <span class="spacer"></span>
         <span class="user-menu-wrap">
@@ -774,7 +444,9 @@
             <div class="cmd-title">debug — 调试模式开关</div>
             <div class="cmd-list">
               <div class="cmd-item">
-                <span class="cmd-desc">查看当前状态（yes/no 可简写为 y/n）</span>
+                <span class="cmd-desc"
+                  >查看当前状态（yes/no 可简写为 y/n）</span
+                >
                 <code>debug show</code>
               </div>
               <div class="cmd-item">
@@ -860,9 +532,14 @@
             <button type="button" class="btn" id="ddAdd">+ 添加规则</button>
           </div>
 
-          <button class="btn btn-primary btn-block" id="filterSave">
-            保存过滤模板
-          </button>
+          <div class="filter-actions">
+            <button class="btn btn-primary" id="filterSave">
+              保存过滤模板
+            </button>
+            <button type="button" class="btn btn-ghost" id="filterCancel">
+              取消
+            </button>
+          </div>
           <div class="alert" id="filterAlert"></div>
         </div>
       </div>
@@ -1339,15 +1016,8 @@
         });
       };
 
-      // ---------- 顶栏账号菜单 ----------
+      // ---------- 顶栏账号菜单（展开/互斥/点外关闭由 shared.js 接管） ----------
       var menu = document.getElementById("userMenu");
-      document.getElementById("userChip").onclick = function (ev) {
-        ev.stopPropagation();
-        menu.classList.toggle("show");
-      };
-      document.addEventListener("click", function () {
-        menu.classList.remove("show");
-      });
       // 修改密码：旧密码 1 遍 + 新密码 2 遍；成功后全部令牌吊销，回登录页
       document.getElementById("menuPass").onclick = function () {
         menu.classList.remove("show");
@@ -1611,12 +1281,11 @@
         document.getElementById("filterMask").classList.add("show");
         loadFilters();
       };
-      document
-        .getElementById("filterMask")
-        .addEventListener("click", function (e) {
-          if (e.target === document.getElementById("filterMask"))
-            document.getElementById("filterMask").classList.remove("show");
-        });
+      // 点击弹窗外部不再关闭，仅可通过「取消」按钮关闭
+      document.getElementById("filterCancel").onclick = function () {
+        document.getElementById("filterMask").classList.remove("show");
+        hideAlert(document.getElementById("filterAlert"));
+      };
       document.getElementById("kwAdd").onclick = function () {
         addKeywords("keywords", "kwChips", "kwInput");
       };

@@ -1,0 +1,580 @@
+/* ===== CatDock 共享样式（login/user/admin 三端共用，
+   由 core/webui.py 注入到各页面 style 的占位符处） ===== */
+
+/* ---------- 主题变量：亮色通用 ---------- */
+:root,
+:root[data-mode="light"] {
+  color-scheme: light;
+  --bg: #f3f5f9;
+  --card: #ffffff;
+  --border: #e5e8ef;
+  --text: #1f2937;
+  --text-2: #6b7280;
+  --text-3: #9ca3af;
+  --code-bg: #f8fafc;
+  --input-bg: #fff;
+  --ghost-bg: #fff;
+  --ghost-hover: #f8fafc;
+  --mask: rgba(17, 24, 39, 0.45);
+  --radius: 12px;
+  --shadow:
+    0 1px 3px rgba(16, 24, 40, 0.08), 0 1px 2px rgba(16, 24, 40, 0.04);
+}
+/* ---------- 主题变量：暗色通用 ---------- */
+:root[data-mode="dark"] {
+  color-scheme: dark;
+  --bg: #111827;
+  --card: #1e293b;
+  --border: #334155;
+  --text: #e2e8f0;
+  --text-2: #94a3b8;
+  --text-3: #64748b;
+  --code-bg: #0f172a;
+  --input-bg: #0f172a;
+  --ghost-bg: rgba(255, 255, 255, 0.08);
+  --ghost-hover: rgba(255, 255, 255, 0.14);
+  --mask: rgba(0, 0, 0, 0.6);
+  --shadow: 0 1px 3px rgba(0, 0, 0, 0.3), 0 1px 2px rgba(0, 0, 0, 0.2);
+}
+
+/* ===== 墨绿（默认色板）===== */
+:root[data-palette="default"],
+:root:not([data-palette]) {
+  --bg: #f0f7f4;
+  --card: #ffffff;
+  --border: #d1e7dc;
+  --primary-soft: #ecfdf5;
+  --code-bg: #f3f9f6;
+  --primary: #059669;
+  --primary-hover: #047857;
+  --focus-ring: rgba(5, 150, 105, 0.14);
+  --green: #059669;
+  --green-soft: #ecfdf5;
+  --amber: #d97706;
+  --amber-soft: #fffbeb;
+  --red: #dc2626;
+  --red-soft: #fef2f2;
+}
+:root[data-palette="default"][data-mode="dark"],
+:root:not([data-palette])[data-mode="dark"] {
+  --bg: #0e1f1a;
+  --card: #14302a;
+  --border: #1f4a3a;
+  --code-bg: #0a1612;
+  --input-bg: #0a1612;
+  --primary: #10b981;
+  --primary-hover: #059669;
+  --primary-soft: #064e3b;
+  --focus-ring: rgba(16, 185, 129, 0.22);
+  --green: #10b981;
+  --green-soft: #064e3b;
+  --amber: #f59e0b;
+  --amber-soft: #78350f;
+  --red: #ef4444;
+  --red-soft: #450a0a;
+}
+
+/* ===== 暖橙 ===== */
+:root[data-palette="orange"] {
+  --bg: #fbf5f0;
+  --card: #ffffff;
+  --border: #f0ddd0;
+  --primary-soft: #fff7ed;
+  --code-bg: #fdf7f3;
+  --primary: #ea580c;
+  --primary-hover: #c2410c;
+  --focus-ring: rgba(234, 88, 12, 0.14);
+  --green: #16a34a;
+  --green-soft: #ecfdf3;
+  --amber: #ea580c;
+  --amber-soft: #fff7ed;
+  --red: #dc2626;
+  --red-soft: #fef2f2;
+}
+:root[data-palette="orange"][data-mode="dark"] {
+  --bg: #1a1410;
+  --card: #2a1f18;
+  --border: #3d2e22;
+  --code-bg: #14100c;
+  --input-bg: #14100c;
+  --primary: #f97316;
+  --primary-hover: #ea580c;
+  --primary-soft: #431407;
+  --focus-ring: rgba(249, 115, 22, 0.22);
+  --green: #22c55e;
+  --green-soft: #14532d;
+  --amber: #f97316;
+  --amber-soft: #431407;
+  --red: #ef4444;
+  --red-soft: #450a0a;
+}
+
+/* ===== 紫罗兰 ===== */
+:root[data-palette="violet"] {
+  --bg: #f6f3fb;
+  --card: #ffffff;
+  --border: #e0d9f0;
+  --primary-soft: #f5f3ff;
+  --code-bg: #f9f7fd;
+  --primary: #7c3aed;
+  --primary-hover: #6d28d9;
+  --focus-ring: rgba(124, 58, 237, 0.14);
+  --green: #16a34a;
+  --green-soft: #ecfdf3;
+  --amber: #d97706;
+  --amber-soft: #fffbeb;
+  --red: #dc2626;
+  --red-soft: #fef2f2;
+}
+:root[data-palette="violet"][data-mode="dark"] {
+  --bg: #15102a;
+  --card: #221a3d;
+  --border: #362959;
+  --code-bg: #100b1f;
+  --input-bg: #100b1f;
+  --primary: #a78bfa;
+  --primary-hover: #8b5cf6;
+  --primary-soft: #2e1065;
+  --focus-ring: rgba(167, 139, 250, 0.22);
+  --green: #22c55e;
+  --green-soft: #14532d;
+  --amber: #f59e0b;
+  --amber-soft: #78350f;
+  --red: #ef4444;
+  --red-soft: #450a0a;
+}
+
+/* ---------- 基础 ---------- */
+* {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+body {
+  font-family:
+    -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC",
+    "Hiragino Sans GB", "Microsoft YaHei", sans-serif;
+  background: var(--bg);
+  color: var(--text);
+  font-size: 14px;
+  line-height: 1.6;
+  min-height: 100vh;
+}
+
+/* ---------- 表单元素 ---------- */
+label.field {
+  display: block;
+  margin-bottom: 14px;
+}
+label.field > span {
+  display: block;
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--text);
+  margin-bottom: 5px;
+}
+label.field > span .req {
+  color: var(--red);
+  margin-left: 2px;
+}
+input[type="text"],
+input[type="password"],
+textarea,
+select {
+  width: 100%;
+  padding: 9px 12px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  font-size: 14px;
+  font-family: inherit;
+  color: var(--text);
+  background: var(--input-bg);
+  outline: none;
+  transition:
+    border-color 0.15s,
+    box-shadow 0.15s;
+}
+input:focus,
+textarea:focus,
+select:focus {
+  border-color: var(--primary);
+  box-shadow: 0 0 0 3px var(--focus-ring);
+}
+textarea {
+  resize: vertical;
+  min-height: 42px;
+}
+/* 下拉框与输入框风格统一：去除原生方角外观，自绘箭头随主题变色；
+   color-scheme 由 :root[data-mode] 设定，暗色下原生选项列表同步变暗 */
+select {
+  appearance: none;
+  -webkit-appearance: none;
+  padding-right: 34px;
+  background-image:
+    linear-gradient(45deg, transparent 50%, var(--text-2) 50%),
+    linear-gradient(135deg, var(--text-2) 50%, transparent 50%);
+  background-position:
+    calc(100% - 19px) calc(50% + 1px),
+    calc(100% - 14px) calc(50% + 1px);
+  background-size:
+    5px 5px,
+    5px 5px;
+  background-repeat: no-repeat;
+}
+.hint {
+  font-size: 12px;
+  color: var(--text-3);
+  margin-top: 4px;
+}
+
+/* ---------- 提示条 ---------- */
+.alert {
+  border-radius: 8px;
+  padding: 9px 12px;
+  font-size: 13px;
+  margin-top: 12px;
+  display: none;
+  word-break: break-all;
+}
+.alert-error {
+  background: var(--red-soft);
+  color: var(--red);
+  border: 1px solid #fecaca;
+}
+.alert-success {
+  background: var(--green-soft);
+  color: var(--green);
+  border: 1px solid #bbf7d0;
+}
+.alert.show {
+  display: block;
+}
+
+/* ---------- 按钮 ---------- */
+.btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  padding: 9px 16px;
+  border: 1px solid transparent;
+  border-radius: 10px;
+  font-size: 14px;
+  font-weight: 500;
+  font-family: inherit;
+  cursor: pointer;
+  transition:
+    background 0.15s,
+    border-color 0.15s,
+    color 0.15s;
+  white-space: nowrap;
+}
+
+.btn-primary {
+  background: var(--primary);
+  color: #fff;
+}
+
+.btn-primary:hover {
+  background: var(--primary-hover);
+}
+
+.btn-danger {
+  background: var(--red);
+  color: #fff;
+}
+
+.btn-danger:hover {
+  filter: brightness(1.12);
+}
+
+.btn-ghost {
+  background: var(--ghost-bg);
+  color: var(--text-2);
+  border-color: var(--border);
+}
+
+.btn-ghost:hover {
+  background: var(--ghost-hover);
+  color: var(--text);
+}
+
+.btn-block {
+  width: 100%;
+}
+
+.btn:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+/* ---------- 顶栏与菜单 ---------- */
+.topbar {
+  background: var(--card);
+  border-bottom: 1px solid var(--border);
+  position: sticky;
+  top: 0;
+  z-index: 10;
+}
+
+.topbar-inner {
+  max-width: 1080px;
+  margin: 0 auto;
+  padding: 12px 20px;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.brand {
+  font-size: 17px;
+  font-weight: 600;
+  cursor: pointer;
+  user-select: none;
+}
+.brand .logo {
+  margin-right: 4px;
+}
+
+.topbar .spacer {
+  flex: 1;
+}
+
+.user-chip {
+  padding: 4px 10px;
+  border-radius: 999px;
+  font-size: 13px;
+  font-weight: 500;
+  cursor: pointer;
+  user-select: none;
+}
+.user-chip::after {
+  content: "▾";
+  margin-left: 4px;
+  font-size: 10px;
+  opacity: 0.7;
+}
+
+.user-menu-wrap {
+  position: relative;
+  display: inline-flex;
+}
+
+.user-menu {
+  display: none;
+  position: absolute;
+  right: 0;
+  top: calc(100% + 8px);
+  min-width: 120px;
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  box-shadow: var(--shadow);
+  padding: 6px;
+  z-index: 30;
+}
+
+.user-menu.show {
+  display: block;
+}
+
+/* 外观菜单左对齐：与 CatDock 标题左边缘对齐（账号菜单保持右对齐） */
+#brandMenu {
+  left: 0;
+  right: auto;
+}
+
+.user-menu-item {
+  display: block;
+  width: 100%;
+  text-align: left;
+  padding: 8px 12px;
+  border: none;
+  border-radius: 8px;
+  background: none;
+  font-size: 13px;
+  font-family: inherit;
+  color: var(--text-2);
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.user-menu-item .btn-icon {
+  margin-right: 6px;
+}
+
+.user-menu-item:hover {
+  background: var(--ghost-bg);
+  color: var(--primary);
+}
+
+.user-menu-item.danger {
+  color: var(--red);
+}
+
+.user-menu-item.danger:hover {
+  background: var(--red-soft);
+  color: var(--red);
+}
+
+/* ---------- 卡片 ---------- */
+.card {
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow);
+  padding: 18px 20px;
+  display: flex;
+  flex-direction: column;
+}
+
+/* ---------- 弹层与 Toast ---------- */
+.mask {
+  position: fixed;
+  inset: 0;
+  background: var(--mask);
+  display: none;
+  align-items: center;
+  justify-content: center;
+  z-index: 100;
+  padding: 20px;
+}
+
+.mask.show {
+  display: flex;
+}
+
+.toast {
+  position: fixed;
+  left: 50%;
+  bottom: 34px;
+  transform: translateX(-50%) translateY(20px);
+  background: var(--card);
+  border: 1px solid var(--border);
+  color: var(--text);
+  border-radius: 10px;
+  padding: 9px 18px;
+  font-size: 13px;
+  box-shadow: var(--shadow);
+  opacity: 0;
+  pointer-events: none;
+  transition:
+    opacity 0.2s,
+    transform 0.2s;
+  z-index: 200;
+  max-width: 90vw;
+}
+.toast.show {
+  opacity: 1;
+  transform: translateX(-50%) translateY(0);
+}
+.toast.err {
+  border-color: var(--red);
+  color: var(--red);
+}
+
+/* ---------- 过滤规则编辑器 ---------- */
+.filter-editor {
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+}
+.filter-editor .fe-section {
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 12px 14px;
+  margin-bottom: 12px;
+}
+.filter-editor .fe-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  margin-bottom: 8px;
+}
+.filter-editor .fe-switch {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 13px;
+  font-weight: 500;
+  margin: 0;
+}
+.filter-editor .chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-bottom: 8px;
+}
+.filter-editor .chips .chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  background: var(--primary-soft);
+  color: var(--primary);
+  border-radius: 999px;
+  padding: 3px 6px 3px 10px;
+  font-size: 12px;
+  word-break: break-all;
+}
+.filter-editor .chips .chip button {
+  border: none;
+  background: none;
+  color: inherit;
+  cursor: pointer;
+  font-size: 13px;
+  line-height: 1;
+  padding: 1px 3px;
+  border-radius: 50%;
+}
+.filter-editor .chips .chip button:hover {
+  color: var(--red);
+}
+.filter-editor .chips .empty-tip {
+  font-size: 12px;
+  color: var(--text-3);
+}
+.filter-editor .fe-add {
+  display: flex;
+  gap: 8px;
+}
+.filter-editor .fe-add input {
+  flex: 1;
+  min-width: 0;
+}
+.filter-editor .dd-rule {
+  display: flex;
+  gap: 6px;
+  margin-bottom: 6px;
+  align-items: center;
+}
+.filter-editor .dd-rule input {
+  flex: 1;
+  min-width: 0;
+  font-family: ui-monospace, monospace;
+  font-size: 12px;
+}
+.filter-editor .dd-rule .dd-arrow {
+  color: var(--text-3);
+  flex: none;
+}
+.filter-editor .dd-rule button {
+  flex: none;
+}
+.filter-editor .fe-head .hint {
+  margin: 0;
+}
+.filter-editor .alert {
+  margin-top: 8px;
+}
+
+/* 保存 / 取消并排：各占一半，取消在右 */
+.filter-actions {
+  display: flex;
+  gap: 10px;
+}
+.filter-actions .btn {
+  flex: 1;
+  min-width: 0;
+}

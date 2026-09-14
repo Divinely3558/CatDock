@@ -5,7 +5,8 @@
   - login.html：登录页，GET /{prefix}/login.html 返回
   - user.html：下载控制台（普通用户），GET /{prefix}/user.html 返回
   - admin.html：管理控制台（管理员），GET /{prefix}/admin.html 返回
-首次访问时读取并缓存。
+首次访问时读取并缓存。页面中的 __SHARED_CSS__ / __SHARED_JS__ 占位符
+会替换为 web/shared.css、web/shared.js 的共享内容，浏览器收到的仍是完整单文件页面。
 """
 import os
 
@@ -21,17 +22,28 @@ def _version_display():
     return cfg.version if cfg.version else "未知"
 
 
-def _read_html(filename):
-    """读取 HTML 文件（带缓存），并注入 __VERSION__ 占位符。
+def _find_web_file(filename):
+    """定位 web 资源文件。
 
     查找顺序：同目录（容器内平铺布局）→ ../web/（仓库源码布局）
     """
     base = os.path.dirname(os.path.abspath(__file__))
-    html_path = os.path.join(base, filename)
-    if not os.path.isfile(html_path):
-        html_path = os.path.join(base, '..', 'web', filename)
-    with open(html_path, 'r', encoding='utf-8') as f:
+    path = os.path.join(base, filename)
+    if not os.path.isfile(path):
+        path = os.path.join(base, '..', 'web', filename)
+    return path
+
+
+def _read_html(filename):
+    """读取 HTML 文件（带缓存），并注入共享样式/脚本与 __VERSION__ 占位符。"""
+    with open(_find_web_file(filename), 'r', encoding='utf-8') as f:
         html = f.read()
+    with open(_find_web_file('shared.css'), 'r', encoding='utf-8') as f:
+        shared_css = f.read()
+    with open(_find_web_file('shared.js'), 'r', encoding='utf-8') as f:
+        shared_js = f.read()
+    html = html.replace('/*__SHARED_CSS__*/', shared_css)
+    html = html.replace('/*__SHARED_JS__*/', shared_js)
     return html.replace('__VERSION__', _version_display())
 
 
