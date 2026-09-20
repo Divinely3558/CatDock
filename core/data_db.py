@@ -708,10 +708,13 @@ def _print_usage():
     print("  add <IP地址>     手动添加封禁 IP")
     print("  del <IP地址>     手动删除（解封）封禁 IP")
     print("")
+    print("子命令缩写: show=-s/ls  add=-a  del=-d/rm")
+    print("")
     print("示例:")
     print("  banip show")
     print("  banip add 192.168.1.100")
     print("  banip del 192.168.1.100")
+    print("  bip -s                  # 用别名 bip 缩写")
 
 
 def _cmd_show():
@@ -798,19 +801,24 @@ def main():
     subcmd = argv[0]
     rest = argv[1:]
 
-    if subcmd == 'show':
-        sys.exit(_cmd_show())
-    elif subcmd == 'add':
-        sys.exit(_cmd_add(rest))
-    elif subcmd == 'del':
-        sys.exit(_cmd_del(rest))
-    elif subcmd in ('-h', '--help', 'help'):
+    # 子命令缩写映射
+    _SUBMAP = {
+        'show': lambda _args: _cmd_show(),
+        '-s': lambda _args: _cmd_show(),
+        'ls': lambda _args: _cmd_show(),
+        'add': _cmd_add, '-a': _cmd_add,
+        'del': _cmd_del, '-d': _cmd_del, 'rm': _cmd_del,
+    }
+
+    handler = _SUBMAP.get(subcmd)
+    if handler is not None:
+        sys.exit(handler(rest))
+    if subcmd in ('-h', '--help', 'help'):
         _print_usage()
         sys.exit(0)
-    else:
-        print(f"未知子命令: {subcmd}", file=sys.stderr)
-        _print_usage()
-        sys.exit(1)
+    print(f"未知子命令: {subcmd}", file=sys.stderr)
+    _print_usage()
+    sys.exit(1)
 
 
 if __name__ == '__main__':

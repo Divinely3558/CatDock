@@ -11,6 +11,10 @@
     userctl unban <用户名>      解禁用户
     userctl --help
 
+缩写:
+    userctl → uctl    add → -a    del → -d / rm
+    password → -p / pw    ban → -b    unban → -u / ub
+
 用户名规则：仅字母+数字、不能纯数字、字母数量不少于 4 位。
 密码以 pbkdf2 + 随机盐 哈希存储，不留明文。
 管理员账户（role='admin'）请使用 adminctl 命令管理，本工具不操作管理员。
@@ -189,14 +193,25 @@ def _print_usage():
     print("  ban <用户名>        禁用用户（无法登录、令牌失效）")
     print("  unban <用户名>      解禁用户")
     print("")
+    print("子命令缩写: add=-a  del=-d/rm  password=-p/pw  ban=-b  unban=-u/ub")
+    print("")
     print("用户名规则: 仅字母+数字、不能纯数字、字母数量不少于 4 位")
     print("")
     print("示例:")
     print("  userctl add alice")
     print("  userctl del alice")
-    print("  userctl password alice")
-    print("  userctl ban alice")
-    print("  userctl unban alice")
+    print("  uctl -b alice           # 用别名 uctl 缩写")
+
+
+# 子命令完整名 → 函数的映射（缩写先归一为完整名再分发）
+_SUBMAP = {
+    'add': _cmd_add, '-a': _cmd_add,
+    'del': _cmd_del, '-d': _cmd_del, 'rm': _cmd_del,
+    'password': _cmd_password, '-p': _cmd_password, 'pw': _cmd_password,
+    'ban': lambda args: _cmd_ban(args, flag=True), '-b': lambda args: _cmd_ban(args, flag=True),
+    'unban': lambda args: _cmd_ban(args, flag=False), '-u': lambda args: _cmd_ban(args, flag=False),
+    'ub': lambda args: _cmd_ban(args, flag=False),
+}
 
 
 def main():
@@ -208,20 +223,12 @@ def main():
     subcmd = argv[0]
     rest = argv[1:]
 
-    if subcmd == 'add':
-        sys.exit(_cmd_add(rest))
-    elif subcmd == 'del':
-        sys.exit(_cmd_del(rest))
-    elif subcmd == 'password':
-        sys.exit(_cmd_password(rest))
-    elif subcmd == 'ban':
-        sys.exit(_cmd_ban(rest, flag=True))
-    elif subcmd == 'unban':
-        sys.exit(_cmd_ban(rest, flag=False))
-    else:
-        print(f"未知子命令: {subcmd}", file=sys.stderr)
-        _print_usage()
-        sys.exit(1)
+    handler = _SUBMAP.get(subcmd)
+    if handler is not None:
+        sys.exit(handler(rest))
+    print(f"未知子命令: {subcmd}", file=sys.stderr)
+    _print_usage()
+    sys.exit(1)
 
 
 if __name__ == '__main__':

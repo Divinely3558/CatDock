@@ -9,11 +9,14 @@ SIGUSR1（开启）/ SIGUSR2（关闭）信号即时切换，不写入任何配�
 容器重启后恢复默认关闭。
 
 用法:
-    debug yes / debug y    开启调试模式
-    debug no  / debug n    关闭调试模式
-    debug show             查看当前状态
-    debug                  不带参数显示用法帮助
+    debug yes / debug y / debug -y    开启调试模式
+    debug no  / debug n / debug -n    关闭调试模式
+    debug show / debug s / debug -s   查看当前状态
+    debug                             不带参数显示用法帮助
     debug --help
+
+缩写:
+    debug → dbg    yes → -y    no → -n    show → -s
 """
 import os
 import sys
@@ -101,20 +104,21 @@ def _cmd_set(enable):
 
 
 def _print_usage():
-    print("用法: debug <yes|y|no|n|show>")
+    print("用法: debug <yes|y|-y|no|n|-n|show|s|-s>")
     print("")
     print("子命令:")
-    print("  yes / y    开启调试模式（输出详细过程日志）")
-    print("  no  / n    关闭调试模式（仅输出关键下载结果）")
-    print("  show       查看当前状态")
+    print("  yes / y / -y    开启调试模式（输出详细过程日志）")
+    print("  no  / n / -n    关闭调试模式（仅输出关键下载结果）")
+    print("  show / s / -s   查看当前状态")
     print("")
+    print("缩写: debug → dbg")
     print("不带参数显示本用法帮助。")
     print("调试模式为运行时开关：即时生效，不写配置文件，重启容器后恢复默认关闭。")
     print("")
     print("示例:")
     print("  debug yes")
-    print("  debug n")
-    print("  debug show")
+    print("  debug -n")
+    print("  dbg -s")
 
 
 def main():
@@ -129,12 +133,12 @@ def main():
         _print_usage()
         sys.exit(0)
 
-    if subcmd in ('show', 'status', 's'):
+    if subcmd in ('show', 'status', 's', '-s'):
         sys.exit(_cmd_show())
 
-    if subcmd in ('yes', 'y'):
+    if subcmd in ('yes', 'y', '-y'):
         sys.exit(_cmd_set(True))
-    if subcmd in ('no', 'n'):
+    if subcmd in ('no', 'n', '-n'):
         sys.exit(_cmd_set(False))
 
     print(f"未知子命令: {argv[0]}", file=sys.stderr)

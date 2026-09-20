@@ -2,7 +2,7 @@
 
 基于 N_m3u8DL-RE 的 Docker 容器下载工具，支持通过猫抓浏览器插件远程控制容器下载视频。
 
-> **当前版本：v26.09.21**（版本号以 [`web/VERSION`](web/VERSION) 为唯一来源；各版本变更见文末「[更新日志](#-更新日志)」）
+> **当前版本：v26.09.22**（版本号以 [`web/VERSION`](web/VERSION) 为唯一来源；各版本变更见文末「[更新日志](#-更新日志)」）
 
 ## ✨ 功能特性
 
@@ -10,7 +10,7 @@
 - **🔌 猫抓插件支持**：通过数据发送功能远程控制容器下载
 - **📡 HTTP API**：提供下载触发、任务查询、用户管理等接口
 - **🖥️ 三套网页**：登录页 `/{prefix}/login.html`、下载控制台 `/{prefix}/user.html`、管理控制台 `/{prefix}/admin.html`；旧地址（根路径、`/login`、`/user`、`/admin` 及带尾斜杠形式）访问时 302 跳转到对应 `.html` 规范地址；登录后按角色自动跳转，纯静态外壳 + Bearer 令牌调用 API
-- **🏷️ 版本号展示**：版本号以 `web/VERSION` 单行文本为唯一来源（当前 26.09.21），启动 banner 顶部、登录页与管理端顶栏（均带 `v` 前缀）、下载控制台「服务信息」卡片、`GET /{prefix}/config` 接口均展示同一版本号
+- **🏷️ 版本号展示**：版本号以 `web/VERSION` 单行文本为唯一来源（当前 26.09.22），启动 banner 顶部、登录页与管理端顶栏（均带 `v` 前缀）、下载控制台「服务信息」卡片、`GET /{prefix}/config` 接口均展示同一版本号
 - **🎬 完整下载参数**：支持 referer、cookie、user-agent、逐任务输出格式（mp4/mkv）等
 - **💾 数据持久化**：配置、用户数据、下载缓存与成品文件均持久化到宿主机，重建容器不丢失
 - **🔒 URL 路径前缀**：支持设置访问前缀（如 `/qj52lajx`），增强接口安全性
@@ -79,7 +79,7 @@ catdock/
 │   ├── admin.html       # 🛠️ 管理控制台（管理员）
 │   ├── shared.css       # 🎨 三页共享样式（经占位符注入各页面）
 │   ├── shared.js        # ✨ 三页共享脚本（会话随机色板/亮暗记忆/顶栏菜单）
-│   ├── VERSION          # 🏷️ 版本号唯一来源（单行纯文本，无扩展名，如 26.09.21）
+│   ├── VERSION          # 🏷️ 版本号唯一来源（单行纯文本，无扩展名，如 26.09.22）
 │   └── favicon.ico      # 🌐 网页图标
 ├── sh/                  # 📜 Shell 脚本
 │   ├── entrypoint.sh    # 🚀 容器启动脚本
@@ -1205,6 +1205,15 @@ docker-compose up -d --build
 
 ## 🧰 容器内命令行工具
 
+> **命令别名**：容器内同时提供简短别名（软链指向原脚本），两种写法完全等价。
+>
+> | 原名       | 别名   |
+> | ---------- | ------ |
+> | `adminctl` | `actl` |
+> | `userctl`  | `uctl` |
+> | `banip`    | `bip`  |
+> | `debug`    | `dbg`  |
+
 ### adminctl — 管理员账户管理
 
 ```bash
@@ -1216,6 +1225,8 @@ docker exec -it catdock adminctl password <用户名>   # 重置管理员密码�
 
 - 首启自动创建默认管理员 `admin`（14 位随机初始密码，仅在启动日志显示一次，请尽快登录修改）
 - 管理员账户的改密与删除只能通过本 CLI 完成（管理网页仅支持添加管理员，见「用户管理」）；非管理员账户使用本命令会报错并提示改用 `userctl`
+
+**子命令缩写**：`add=-a`、`del=-d/rm`、`password=-p/pw`、`list=-l/ls`（例：`actl -l` 等价于 `adminctl list`）
 
 ### userctl — 下载用户管理
 
@@ -1231,6 +1242,8 @@ docker exec -it catdock userctl unban <用户名>      # 解禁用户
 - `ban`/`unban` 为可逆禁用：被禁用户密码正确时返回 403「账号已被禁用」，且**不计入**封禁失败计数
 - `ban`/`del`/`password` 不能作用于管理员账户（请改用 `adminctl` 命令）；下载用户可全部删除
 - 以上操作也可在管理网页 `/{prefix}/admin.html` 中完成（管理员账户除外：网页仅可添加管理员，改密/删除需用 `adminctl`）
+
+**子命令缩写**：`add=-a`、`del=-d/rm`、`password=-p/pw`、`ban=-b`、`unban=-u/ub`（例：`uctl -b alice` 等价于 `userctl ban alice`）
 
 ### banip — IP 封禁管理
 
@@ -1248,6 +1261,8 @@ docker exec -it catdock banip del <IP地址>         # 解封（同时清零失�
 - **账号级**（用户存在但密码错误）：累计 **5** 次 → 自动禁用该账号（需 `userctl unban` / 管理网页解禁或重置密码）
 - URL 前缀错误返回 404 **不**计数；账号已禁用导致的 403 不计数；认证成功自动清零该 IP 与该账号的计数
 
+**子命令缩写**：`show=-s/ls`、`add=-a`、`del=-d/rm`（例：`bip -s` 等价于 `banip show`）
+
 ### debug — 调试模式开关
 
 调试模式为**纯运行时开关**：即时生效、不写任何配置文件、不需要重启容器，容器重启后恢复默认关闭。
@@ -1260,6 +1275,9 @@ docker exec -it catdock debug no       # 关闭调试模式（仅输出关键下
 
 - 原理：命令扫描 `/proc` 找到运行中的服务进程，发送 SIGUSR1（开启）/ SIGUSR2（关闭）信号切换，状态记录在 `/tmp` 运行时文件中
 - 调试模式下日志量显著增加，排查完问题建议执行 `debug no` 关闭
+
+**子命令缩写**：`yes=y/-y`、`no=n/-n`、`show=s/-s`（例：`dbg -y` 等价于 `debug yes`）
+
 - 不带参数执行 `debug`（或 `debug --help`）显示用法帮助
 
 ## 🛠️ 故障排查
@@ -1396,6 +1414,15 @@ A: 这是 Docker 在宿主机 DNS 就绪前启动容器导致的时序问题。`
 ## 📝 更新日志
 
 > **维护约定**：本文档主体始终描述最新版本的完整功能；每次发布新版本时，在本章节**顶部**追加一条版本记录，按「新增 / 变更 / 修复 / 移除」分类列出改动，同时同步修订正文对应描述。版本号与 [`web/VERSION`](web/VERSION) 文件保持一致（`YY.MM.DD` 格式）。v26.09.14 之前的未版本化历史不再追溯。
+
+### v26.09.22（2026-09-22）
+
+CLI 命令别名与子命令缩写。
+
+**新增**
+
+- 🔤 命令别名：容器启动时自动为四个 CLI 创建软链——`adminctl → actl`、`userctl → uctl`、`banip → bip`、`debug → dbg`，同时放于 `/home/downloader/` 与 `/usr/local/bin/` 全局 PATH，两种写法完全等价
+- 📝 子命令缩写：四个 CLI 全部支持单字母 `-x` 和双字母两种缩写形式——`adminctl`：`add=-a`、`del=-d/rm`、`password=-p/pw`、`list=-l/ls`；`userctl`：`add=-a`、`del=-d/rm`、`password=-p/pw`、`ban=-b`、`unban=-u/ub`；`banip`：`show=-s/ls`、`add=-a`、`del=-d/rm`；`debug`：`yes=-y`、`no=-n`、`show=-s`（原有不带横杠的 y/n/s 继续保留）
 
 ### v26.09.21（2026-09-21）
 

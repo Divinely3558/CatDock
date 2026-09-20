@@ -86,5 +86,16 @@ curl -s --connect-timeout 5 --max-time 10 -o /dev/null -w "网络延迟: %{time_
 # 额外等待几秒确保系统稳定
 sleep 3
 
+# 创建 CLI 命令别名软链（容器内平铺在 /home/downloader/，同时链接到 /usr/local/bin 全局 PATH）
+cd /home/downloader
+ln -sf adminctl actl
+ln -sf userctl  uctl
+ln -sf banip    bip
+ln -sf debug    dbg
+ln -sf /home/downloader/adminctl /usr/local/bin/actl
+ln -sf /home/downloader/userctl  /usr/local/bin/uctl
+ln -sf /home/downloader/banip    /usr/local/bin/bip
+ln -sf /home/downloader/debug    /usr/local/bin/dbg
+
 # 启动服务
 PYTHONUNBUFFERED=1 python3 -u /home/downloader/main.py
