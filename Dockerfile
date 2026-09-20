@@ -25,7 +25,11 @@ RUN chmod +x /home/downloader/N_m3u8DL-RE /home/downloader/main.py /home/downloa
     ln -sf /home/downloader/banip /usr/local/bin/banip && \
     ln -sf /home/downloader/userctl /usr/local/bin/userctl && \
     ln -sf /home/downloader/adminctl /usr/local/bin/adminctl && \
-    ln -sf /home/downloader/debug /usr/local/bin/debug
+    ln -sf /home/downloader/debug /usr/local/bin/debug && \
+    ln -sf /home/downloader/adminctl /usr/local/bin/actl && \
+    ln -sf /home/downloader/userctl /usr/local/bin/uctl && \
+    ln -sf /home/downloader/banip /usr/local/bin/bip && \
+    ln -sf /home/downloader/debug /usr/local/bin/dbg
 
 COPY sh/entrypoint.sh /entrypoint.sh
 RUN chmod +x /entrypoint.sh
