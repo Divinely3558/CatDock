@@ -564,27 +564,31 @@
       <div class="card">
         <div class="card-title">⌨️ 命令行参考</div>
         <div class="sub">
-          在容器内执行（docker exec -it catdock bash），以下为全部命令行工具：
+          在容器内执行（docker exec -it catdock bash）。命令可用别名代替全称：
+          adminctl→<code>actl</code>、userctl→<code>uctl</code>、banip→<code>bip</code>、debug→<code>dbg</code>；
+          各行括号内为子命令缩写。
         </div>
         <div class="cmd-row">
           <div class="cmd-group">
             <div class="cmd-title">adminctl — 管理员账户管理</div>
             <div class="cmd-list">
               <div class="cmd-item">
-                <span class="cmd-desc">列出全部用户</span>
-                <code>adminctl list</code>
-              </div>
-              <div class="cmd-item">
-                <span class="cmd-desc">添加管理员</span>
+                <span class="cmd-desc">添加管理员（-a）</span>
                 <code>adminctl add &lt;用户名&gt;</code>
               </div>
               <div class="cmd-item">
-                <span class="cmd-desc">删除管理员（至少保留一个）</span>
+                <span class="cmd-desc">修改管理员密码（-p / pw）</span>
+                <code>adminctl password &lt;用户名&gt;</code>
+              </div>
+              <div class="cmd-item">
+                <span class="cmd-desc"
+                  >删除管理员，至少保留一个（-d / rm）</span
+                >
                 <code>adminctl del &lt;用户名&gt;</code>
               </div>
               <div class="cmd-item">
-                <span class="cmd-desc">修改管理员密码</span>
-                <code>adminctl password &lt;用户名&gt;</code>
+                <span class="cmd-desc">列出全部用户（-l / ls）</span>
+                <code>adminctl list</code>
               </div>
             </div>
           </div>
@@ -592,23 +596,23 @@
             <div class="cmd-title">userctl — 下载用户管理</div>
             <div class="cmd-list">
               <div class="cmd-item">
-                <span class="cmd-desc">添加用户</span>
+                <span class="cmd-desc">添加用户（-a）</span>
                 <code>userctl add &lt;用户名&gt;</code>
               </div>
               <div class="cmd-item">
-                <span class="cmd-desc">删除用户（含全部数据）</span>
-                <code>userctl del &lt;用户名&gt;</code>
-              </div>
-              <div class="cmd-item">
-                <span class="cmd-desc">修改用户密码</span>
+                <span class="cmd-desc">修改用户密码（-p / pw）</span>
                 <code>userctl password &lt;用户名&gt;</code>
               </div>
               <div class="cmd-item">
-                <span class="cmd-desc">禁用用户</span>
+                <span class="cmd-desc">删除用户，含全部数据（-d / rm）</span>
+                <code>userctl del &lt;用户名&gt;</code>
+              </div>
+              <div class="cmd-item">
+                <span class="cmd-desc">禁用用户（-b）</span>
                 <code>userctl ban &lt;用户名&gt;</code>
               </div>
               <div class="cmd-item">
-                <span class="cmd-desc">解禁用户</span>
+                <span class="cmd-desc">解禁用户（-u）</span>
                 <code>userctl unban &lt;用户名&gt;</code>
               </div>
             </div>
@@ -617,16 +621,16 @@
             <div class="cmd-title">banip — IP 封禁管理</div>
             <div class="cmd-list">
               <div class="cmd-item">
-                <span class="cmd-desc">查看封禁列表</span>
-                <code>banip show</code>
-              </div>
-              <div class="cmd-item">
-                <span class="cmd-desc">封禁 IP</span>
+                <span class="cmd-desc">封禁 IP（-a）</span>
                 <code>banip add &lt;IP&gt;</code>
               </div>
               <div class="cmd-item">
-                <span class="cmd-desc">解封 IP</span>
+                <span class="cmd-desc">解封 IP（-d / rm）</span>
                 <code>banip del &lt;IP&gt;</code>
+              </div>
+              <div class="cmd-item">
+                <span class="cmd-desc">查看封禁列表（-s / ls）</span>
+                <code>banip show</code>
               </div>
             </div>
           </div>
@@ -635,17 +639,19 @@
             <div class="cmd-list">
               <div class="cmd-item">
                 <span class="cmd-desc"
-                  >查看当前状态（yes/no 可简写为 y/n）</span
+                  >开启调试模式，输出详细过程日志（-y）</span
                 >
-                <code>debug show</code>
-              </div>
-              <div class="cmd-item">
-                <span class="cmd-desc">开启调试模式（输出详细过程日志）</span>
                 <code>debug yes</code>
               </div>
               <div class="cmd-item">
-                <span class="cmd-desc">关闭调试模式（仅输出关键下载结果）</span>
+                <span class="cmd-desc"
+                  >关闭调试模式，仅输出关键下载结果（-n）</span
+                >
                 <code>debug no</code>
+              </div>
+              <div class="cmd-item">
+                <span class="cmd-desc">查看当前状态（-s）</span>
+                <code>debug show</code>
               </div>
             </div>
           </div>
