@@ -133,7 +133,7 @@ def main():
         _print_usage()
         sys.exit(0)
 
-    if subcmd in ('show', 'status', 's', '-s'):
+    if subcmd in ('show', 's', '-s'):
         sys.exit(_cmd_show())
 
     if subcmd in ('yes', 'y', '-y'):

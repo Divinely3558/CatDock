@@ -13,7 +13,7 @@
 
 缩写:
     userctl → uctl    add → -a    del → -d / rm
-    password → -p / pw    ban → -b    unban → -u / ub
+    password → -p / pw    ban → -b    unban → -u
 
 用户名规则：仅字母+数字、不能纯数字、字母数量不少于 4 位。
 密码以 pbkdf2 + 随机盐 哈希存储，不留明文。
@@ -193,7 +193,7 @@ def _print_usage():
     print("  ban <用户名>        禁用用户（无法登录、令牌失效）")
     print("  unban <用户名>      解禁用户")
     print("")
-    print("子命令缩写: add=-a  del=-d/rm  password=-p/pw  ban=-b  unban=-u/ub")
+    print("子命令缩写: add=-a  del=-d/rm  password=-p/pw  ban=-b  unban=-u")
     print("")
     print("用户名规则: 仅字母+数字、不能纯数字、字母数量不少于 4 位")
     print("")
@@ -204,13 +204,13 @@ def _print_usage():
 
 
 # 子命令完整名 → 函数的映射（缩写先归一为完整名再分发）
+# 规则：主缩写 = -首字母；次缩写仅限 shell 惯用词（rm/pw）
 _SUBMAP = {
     'add': _cmd_add, '-a': _cmd_add,
     'del': _cmd_del, '-d': _cmd_del, 'rm': _cmd_del,
     'password': _cmd_password, '-p': _cmd_password, 'pw': _cmd_password,
     'ban': lambda args: _cmd_ban(args, flag=True), '-b': lambda args: _cmd_ban(args, flag=True),
     'unban': lambda args: _cmd_ban(args, flag=False), '-u': lambda args: _cmd_ban(args, flag=False),
-    'ub': lambda args: _cmd_ban(args, flag=False),
 }
 
 

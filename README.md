@@ -2,7 +2,7 @@
 
 基于 N_m3u8DL-RE 的 Docker 容器下载工具，支持通过猫抓浏览器插件远程控制容器下载视频。
 
-> **当前版本：v26.09.22**（版本号以 [`web/VERSION`](web/VERSION) 为唯一来源；各版本变更见文末「[更新日志](#-更新日志)」）
+> **当前版本：v26.09.23**（版本号以 [`web/VERSION`](web/VERSION) 为唯一来源；各版本变更见文末「[更新日志](#-更新日志)」）
 
 ## ✨ 功能特性
 
@@ -10,7 +10,7 @@
 - **🔌 猫抓插件支持**：通过数据发送功能远程控制容器下载
 - **📡 HTTP API**：提供下载触发、任务查询、用户管理等接口
 - **🖥️ 三套网页**：登录页 `/{prefix}/login.html`、下载控制台 `/{prefix}/user.html`、管理控制台 `/{prefix}/admin.html`；旧地址（根路径、`/login`、`/user`、`/admin` 及带尾斜杠形式）访问时 302 跳转到对应 `.html` 规范地址；登录后按角色自动跳转，纯静态外壳 + Bearer 令牌调用 API
-- **🏷️ 版本号展示**：版本号以 `web/VERSION` 单行文本为唯一来源（当前 26.09.22），启动 banner 顶部、登录页与管理端顶栏（均带 `v` 前缀）、下载控制台「服务信息」卡片、`GET /{prefix}/config` 接口均展示同一版本号
+- **🏷️ 版本号展示**：版本号以 `web/VERSION` 单行文本为唯一来源（当前 26.09.23），启动 banner 顶部、登录页与管理端顶栏（均带 `v` 前缀）、下载控制台「服务信息」卡片、`GET /{prefix}/config` 接口均展示同一版本号
 - **🎬 完整下载参数**：支持 referer、cookie、user-agent、逐任务输出格式（mp4/mkv）等
 - **💾 数据持久化**：配置、用户数据、下载缓存与成品文件均持久化到宿主机，重建容器不丢失
 - **🔒 URL 路径前缀**：支持设置访问前缀（如 `/qj52lajx`），增强接口安全性
@@ -79,7 +79,7 @@ catdock/
 │   ├── admin.html       # 🛠️ 管理控制台（管理员）
 │   ├── shared.css       # 🎨 三页共享样式（经占位符注入各页面）
 │   ├── shared.js        # ✨ 三页共享脚本（会话随机色板/亮暗记忆/顶栏菜单）
-│   ├── VERSION          # 🏷️ 版本号唯一来源（单行纯文本，无扩展名，如 26.09.22）
+│   ├── VERSION          # 🏷️ 版本号唯一来源（单行纯文本，无扩展名，如 26.09.23）
 │   └── favicon.ico      # 🌐 网页图标
 ├── sh/                  # 📜 Shell 脚本
 │   ├── entrypoint.sh    # 🚀 容器启动脚本
@@ -1213,6 +1213,8 @@ docker-compose up -d --build
 > | `userctl`  | `uctl` |
 > | `banip`    | `bip`  |
 > | `debug`    | `dbg`  |
+>
+> **缩写规则**（四个工具统一）：主缩写 = `-` + 子命令首字母，同一字母在所有工具中含义相同（`-a`=add、`-d`=del、`-p`=password、`-b`=ban、`-u`=unban、`-l`=list、`-s`=show、`-y`=yes、`-n`=no）；次缩写仅限 shell 惯用词 `ls`（列出）/`rm`（删除）/`pw`（密码）；`debug` 另保留无横杠 `y`/`n`/`s` 历史兼容写法。
 
 ### adminctl — 管理员账户管理
 
@@ -1243,7 +1245,7 @@ docker exec -it catdock userctl unban <用户名>      # 解禁用户
 - `ban`/`del`/`password` 不能作用于管理员账户（请改用 `adminctl` 命令）；下载用户可全部删除
 - 以上操作也可在管理网页 `/{prefix}/admin.html` 中完成（管理员账户除外：网页仅可添加管理员，改密/删除需用 `adminctl`）
 
-**子命令缩写**：`add=-a`、`del=-d/rm`、`password=-p/pw`、`ban=-b`、`unban=-u/ub`（例：`uctl -b alice` 等价于 `userctl ban alice`）
+**子命令缩写**：`add=-a`、`del=-d/rm`、`password=-p/pw`、`ban=-b`、`unban=-u`（例：`uctl -b alice` 等价于 `userctl ban alice`）
 
 ### banip — IP 封禁管理
 
@@ -1276,7 +1278,7 @@ docker exec -it catdock debug no       # 关闭调试模式（仅输出关键下
 - 原理：命令扫描 `/proc` 找到运行中的服务进程，发送 SIGUSR1（开启）/ SIGUSR2（关闭）信号切换，状态记录在 `/tmp` 运行时文件中
 - 调试模式下日志量显著增加，排查完问题建议执行 `debug no` 关闭
 
-**子命令缩写**：`yes=y/-y`、`no=n/-n`、`show=s/-s`（例：`dbg -y` 等价于 `debug yes`）
+**子命令缩写**：`yes=-y`、`no=-n`、`show=-s`（兼容无横杠 `y`/`n`/`s`；例：`dbg -y` 等价于 `debug yes`）
 
 - 不带参数执行 `debug`（或 `debug --help`）显示用法帮助
 
@@ -1414,6 +1416,19 @@ A: 这是 Docker 在宿主机 DNS 就绪前启动容器导致的时序问题。`
 ## 📝 更新日志
 
 > **维护约定**：本文档主体始终描述最新版本的完整功能；每次发布新版本时，在本章节**顶部**追加一条版本记录，按「新增 / 变更 / 修复 / 移除」分类列出改动，同时同步修订正文对应描述。版本号与 [`web/VERSION`](web/VERSION) 文件保持一致（`YY.MM.DD` 格式）。v26.09.14 之前的未版本化历史不再追溯。
+
+### v26.09.23（2026-09-23）
+
+CLI 缩写风格统一，便于记忆。
+
+**变更**
+
+- 📐 子命令缩写规则统一：主缩写 = `-` + 子命令首字母（同一字母各工具含义相同），次缩写仅限 shell 惯用词 `ls`/`rm`/`pw`，`debug` 保留无横杠 `y`/`n`/`s` 历史兼容写法
+
+**移除**
+
+- 🗑️ `userctl unban` 的双字母缩写 `ub`（不成词、无历史负担，`unban` 仅保留 `-u`）
+- 🗑️ `debug show` 的隐藏同义词 `status`（统一为 `show` / `-s` / `s`）
 
 ### v26.09.22（2026-09-22）
 
