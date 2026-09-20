@@ -50,6 +50,26 @@
         margin-bottom: 14px;
       }
 
+      /* ---------- 服务器配置 + 日志导出：宽屏并排，手机竖屏垂直 ---------- */
+      .dual-card-row {
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 16px;
+      }
+      /* 卡片内部纵向 flex，按钮沉底：两张卡片高度不同时按钮仍保持水平对齐 */
+      .dual-card-row .card {
+        display: flex;
+        flex-direction: column;
+      }
+      .dual-card-row .card > .btn {
+        margin-top: auto;
+      }
+      @media (max-width: 600px) {
+        .dual-card-row {
+          grid-template-columns: minmax(0, 1fr);
+        }
+      }
+
       /* ---------- 命令行参考 ---------- */
       .cmd-row {
         display: grid;
@@ -187,14 +207,96 @@
         padding-bottom: 10px;
       }
       @media (max-width: 480px) {
+        /* 手机端起止日期保持并排一行，仅收紧间距 */
         .date-range-row {
-          flex-direction: column;
-          align-items: stretch;
+          gap: 6px;
         }
-        .date-range-sep {
-          padding: 0;
-          text-align: center;
-        }
+      }
+
+      /* ---------- 自定义日历面板（替代原生日历弹层，随主题配色） ---------- */
+      .cal-panel {
+        position: fixed;
+        z-index: 90;
+        width: 272px;
+        background: var(--card);
+        border: 1px solid var(--border);
+        border-radius: var(--radius);
+        box-shadow: var(--shadow);
+        padding: 10px;
+        display: none;
+      }
+      .cal-panel.show {
+        display: block;
+      }
+      .cal-head {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        margin-bottom: 6px;
+      }
+      .cal-title {
+        font-size: 13px;
+        font-weight: 600;
+        color: var(--text);
+      }
+      .cal-nav {
+        width: 26px;
+        height: 26px;
+        border: 1px solid var(--border);
+        border-radius: 8px;
+        background: var(--ghost-bg);
+        color: var(--text-2);
+        font-size: 14px;
+        font-family: inherit;
+        line-height: 1;
+        cursor: pointer;
+      }
+      .cal-nav:hover:not(:disabled) {
+        background: var(--ghost-hover);
+        color: var(--text);
+      }
+      .cal-nav:disabled {
+        opacity: 0.35;
+        cursor: default;
+      }
+      .cal-week,
+      .cal-grid {
+        display: grid;
+        grid-template-columns: repeat(7, 1fr);
+        gap: 2px;
+      }
+      .cal-week span {
+        font-size: 11px;
+        color: var(--text-3);
+        text-align: center;
+        padding: 2px 0;
+      }
+      .cal-day {
+        height: 30px;
+        border: none;
+        border-radius: 8px;
+        background: none;
+        font-size: 12.5px;
+        font-family: inherit;
+        color: var(--text);
+        cursor: pointer;
+      }
+      .cal-day:hover:not(:disabled) {
+        background: var(--primary-soft);
+      }
+      .cal-day:disabled {
+        color: var(--text-3);
+        opacity: 0.55;
+        cursor: default;
+      }
+      .cal-day.today {
+        box-shadow: inset 0 0 0 1px var(--primary);
+      }
+      .cal-day.selected,
+      .cal-day.selected:hover {
+        background: var(--primary);
+        color: #fff;
+        font-weight: 600;
       }
       .warn-box {
         background: var(--amber-soft);
@@ -218,7 +320,30 @@
       .modal h3 {
         font-size: 15px;
         font-weight: 700;
+        margin: 0;
+      }
+      /* 弹窗标题行：标题在左，右侧可放置附加内容（如复选框） */
+      .modal-head {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
         margin-bottom: 8px;
+        gap: 12px;
+      }
+      .modal-title-extra {
+        font-size: 13px;
+        font-weight: 400;
+        color: var(--text-2);
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+        cursor: pointer;
+        user-select: none;
+        white-space: nowrap;
+      }
+      .modal-title-extra input {
+        width: auto;
+        cursor: pointer;
       }
       .modal .msg {
         color: var(--text-2);
@@ -269,6 +394,9 @@
         }
         .card {
           padding: 14px;
+        }
+        .dual-card-row {
+          gap: 12px;
         }
         .key-row {
           flex-direction: column;
@@ -384,50 +512,53 @@
         </div>
       </div>
 
-      <div class="card">
-        <div class="card-title">🛠️ 服务器配置</div>
-        <div class="warn-box">
-          ⚠️ 修改 AUTH_KEY 后，猫抓插件请求体中的
-          <code>key</code> 字段与所有网页登录都要同步更换。
-        </div>
-        <label class="field">
-          <span>新 AUTH_KEY<span class="req">*</span></span>
-          <div class="key-row">
-            <input
-              type="text"
-              id="newKey"
-              placeholder="点击「🎲 随机」自动生成"
-              autocomplete="off"
-              readonly
-            />
-            <button class="btn btn-ghost" id="btnGenKey" type="button">
-              🎲 随机
-            </button>
+      <div class="dual-card-row">
+        <div class="card">
+          <div class="card-title">🛠️ 服务器配置</div>
+          <div class="warn-box">
+            ⚠️ 更换后：猫抓插件的 <code>key</code> 需同步更新，网页需重新登录。
           </div>
-        </label>
-        <button class="btn btn-danger btn-block" id="btnSaveKey">
-          保存并全员下线
-        </button>
-      </div>
+          <label class="field">
+            <span>新 AUTH_KEY<span class="req">*</span></span>
+            <div class="key-row">
+              <input
+                type="text"
+                id="newKey"
+                placeholder="点击「🎲 随机」自动生成"
+                autocomplete="off"
+                readonly
+              />
+              <button class="btn btn-ghost" id="btnGenKey" type="button">
+                🎲 随机
+              </button>
+            </div>
+          </label>
+          <button class="btn btn-danger btn-block" id="btnSaveKey">
+            保存并全员下线
+          </button>
+        </div>
 
-      <div class="card">
-        <div class="card-title">📤 日志导出</div>
-        <div class="sub">
-          选择日期范围导出每日日志（合并为单个文件），单次最多 15
-          天，不可选择未来日期；无日志的日期会自动跳过。
+        <div class="card">
+          <div class="card-title">📤 日志导出</div>
+          <div class="sub">
+            选择日期范围导出每日日志（合并为单个文件），单次最多 15
+            天，不可选择未来日期；无日志的日期会自动跳过。
+          </div>
+          <div class="date-range-row">
+            <label class="field">
+              <span>开始日期</span>
+              <input type="date" id="logStart" />
+            </label>
+            <span class="date-range-sep">至</span>
+            <label class="field">
+              <span>结束日期</span>
+              <input type="date" id="logEnd" />
+            </label>
+          </div>
+          <button class="btn btn-primary btn-block" id="btnExportLog">
+            导出日志
+          </button>
         </div>
-        <div class="date-range-row">
-          <label class="field">
-            <span>开始日期</span>
-            <input type="date" id="logStart" />
-          </label>
-          <span class="date-range-sep">至</span>
-          <label class="field">
-            <span>结束日期</span>
-            <input type="date" id="logEnd" />
-          </label>
-        </div>
-        <button class="btn btn-primary" id="btnExportLog">导出日志</button>
       </div>
 
       <div class="card">
@@ -525,7 +656,10 @@
     <!-- 通用弹层（表单 / 确认） -->
     <div class="mask" id="mask">
       <div class="modal">
-        <h3 id="modalTitle"></h3>
+        <div class="modal-head">
+          <h3 id="modalTitle"></h3>
+          <span id="modalTitleExtra" class="modal-title-extra"></span>
+        </div>
         <div class="msg" id="modalMsg"></div>
         <div id="modalForm" style="margin-bottom: 16px"></div>
         <div class="btns">
@@ -534,6 +668,25 @@
         </div>
       </div>
     </div>
+
+    <!-- ================= 自定义日历面板（日志导出日期选择） ================= -->
+    <div class="cal-panel" id="calPanel">
+      <div class="cal-head">
+        <button type="button" class="cal-nav" id="calPrev" title="上个月">
+          ‹
+        </button>
+        <span class="cal-title" id="calTitle"></span>
+        <button type="button" class="cal-nav" id="calNext" title="下个月">
+          ›
+        </button>
+      </div>
+      <div class="cal-week">
+        <span>日</span><span>一</span><span>二</span><span>三</span
+        ><span>四</span><span>五</span><span>六</span>
+      </div>
+      <div class="cal-grid" id="calGrid"></div>
+    </div>
+
     <div class="toast" id="toast"></div>
 
     <!-- ================= 过滤规则模板弹窗 ================= -->
@@ -663,6 +816,9 @@
       function openModal(spec) {
         document.getElementById("modalTitle").textContent =
           spec.title || "提示";
+        // 标题右侧附加内容（如复选框），可选
+        var extraEl = document.getElementById("modalTitleExtra");
+        extraEl.innerHTML = spec.titleExtra || "";
         document.getElementById("modalMsg").innerHTML = spec.msg || "";
         var form = document.getElementById("modalForm");
         form.innerHTML = "";
@@ -890,6 +1046,10 @@
       document.getElementById("btnAddUser").onclick = function () {
         openModal({
           title: "添加用户",
+          // 标题右侧附加：添加为管理员复选框（字号小于标题）
+          titleExtra:
+            '<label for="mf_isAdmin" style="display:inline-flex;align-items:center;gap:6px;cursor:pointer">' +
+            '<input type="checkbox" id="mf_isAdmin" /> 添加为管理员</label>',
           fields: [
             {
               id: "username",
@@ -911,11 +1071,6 @@
               required: true,
               placeholder: "再次输入",
             },
-            {
-              id: "isAdmin",
-              label: "添加为管理员",
-              type: "checkbox",
-            },
           ],
           okText: "添加",
           onOk: function (v) {
@@ -923,10 +1078,12 @@
               return (toast("用户名和密码不能为空", true), false);
             if (v.pwd !== v.pwd2)
               return (toast("两次输入的密码不一致", true), false);
+            // 复选框在标题行，需单独读取
+            var isAdmin = document.getElementById("mf_isAdmin").checked;
             api("POST", "admin/users/add", {
               username: v.username,
               password: v.pwd,
-              role: v.isAdmin ? "admin" : "user",
+              role: isAdmin ? "admin" : "user",
             })
               .then(function (j) {
                 toast(j.message);
@@ -1106,19 +1263,150 @@
       };
 
       // ---------- 日志导出 ----------
+      // 本地时区日期串（YYYY-MM-DD）；toISOString 按 UTC 计算，UTC+8 凌晨会把今天算成昨天
+      function localDateStr(d) {
+        return (
+          d.getFullYear() +
+          "-" +
+          String(d.getMonth() + 1).padStart(2, "0") +
+          "-" +
+          String(d.getDate()).padStart(2, "0")
+        );
+      }
       // 日期选择器限制：不可选未来日期；默认结束日期为今天
       (function initLogDates() {
-        var today = new Date();
-        var todayStr = today.toISOString().slice(0, 10);
+        var todayStr = localDateStr(new Date());
         var startEl = document.getElementById("logStart");
         var endEl = document.getElementById("logEnd");
         startEl.max = todayStr;
         endEl.max = todayStr;
         endEl.value = todayStr;
         // 默认开始日期为 7 天前（不早于今天）
-        var weekAgo = new Date(today.getTime() - 6 * 86400000);
-        startEl.value = weekAgo.toISOString().slice(0, 10);
+        var weekAgo = new Date(Date.now() - 6 * 86400000);
+        startEl.value = localDateStr(weekAgo);
       })();
+
+      // ---------- 自定义日历（统一主题风格，替代原生日历弹层） ----------
+      var calPanel = document.getElementById("calPanel");
+      var calTarget = null; // 当前绑定的日期输入框
+      var calView = null; // 当前展示的年月 { y, m }
+
+      function calOpen(input) {
+        calTarget = input;
+        var v = input.value ? input.value.split("-") : null;
+        var now = new Date();
+        calView = v
+          ? { y: +v[0], m: +v[1] - 1 }
+          : { y: now.getFullYear(), m: now.getMonth() };
+        calRender();
+        calPanel.classList.add("show");
+        // 定位：默认贴输入框下方，空间不足放上方，左右夹在视口内
+        var rect = input.getBoundingClientRect();
+        var pw = calPanel.offsetWidth;
+        var ph = calPanel.offsetHeight;
+        var left = Math.min(Math.max(rect.left, 8), window.innerWidth - pw - 8);
+        var top = rect.bottom + 6;
+        if (top + ph > window.innerHeight - 8) {
+          top = Math.max(rect.top - ph - 6, 8);
+        }
+        calPanel.style.left = left + "px";
+        calPanel.style.top = top + "px";
+      }
+
+      function calClose() {
+        calPanel.classList.remove("show");
+        calTarget = null;
+      }
+
+      function calRender() {
+        var y = calView.y;
+        var m = calView.m;
+        document.getElementById("calTitle").textContent =
+          y + " 年 " + (m + 1) + " 月";
+        var now = new Date();
+        var todayStr = localDateStr(now);
+        var days = new Date(y, m + 1, 0).getDate(); // 本月天数
+        var firstDow = new Date(y, m, 1).getDay(); // 1 号是周几（0=周日）
+        var selected = calTarget && calTarget.value ? calTarget.value : "";
+        var html = "";
+        for (var i = 0; i < firstDow; i++) html += "<span></span>";
+        for (var d = 1; d <= days; d++) {
+          var ds =
+            y +
+            "-" +
+            String(m + 1).padStart(2, "0") +
+            "-" +
+            String(d).padStart(2, "0");
+          var cls =
+            "cal-day" +
+            (ds === todayStr ? " today" : "") +
+            (ds === selected ? " selected" : "");
+          html +=
+            '<button type="button" class="' +
+            cls +
+            '" data-d="' +
+            ds +
+            '"' +
+            (ds > todayStr ? " disabled" : "") +
+            ">" +
+            d +
+            "</button>";
+        }
+        document.getElementById("calGrid").innerHTML = html;
+        // 已是当前月则禁止翻向未来
+        document.getElementById("calNext").disabled =
+          y > now.getFullYear() ||
+          (y === now.getFullYear() && m >= now.getMonth());
+      }
+
+      document
+        .getElementById("calGrid")
+        .addEventListener("click", function (e) {
+          var btn = e.target.closest(".cal-day");
+          if (!btn || btn.disabled || !calTarget) return;
+          calTarget.value = btn.getAttribute("data-d");
+          calClose();
+        });
+      document.getElementById("calPrev").onclick = function () {
+        calView.m--;
+        if (calView.m < 0) {
+          calView.m = 11;
+          calView.y--;
+        }
+        calRender();
+      };
+      document.getElementById("calNext").onclick = function () {
+        calView.m++;
+        if (calView.m > 11) {
+          calView.m = 0;
+          calView.y++;
+        }
+        calRender();
+      };
+      // 日期输入框设为只读，点击弹出自定义日历（只读同时阻止原生日历弹出）
+      ["logStart", "logEnd"].forEach(function (id) {
+        var el = document.getElementById(id);
+        el.readOnly = true;
+        el.style.cursor = "pointer";
+        el.addEventListener("click", function () {
+          if (calTarget === el) calClose();
+          else calOpen(el);
+        });
+      });
+      // 点击面板外 / Esc / 滚动 / 缩放时关闭
+      document.addEventListener("click", function (e) {
+        if (!calTarget) return;
+        // 面板内、输入框本体及其所在 label 内的点击不关闭
+        if (calPanel.contains(e.target) || e.target === calTarget) return;
+        var label = calTarget.closest("label");
+        if (label && label.contains(e.target)) return;
+        calClose();
+      });
+      document.addEventListener("keydown", function (e) {
+        if (e.key === "Escape" && calTarget) calClose();
+      });
+      window.addEventListener("resize", calClose);
+      window.addEventListener("scroll", calClose, true);
 
       document.getElementById("btnExportLog").onclick = function () {
         var start = document.getElementById("logStart").value;
@@ -1129,13 +1417,12 @@
         }
         var sd = new Date(start);
         var ed = new Date(end);
-        var today = new Date();
-        today.setHours(0, 0, 0, 0);
         if (sd > ed) {
           toast("开始日期不能晚于结束日期", true);
           return;
         }
-        if (ed > today) {
+        // 与本地今天比较（同为 YYYY-MM-DD 字符串，可直接比较，无时区偏差）
+        if (end > localDateStr(new Date())) {
           toast("不能导出未来日期的日志", true);
           return;
         }
