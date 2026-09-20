@@ -182,6 +182,89 @@ class DownloadHandler(http.server.BaseHTTPRequestHandler):
         except Exception as e:
             debug_print(f"[HTTP] 页面发送失败（客户端可能已断开）: {e}")
 
+    def _handle_log_export(self):
+        """日志导出：按日期范围合并每日日志文件为单个 .log 文件下载。
+
+        查询参数：start=YYYY-MM-DD&end=YYYY-MM-DD
+        规则：起止日期均不可晚于今天；跨度不超过 15 天；无日志的日期自动跳过。
+        输出文件名：log_YYYYMMDD_HHMMSS.log（导出时刻的时间戳），
+        文件内每个日期前加一行日期分隔标记。
+        """
+        import datetime as _dt
+
+        today = _dt.date.today()
+        # 解析查询参数
+        query = urllib.parse.urlparse(self.path).query
+        params = urllib.parse.parse_qs(query)
+        start_str = (params.get('start') or [''])[0].strip()
+        end_str = (params.get('end') or [''])[0].strip()
+
+        if not start_str or not end_str:
+            self.send_json({'success': False, 'message': '请选择起止日期'}, 400)
+            return
+        try:
+            start_date = _dt.date.fromisoformat(start_str)
+            end_date = _dt.date.fromisoformat(end_str)
+        except ValueError:
+            self.send_json({'success': False, 'message': '日期格式不正确，应为 YYYY-MM-DD'}, 400)
+            return
+
+        if start_date > end_date:
+            self.send_json({'success': False, 'message': '开始日期不能晚于结束日期'}, 400)
+            return
+        if end_date > today:
+            self.send_json({'success': False, 'message': '不能导出未来日期的日志'}, 400)
+            return
+        span = (end_date - start_date).days + 1
+        if span > 15:
+            self.send_json({'success': False, 'message': '导出范围不能超过 15 天'}, 400)
+            return
+
+        # 逐日期读取日志文件并合并（无日志的日期跳过）
+        lines = []
+        exported_days = 0
+        cur = start_date
+        while cur <= end_date:
+            log_path = os.path.join(cfg.LOG_DIR, cur.isoformat() + '.log')
+            if os.path.isfile(log_path):
+                try:
+                    with open(log_path, 'r', encoding='utf-8') as f:
+                        content = f.read()
+                    if content:
+                        lines.append(f"===== {cur.isoformat()} =====\n")
+                        if not content.endswith('\n'):
+                            content += '\n'
+                        lines.append(content)
+                        exported_days += 1
+                except OSError as e:
+                    debug_print(f"[日志导出] 读取 {log_path} 失败: {e}")
+            cur += _dt.timedelta(days=1)
+
+        if exported_days == 0:
+            self.send_json({'success': False,
+                            'message': '所选日期范围内没有日志文件'}, 400)
+            return
+
+        merged = ''.join(lines)
+        body = merged.encode('utf-8')
+        # 文件名：log_YYYYMMDD_HHMMSS.log（导出时刻，东八区）
+        now = _dt.datetime.now()
+        filename = f"log_{now.strftime('%Y%m%d_%H%M%S')}.log"
+        log_info(f"管理员导出日志: {start_str} ~ {end_str}（{exported_days} 天，"
+                 f"{len(body)} 字节）")
+
+        try:
+            self.send_response(200)
+            self.send_header('Content-Type', 'text/plain; charset=utf-8')
+            self.send_header('Content-Length', str(len(body)))
+            self.send_header('Content-Disposition',
+                             f'attachment; filename="{filename}"')
+            self.send_header('Connection', 'close')
+            self.end_headers()
+            self.wfile.write(body)
+        except Exception as e:
+            debug_print(f"[HTTP] 日志文件发送失败: {e}")
+
     def handle(self):
         # IP 封禁检查：被封禁的 IP 直接断开连接，不返回任何响应
         # dual-stack 监听下 IPv4 客户端呈现为 ::ffff:1.2.3.4，统一规范化为纯 IPv4，
@@ -565,6 +648,12 @@ class DownloadHandler(http.server.BaseHTTPRequestHandler):
                     ],
                 },
             }})
+        elif path == '/admin/logs/export':
+            # 日志导出：按日期范围合并每日日志为单个文件下载
+            if not self._require_admin():
+                return
+            self._handle_log_export()
+            return
         elif path == '/tasks':
             with cfg.tasks_lock:
                 current_user = self.authenticated_user
@@ -1002,16 +1091,20 @@ class DownloadHandler(http.server.BaseHTTPRequestHandler):
                 elif path == '/admin/users/add':
                     username = self._get_param(data, 'username', 'user')
                     password = self._get_param(data, 'password', 'newPassword')
+                    # 角色：默认下载用户；勾选「添加为管理员」时 role='admin'
+                    role_raw = self._get_param(data, 'role', 'isAdmin', 'is_admin')
+                    role = 'admin' if str(role_raw).lower() in ('1', 'true', 'admin') else 'user'
                     if not username or not password:
                         self.send_json({'success': False, 'message': '用户名和密码不能为空'}, 400)
                         return
                     try:
-                        data_db.add_user(username, password, role='user')
+                        data_db.add_user(username, password, role=role)
                     except ValueError as e:
                         self.send_json({'success': False, 'message': str(e)}, 400)
                         return
-                    log_info(f"管理员添加用户: {username}")
-                    self.send_json({'success': True, 'message': f'已添加用户: {username}'})
+                    role_label = '管理员' if role == 'admin' else '下载用户'
+                    log_info(f"管理员添加{role_label}: {username}")
+                    self.send_json({'success': True, 'message': f'已添加{role_label}: {username}'})
                 elif path == '/admin/users/delete':
                     username = self._get_param(data, 'username', 'user')
                     if not username:

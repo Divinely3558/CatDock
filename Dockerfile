@@ -13,7 +13,7 @@ RUN sed -i 's/deb.debian.org/mirrors.tuna.tsinghua.edu.cn/g' /etc/apt/sources.li
     echo "Asia/Shanghai" > /etc/timezone
 
 RUN useradd -m -s /bin/bash downloader && \
-    mkdir -p /home/downloader/downloads /home/downloader/temp /home/downloader/config /home/downloader/user && \
+    mkdir -p /home/downloader/downloads /home/downloader/temp /home/downloader/config /home/downloader/config/log /home/downloader/user && \
     chown -R downloader:downloader /home/downloader
 
 WORKDIR /home/downloader

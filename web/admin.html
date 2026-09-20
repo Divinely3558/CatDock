@@ -123,15 +123,18 @@
         padding: 9px 10px;
         border-bottom: 1px solid var(--border);
         white-space: nowrap;
+        vertical-align: middle;
       }
       th {
         color: var(--text-2);
         font-weight: 600;
         font-size: 12px;
       }
-      td.actions {
+      /* 操作列按钮组：用内层 div 做 flex，避免 td 设 display:flex 破坏表格行边框对齐 */
+      td.actions .action-btns {
         display: flex;
         gap: 6px;
+        align-items: center;
       }
       .badge {
         display: inline-block;
@@ -164,6 +167,34 @@
       .key-row input {
         flex: 1;
         min-width: 0;
+      }
+      /* 日志导出：起止日期横向排列，中间用「至」连接，移动端自动换行 */
+      .date-range-row {
+        display: flex;
+        align-items: flex-end;
+        gap: 10px;
+        margin-bottom: 12px;
+      }
+      .date-range-row .field {
+        flex: 1;
+        min-width: 0;
+        margin-bottom: 0;
+      }
+      .date-range-sep {
+        flex: none;
+        font-size: 13px;
+        color: var(--text-2);
+        padding-bottom: 10px;
+      }
+      @media (max-width: 480px) {
+        .date-range-row {
+          flex-direction: column;
+          align-items: stretch;
+        }
+        .date-range-sep {
+          padding: 0;
+          text-align: center;
+        }
       }
       .warn-box {
         background: var(--amber-soft);
@@ -295,10 +326,18 @@
       <div class="card">
         <div class="card-title">👥 用户管理</div>
         <div class="sub">
-          管理下载用户；管理员账户请在容器内使用
-          <code>adminctl</code> 命令行工具管理。
+          管理下载用户与管理员账户；勾选「添加为管理员」可创建管理员账户，管理员的改密、删除仍需在容器内使用
+          <code>adminctl</code> 命令行工具操作。
         </div>
-        <div style="margin-bottom: 12px">
+        <div
+          style="
+            margin-bottom: 12px;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            flex-wrap: wrap;
+          "
+        >
           <button class="btn btn-primary" id="btnAddUser">➕ 添加用户</button>
           <button class="btn btn-ghost" id="btnRefresh">🔄 刷新</button>
         </div>
@@ -369,6 +408,26 @@
         <button class="btn btn-danger btn-block" id="btnSaveKey">
           保存并全员下线
         </button>
+      </div>
+
+      <div class="card">
+        <div class="card-title">📤 日志导出</div>
+        <div class="sub">
+          选择日期范围导出每日日志（合并为单个文件），单次最多 15
+          天，不可选择未来日期；无日志的日期会自动跳过。
+        </div>
+        <div class="date-range-row">
+          <label class="field">
+            <span>开始日期</span>
+            <input type="date" id="logStart" />
+          </label>
+          <span class="date-range-sep">至</span>
+          <label class="field">
+            <span>结束日期</span>
+            <input type="date" id="logEnd" />
+          </label>
+        </div>
+        <button class="btn btn-primary" id="btnExportLog">导出日志</button>
       </div>
 
       <div class="card">
@@ -610,16 +669,34 @@
         (spec.fields || []).forEach(function (f) {
           var lab = document.createElement("label");
           lab.className = "field";
-          var span = document.createElement("span");
-          span.textContent = f.label;
-          if (f.required) span.innerHTML += '<span class="req">*</span>';
-          var inp = document.createElement("input");
-          inp.type = f.type || "text";
-          inp.id = "mf_" + f.id;
-          inp.placeholder = f.placeholder || "";
-          inp.autocomplete = "off";
-          lab.appendChild(span);
-          lab.appendChild(inp);
+          if (f.type === "checkbox") {
+            // 复选框：勾选框与文字同行排列
+            lab.style.display = "flex";
+            lab.style.alignItems = "center";
+            lab.style.gap = "8px";
+            var inp = document.createElement("input");
+            inp.type = "checkbox";
+            inp.id = "mf_" + f.id;
+            inp.style.width = "auto";
+            inp.style.cursor = "pointer";
+            if (f.checked) inp.checked = true;
+            var span = document.createElement("span");
+            span.textContent = f.label;
+            span.style.marginBottom = "0";
+            lab.appendChild(inp);
+            lab.appendChild(span);
+          } else {
+            var span = document.createElement("span");
+            span.textContent = f.label;
+            if (f.required) span.innerHTML += '<span class="req">*</span>';
+            var inp = document.createElement("input");
+            inp.type = f.type || "text";
+            inp.id = "mf_" + f.id;
+            inp.placeholder = f.placeholder || "";
+            inp.autocomplete = "off";
+            lab.appendChild(span);
+            lab.appendChild(inp);
+          }
           form.appendChild(lab);
         });
         var okBtn = document.getElementById("modalOk");
@@ -634,7 +711,9 @@
           var values = {};
           for (var i = 0; i < (spec.fields || []).length; i++) {
             var f = spec.fields[i];
-            values[f.id] = document.getElementById("mf_" + f.id).value.trim();
+            var inp = document.getElementById("mf_" + f.id);
+            values[f.id] =
+              f.type === "checkbox" ? inp.checked : inp.value.trim();
           }
           if (spec.onOk && spec.onOk(values) === false) return;
           closeModal();
@@ -681,14 +760,16 @@
           var actions = "";
           if (!isAdmin) {
             actions =
+              '<div class="action-btns">' +
               '<button class="btn btn-ghost small" data-act="pwd">改密</button>' +
               (u.disabled
                 ? '<button class="btn btn-ghost small" data-act="unban">解禁</button>'
                 : '<button class="btn btn-ghost small" data-act="ban">禁用</button>') +
-              '<button class="btn btn-danger small" data-act="del">删除</button>';
+              '<button class="btn btn-danger small" data-act="del">删除</button>' +
+              "</div>";
           } else {
             actions =
-              '<span style="color:var(--text-3);font-size:12px">命令行管理</span>';
+              '<div class="action-btns"><span style="color:var(--text-3);font-size:12px">命令行管理</span></div>';
           }
           tr.innerHTML =
             "<td><strong>" +
@@ -808,7 +889,7 @@
       };
       document.getElementById("btnAddUser").onclick = function () {
         openModal({
-          title: "添加下载用户",
+          title: "添加用户",
           fields: [
             {
               id: "username",
@@ -830,6 +911,11 @@
               required: true,
               placeholder: "再次输入",
             },
+            {
+              id: "isAdmin",
+              label: "添加为管理员",
+              type: "checkbox",
+            },
           ],
           okText: "添加",
           onOk: function (v) {
@@ -840,6 +926,7 @@
             api("POST", "admin/users/add", {
               username: v.username,
               password: v.pwd,
+              role: v.isAdmin ? "admin" : "user",
             })
               .then(function (j) {
                 toast(j.message);
@@ -890,7 +977,9 @@
             (REASON_BADGE[b.reason] || esc(b.reason)) +
             "</td>" +
             '<td class="actions">' +
+            '<div class="action-btns">' +
             '<button class="btn btn-danger small" data-act="del">解封</button>' +
+            "</div>" +
             "</td>";
           tr.querySelector("td.actions").addEventListener(
             "click",
@@ -1014,6 +1103,89 @@
               });
           },
         });
+      };
+
+      // ---------- 日志导出 ----------
+      // 日期选择器限制：不可选未来日期；默认结束日期为今天
+      (function initLogDates() {
+        var today = new Date();
+        var todayStr = today.toISOString().slice(0, 10);
+        var startEl = document.getElementById("logStart");
+        var endEl = document.getElementById("logEnd");
+        startEl.max = todayStr;
+        endEl.max = todayStr;
+        endEl.value = todayStr;
+        // 默认开始日期为 7 天前（不早于今天）
+        var weekAgo = new Date(today.getTime() - 6 * 86400000);
+        startEl.value = weekAgo.toISOString().slice(0, 10);
+      })();
+
+      document.getElementById("btnExportLog").onclick = function () {
+        var start = document.getElementById("logStart").value;
+        var end = document.getElementById("logEnd").value;
+        if (!start || !end) {
+          toast("请选择起止日期", true);
+          return;
+        }
+        var sd = new Date(start);
+        var ed = new Date(end);
+        var today = new Date();
+        today.setHours(0, 0, 0, 0);
+        if (sd > ed) {
+          toast("开始日期不能晚于结束日期", true);
+          return;
+        }
+        if (ed > today) {
+          toast("不能导出未来日期的日志", true);
+          return;
+        }
+        var span = Math.round((ed - sd) / 86400000) + 1;
+        if (span > 15) {
+          toast("导出范围不能超过 15 天", true);
+          return;
+        }
+        var btn = document.getElementById("btnExportLog");
+        btn.disabled = true;
+        var url =
+          BASE +
+          "admin/logs/export?start=" +
+          encodeURIComponent(start) +
+          "&end=" +
+          encodeURIComponent(end);
+        fetch(url, {
+          headers: { Authorization: token ? "Bearer " + token : "" },
+        })
+          .then(function (resp) {
+            if (resp.status === 403 || resp.status === 401) {
+              backToLogin();
+              throw new Error("未登录或登录已过期");
+            }
+            if (!resp.ok) {
+              return resp.json().then(function (j) {
+                throw new Error(j.message || "导出失败");
+              });
+            }
+            return resp.blob().then(function (blob) {
+              // 从 Content-Disposition 提取文件名，取不到则用默认名
+              var cd = resp.headers.get("Content-Disposition") || "";
+              var m = cd.match(/filename="?([^";]+)"?/);
+              var filename = m ? m[1] : "log_export.log";
+              var a = document.createElement("a");
+              a.href = URL.createObjectURL(blob);
+              a.download = filename;
+              document.body.appendChild(a);
+              a.click();
+              document.body.removeChild(a);
+              URL.revokeObjectURL(a.href);
+              toast("日志已导出：" + filename);
+            });
+          })
+          .catch(function (e) {
+            toast(e.message, true);
+          })
+          .finally(function () {
+            btn.disabled = false;
+          });
       };
 
       // ---------- 顶栏账号菜单（展开/互斥/点外关闭由 shared.js 接管） ----------

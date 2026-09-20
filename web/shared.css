@@ -180,6 +180,7 @@ label.field > span .req {
 }
 input[type="text"],
 input[type="password"],
+input[type="date"],
 textarea,
 select {
   width: 100%;
@@ -194,12 +195,30 @@ select {
   transition:
     border-color 0.15s,
     box-shadow 0.15s;
+  box-sizing: border-box;
 }
 input:focus,
 textarea:focus,
 select:focus {
   border-color: var(--primary);
   box-shadow: 0 0 0 3px var(--focus-ring);
+}
+/* 日期输入框：与文本输入框视觉统一，原生日历图标随主题变色并保持可点击 */
+input[type="date"] {
+  -webkit-appearance: none;
+  appearance: none;
+}
+input[type="date"]::-webkit-calendar-picker-indicator {
+  cursor: pointer;
+  opacity: 0.6;
+  filter: var(--date-icon-filter, none);
+}
+input[type="date"]::-webkit-calendar-picker-indicator:hover {
+  opacity: 1;
+}
+/* 暗色模式下日历图标反色，避免深色背景上看不清 */
+:root[data-mode="dark"] input[type="date"]::-webkit-calendar-picker-indicator {
+  filter: invert(1) brightness(1.4);
 }
 textarea {
   resize: vertical;

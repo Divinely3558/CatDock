@@ -43,6 +43,8 @@ ADMIN_CONFIG_FILE = os.path.join(CONFIG_DIR, 'admin_config.json')
 # 全局 filter_rules.json 仅作为新用户首启的过滤规则模板；
 # 下载用户实际读取 user/<名>/filter_rules.json（各自独立）
 FILTER_RULES_FILE = os.path.join(CONFIG_DIR, 'filter_rules.json')
+# 每日日志目录（与 config 同级的 log 子目录），按日期生成 YYYY-MM-DD.log
+LOG_DIR = os.path.join(CONFIG_DIR, 'log')
 # 调试模式运行时状态文件（/tmp 非挂载卷，容器重启即清空）：
 # debug 命令经 SIGUSR1/SIGUSR2 通知服务切换后写此文件，供 CLI 查询当前状态
 DEBUG_STATE_FILE = '/tmp/catdock_debug.state'

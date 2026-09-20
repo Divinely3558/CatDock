@@ -7,7 +7,7 @@ echo "  catdock 启动中..."
 echo "======================================"
 
 # 确保目录存在（user/ 为每用户配置目录：tasks.json / 日志 / filter_rules.json）
-mkdir -p /home/downloader/config /home/downloader/user /home/downloader/temp /home/downloader/downloads
+mkdir -p /home/downloader/config /home/downloader/config/log /home/downloader/user /home/downloader/temp /home/downloader/downloads
 
 # 系统级配置（URL_PREFIX/API_PORT/DEBUG 等）全部由 docker-compose.yml 环境变量提供，
 # 不再使用 config.json；此处仅初始化管理员热配置与过滤规则模板
