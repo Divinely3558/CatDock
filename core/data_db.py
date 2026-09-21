@@ -1,9 +1,15 @@
 #!/usr/bin/env python3
-"""catdock 数据库模块 (data.db)
+"""catdock 数据库模块
 
-使用 SQLite 持久化存储：
+支持两种持久化后端，由环境变量 DATABASE_URL 决定：
+  - 未设置 DATABASE_URL（默认）：SQLite，数据库文件 config/data.db，零外部依赖
+  - DATABASE_URL=mysql://用户:密码@主机:3306/库名：MySQL（目标库需提前建好、
+    账号有建表权限），切换后端视为全新部署，不做自动数据迁移
+
+持久化存储：
   - 认证失败计数与封禁 IP 列表
   - 下载用户及其密码（哈希+盐）
+  - 访问令牌登记（jti，支撑服务端主动吊销）
 
 服务端（main.py / api_server.py）与 CLI 工具（banip / userctl）共用本模块。
 
@@ -42,7 +48,7 @@ AUTH_FAILURE_WINDOW_MINUTES = 10
 # 自动封禁时长：auto 封禁在 N 分钟后自动解封（manual 手动封禁仍为永久）
 BAN_DURATION_MINUTES = 30
 
-# 数据库文件路径：固定为容器内 config 目录（/home/downloader/config）
+# 数据库文件路径（SQLite 后端）：固定为容器内 config 目录（/home/downloader/config）
 # 服务端会通过 set_db_path() 覆盖为 CONFIG_DIR 下路径，CLI 直接使用此默认路径
 DB_PATH = '/home/downloader/config/data.db'
 
@@ -55,13 +61,79 @@ _PBKDF2_ITERATIONS = 100000
 _db_lock = threading.Lock()
 _db_conn = None
 
+# ============ 后端选择（DATABASE_URL）============
+
+# 当前后端：'sqlite'（默认）/ 'mysql'
+_BACKEND = 'sqlite'
+# MySQL 连接配置（_parse_database_url 解析结果）
+_MYSQL_CFG = None
+# 当前后端的唯一约束异常类（save_auth_token 按后端兼容）
+_IntegrityError = sqlite3.IntegrityError
+
+
+def _parse_database_url(url):
+    """解析 mysql://用户:密码@主机:端口/库名 为 PyMySQL 连接配置字典。
+
+    也兼容 mysql+pymysql:// 写法。用户/密码做 URL 解码，端口默认 3306。
+    """
+    from urllib.parse import urlparse, unquote
+    parsed = urlparse(url)
+    database = parsed.path.lstrip('/')
+    if not parsed.hostname:
+        raise RuntimeError("DATABASE_URL 缺少主机名，正确格式: "
+                           "mysql://用户:密码@主机:3306/库名")
+    if not database:
+        raise RuntimeError("DATABASE_URL 缺少数据库名，正确格式: "
+                           "mysql://用户:密码@主机:3306/库名")
+    return {
+        'user': unquote(parsed.username) if parsed.username else None,
+        'password': unquote(parsed.password) if parsed.password is not None else '',
+        'host': parsed.hostname,
+        'port': parsed.port or 3306,
+        'database': database,
+        'charset': 'utf8mb4',
+    }
+
+
+def _configure_backend():
+    """模块导入时按 DATABASE_URL 选择后端；配置非法立即报错（fail-fast）。"""
+    global _BACKEND, _MYSQL_CFG
+    url = os.environ.get('DATABASE_URL', '').strip()
+    if not url:
+        _BACKEND = 'sqlite'
+        return
+    if url.startswith('mysql://') or url.startswith('mysql+pymysql://'):
+        _BACKEND = 'mysql'
+        _MYSQL_CFG = _parse_database_url(url)
+        return
+    raise RuntimeError(
+        f"不支持的 DATABASE_URL 方案: {url.split('://', 1)[0]}；"
+        "目前仅支持 mysql://，不设置 DATABASE_URL 则默认使用 SQLite")
+
+
+_configure_backend()
+
+
+def _masked_database_url():
+    """返回脱敏后的 MySQL 连接串（密码替换为 ***），供日志/CLI 报错使用。"""
+    c = _MYSQL_CFG
+    return f"mysql://{c['user'] or ''}:***@{c['host']}:{c['port']}/{c['database']}"
+
+
+def db_location():
+    """当前数据库位置描述：MySQL 返回脱敏连接串，SQLite 返回文件路径。"""
+    return _masked_database_url() if _BACKEND == 'mysql' else DB_PATH
+
 
 def set_db_path(path):
-    """设置数据库文件路径，并重置连接以便下次访问时使用新路径。
+    """设置 SQLite 数据库文件路径，并重置连接以便下次访问时使用新路径。
 
     服务端在 load_config 中调用，确保 .db 位于 config 目录。
+    MySQL 后端下数据库位置由 DATABASE_URL 决定，此项无意义，直接忽略。
     """
     global DB_PATH, _db_conn
+    if _BACKEND == 'mysql':
+        return
     with _db_lock:
         DB_PATH = path
         if _db_conn is not None:
@@ -72,8 +144,179 @@ def set_db_path(path):
             _db_conn = None
 
 
+# ---------- 建表语句（两套方言）----------
+
+# IP 列按 IPv6 最长 45 字符预留；用户名最长 64；密码哈希串约 120 字符。
+_SQLITE_TABLES = [
+    """
+    CREATE TABLE IF NOT EXISTS failed_attempts (
+        ip TEXT PRIMARY KEY,
+        count INTEGER DEFAULT 0,
+        last_attempt_time TEXT
+    )
+    """,
+    """
+    CREATE TABLE IF NOT EXISTS banned_ips (
+        ip TEXT PRIMARY KEY,
+        banned_at TEXT,
+        reason TEXT
+    )
+    """,
+    """
+    CREATE TABLE IF NOT EXISTS users (
+        username TEXT PRIMARY KEY,
+        password_hash TEXT NOT NULL,
+        created_at TEXT,
+        role TEXT NOT NULL DEFAULT 'user',
+        disabled INTEGER NOT NULL DEFAULT 0
+    )
+    """,
+    # IP 阶梯封禁统计：记录每个 IP 历史触发"自动封禁"的次数，
+    # 第 1 次触发 = 临时封禁（reason='auto'，30 分钟自动解封），
+    # 第 2 次触发 = 永久封禁（reason='auto_perm'，只能 banip del 解除）。
+    # 认证成功清零；临时封禁到期不清除（保留升级计数）。
+    """
+    CREATE TABLE IF NOT EXISTS ip_ban_stats (
+        ip TEXT PRIMARY KEY,
+        temp_ban_count INTEGER DEFAULT 0,
+        last_ban_time TEXT
+    )
+    """,
+    # 账号级失败计数：密码错误累计达 MAX_ACCOUNT_FAILURES 次后自动禁用账号
+    """
+    CREATE TABLE IF NOT EXISTS account_failures (
+        username TEXT PRIMARY KEY,
+        count INTEGER DEFAULT 0,
+        last_attempt_time TEXT
+    )
+    """,
+    # 访问令牌登记表：支撑服务端主动吊销（POST /logout 单令牌吊销、
+    # 改密码/删用户全端下线）。签名仍无状态，吊销状态以本表为准。
+    """
+    CREATE TABLE IF NOT EXISTS auth_tokens (
+        jti TEXT PRIMARY KEY,
+        username TEXT NOT NULL,
+        expires_at INTEGER NOT NULL,
+        revoked INTEGER DEFAULT 0,
+        created_at TEXT
+    )
+    """,
+    "CREATE INDEX IF NOT EXISTS idx_auth_tokens_username ON auth_tokens(username)",
+    "CREATE INDEX IF NOT EXISTS idx_auth_tokens_expires ON auth_tokens(expires_at)",
+]
+
+# MySQL：TEXT 不能做主键，故用 VARCHAR；expires_at 用 BIGINT 避开 2038；
+# 布尔字段用 TINYINT；索引内联在建表语句中（MySQL 的 CREATE INDEX 不支持 IF NOT EXISTS）。
+_MYSQL_TABLES = [
+    """
+    CREATE TABLE IF NOT EXISTS failed_attempts (
+        ip VARCHAR(45) PRIMARY KEY,
+        count INT DEFAULT 0,
+        last_attempt_time VARCHAR(19)
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+    """,
+    """
+    CREATE TABLE IF NOT EXISTS banned_ips (
+        ip VARCHAR(45) PRIMARY KEY,
+        banned_at VARCHAR(19),
+        reason VARCHAR(20)
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+    """,
+    """
+    CREATE TABLE IF NOT EXISTS users (
+        username VARCHAR(64) PRIMARY KEY,
+        password_hash VARCHAR(255) NOT NULL,
+        created_at VARCHAR(19),
+        role VARCHAR(10) NOT NULL DEFAULT 'user',
+        disabled TINYINT NOT NULL DEFAULT 0
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+    """,
+    """
+    CREATE TABLE IF NOT EXISTS ip_ban_stats (
+        ip VARCHAR(45) PRIMARY KEY,
+        temp_ban_count INT DEFAULT 0,
+        last_ban_time VARCHAR(19)
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+    """,
+    """
+    CREATE TABLE IF NOT EXISTS account_failures (
+        username VARCHAR(64) PRIMARY KEY,
+        count INT DEFAULT 0,
+        last_attempt_time VARCHAR(19)
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+    """,
+    """
+    CREATE TABLE IF NOT EXISTS auth_tokens (
+        jti VARCHAR(64) PRIMARY KEY,
+        username VARCHAR(64) NOT NULL,
+        expires_at BIGINT NOT NULL,
+        revoked TINYINT DEFAULT 0,
+        created_at VARCHAR(19),
+        INDEX idx_auth_tokens_username (username),
+        INDEX idx_auth_tokens_expires (expires_at)
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+    """,
+]
+
+
+# SQLite UPSERT：ON CONFLICT(col) DO UPDATE SET ... → MySQL：ON DUPLICATE KEY UPDATE ...
+_UPSERT_RE = re.compile(r'ON CONFLICT\([^)]*\) DO UPDATE SET ', re.IGNORECASE)
+
+
+def _to_mysql_sql(sql):
+    """把业务层统一书写的 SQLite 方言 SQL 转成 MySQL 方言：
+
+      - INSERT OR REPLACE → REPLACE
+      - ON CONFLICT(...) DO UPDATE SET / excluded.col → ON DUPLICATE KEY UPDATE / VALUES(col)
+      - 占位符 ? → %s
+    """
+    if sql.lstrip().upper().startswith('INSERT OR REPLACE'):
+        stripped = sql.lstrip()
+        lead = sql[:len(sql) - len(stripped)]
+        sql = lead + 'REPLACE' + stripped[len('INSERT OR REPLACE'):]
+    m = _UPSERT_RE.search(sql)
+    if m:
+        sql = sql[:m.start()] + 'ON DUPLICATE KEY UPDATE ' + sql[m.end():]
+        sql = re.sub(r'excluded\.(\w+)', r'VALUES(\1)', sql, flags=re.IGNORECASE)
+    return sql.replace('?', '%s')
+
+
+class _MySQLConn:
+    """PyMySQL 原始连接的薄封装：execute 时做方言转换，其余方法透传。
+
+    业务层因此可对两种后端使用同一套 SQL 与同样的调用方式。
+    """
+
+    def __init__(self, raw):
+        self._raw = raw
+
+    def execute(self, sql, args=None):
+        # PyMySQL 与 sqlite3 不同：SQL 经游标执行，这里统一创建并返回游标，
+        # 使业务层 conn.execute(...).fetchone() 的写法对两种后端一致。
+        cursor = self._raw.cursor()
+        cursor.execute(_to_mysql_sql(sql), args)
+        return cursor
+
+    def commit(self):
+        self._raw.commit()
+
+    def close(self):
+        self._raw.close()
+
+    def ping(self):
+        # MySQL 服务端 wait_timeout 会回收空闲连接，访问前自愈
+        self._raw.ping(reconnect=True)
+
+
 def _get_conn():
     """获取（懒加载）数据库连接，自动建表"""
+    if _BACKEND == 'mysql':
+        return _get_mysql_conn()
+    return _get_sqlite_conn()
+
+
+def _get_sqlite_conn():
+    """SQLite 连接（懒加载）：WAL 调优 + 自动建表"""
     global _db_conn
     if _db_conn is None:
         # 确保目录存在
@@ -90,64 +333,41 @@ def _get_conn():
         # WAL 模式下让 checkpoint 自动运行，避免 -wal 文件无限增长
         _db_conn.execute("PRAGMA wal_autocheckpoint=1000")
         _db_conn.execute("PRAGMA synchronous=NORMAL")
-        _db_conn.execute("""
-            CREATE TABLE IF NOT EXISTS failed_attempts (
-                ip TEXT PRIMARY KEY,
-                count INTEGER DEFAULT 0,
-                last_attempt_time TEXT
-            )
-        """)
-        _db_conn.execute("""
-            CREATE TABLE IF NOT EXISTS banned_ips (
-                ip TEXT PRIMARY KEY,
-                banned_at TEXT,
-                reason TEXT
-            )
-        """)
-        _db_conn.execute("""
-            CREATE TABLE IF NOT EXISTS users (
-                username TEXT PRIMARY KEY,
-                password_hash TEXT NOT NULL,
-                created_at TEXT,
-                role TEXT NOT NULL DEFAULT 'user',
-                disabled INTEGER NOT NULL DEFAULT 0
-            )
-        """)
-        # IP 阶梯封禁统计：记录每个 IP 历史触发"自动封禁"的次数，
-        # 第 1 次触发 = 临时封禁（reason='auto'，30 分钟自动解封），
-        # 第 2 次触发 = 永久封禁（reason='auto_perm'，只能 banip del 解除）。
-        # 认证成功清零；临时封禁到期不清除（保留升级计数）。
-        _db_conn.execute("""
-            CREATE TABLE IF NOT EXISTS ip_ban_stats (
-                ip TEXT PRIMARY KEY,
-                temp_ban_count INTEGER DEFAULT 0,
-                last_ban_time TEXT
-            )
-        """)
-        # 账号级失败计数：密码错误累计达 MAX_ACCOUNT_FAILURES 次后自动禁用账号
-        _db_conn.execute("""
-            CREATE TABLE IF NOT EXISTS account_failures (
-                username TEXT PRIMARY KEY,
-                count INTEGER DEFAULT 0,
-                last_attempt_time TEXT
-            )
-        """)
-        # 访问令牌登记表：支撑服务端主动吊销（POST /logout 单令牌吊销、
-        # 改密码/删用户全端下线）。签名仍无状态，吊销状态以本表为准。
-        _db_conn.execute("""
-            CREATE TABLE IF NOT EXISTS auth_tokens (
-                jti TEXT PRIMARY KEY,
-                username TEXT NOT NULL,
-                expires_at INTEGER NOT NULL,
-                revoked INTEGER DEFAULT 0,
-                created_at TEXT
-            )
-        """)
-        _db_conn.execute(
-            "CREATE INDEX IF NOT EXISTS idx_auth_tokens_username ON auth_tokens(username)")
-        _db_conn.execute(
-            "CREATE INDEX IF NOT EXISTS idx_auth_tokens_expires ON auth_tokens(expires_at)")
+        for stmt in _SQLITE_TABLES:
+            _db_conn.execute(stmt)
         _db_conn.commit()
+    return _db_conn
+
+
+def _get_mysql_conn():
+    """MySQL 连接（懒加载）：自动建表；连接已存在时先 ping 自愈。"""
+    global _db_conn, _IntegrityError
+    if _db_conn is None:
+        try:
+            import pymysql
+        except ImportError as e:
+            raise RuntimeError(
+                "使用 MySQL 后端需要 PyMySQL（容器镜像已内置 python3-pymysql）") from e
+        params = dict(_MYSQL_CFG)
+        params['connect_timeout'] = 10
+        try:
+            raw_conn = pymysql.connect(**params)
+        except RuntimeError as e:
+            # MySQL 8 默认 caching_sha2_password：服务端无该用户认证缓存时，
+            # 完整认证路径需要 cryptography（镜像已内置 python3-cryptography）
+            if 'cryptography' in str(e):
+                raise RuntimeError(
+                    "MySQL 服务器使用 caching_sha2_password 认证，需要 cryptography 包；"
+                    "请使用包含 python3-cryptography 的新镜像（重新 docker compose build），"
+                    "或将该账号改为 mysql_native_password 认证") from e
+            raise
+        _db_conn = _MySQLConn(raw_conn)
+        _IntegrityError = pymysql.err.IntegrityError
+        for stmt in _MYSQL_TABLES:
+            _db_conn.execute(stmt)
+        _db_conn.commit()
+    else:
+        _db_conn.ping()
     return _db_conn
 
 
@@ -644,7 +864,7 @@ def save_auth_token(jti, username, expires_at):
             )
             conn.commit()
             return True
-        except sqlite3.IntegrityError:
+        except _IntegrityError:
             return False
 
 
@@ -723,7 +943,7 @@ def _cmd_show():
         rows = list_banned_ips()
     except Exception as e:
         print(f"读取封禁列表失败: {e}", file=sys.stderr)
-        print(f"数据库路径: {DB_PATH}", file=sys.stderr)
+        print(f"数据库: {db_location()}", file=sys.stderr)
         return 1
 
     if not rows:
@@ -762,7 +982,7 @@ def _cmd_add(args):
         add_banned_ip(ip)
     except Exception as e:
         print(f"添加封禁 IP 失败: {e}", file=sys.stderr)
-        print(f"数据库路径: {DB_PATH}", file=sys.stderr)
+        print(f"数据库: {db_location()}", file=sys.stderr)
         return 1
 
     print(f"已封禁 IP: {ip}")
@@ -784,7 +1004,7 @@ def _cmd_del(args):
         remove_banned_ip(ip)
     except Exception as e:
         print(f"删除封禁 IP 失败: {e}", file=sys.stderr)
-        print(f"数据库路径: {DB_PATH}", file=sys.stderr)
+        print(f"数据库: {db_location()}", file=sys.stderr)
         return 1
 
     print(f"已解封 IP: {ip}")

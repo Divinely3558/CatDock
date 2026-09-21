@@ -5,6 +5,8 @@ RUN sed -i 's/deb.debian.org/mirrors.tuna.tsinghua.edu.cn/g' /etc/apt/sources.li
     apt-get update && apt-get install -y --no-install-recommends \
     ffmpeg \
     python3 \
+    python3-pymysql \
+    python3-cryptography \
     curl \
     iputils-ping \
     tzdata \

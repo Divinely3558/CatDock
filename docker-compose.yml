@@ -20,6 +20,9 @@ services:
       - 114.114.114.114
       - 119.29.29.29
     environment:
+      # 数据库后端：不配置 DATABASE_URL 默认使用 SQLite（config/data.db，零外部依赖）
+      # 配置后切换为 MySQL（目标库需提前建好、账号有建表权限；切换后端视为全新部署，不自动迁移数据）：
+      # - DATABASE_URL=mysql://catdock:你的密码@192.168.123.2:3306/catdock
       # AUTH_KEY 存放在 config/admin_config.json（首启自动生成，管理网页可热更新），无需在此配置
       - URL_PREFIX=qj52lajx
       # host 模式下容器直接占用宿主端口，原 ports 5000:8080 改由此指定
