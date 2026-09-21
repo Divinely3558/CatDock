@@ -74,7 +74,7 @@ def _cmd_add(args):
         return 1
     except Exception as e:
         print(f"添加管理员失败: {e}", file=sys.stderr)
-        print(f"数据库路径: {data_db.DB_PATH}", file=sys.stderr)
+        print(f"数据库: {data_db.db_location()}", file=sys.stderr)
         return 1
     print(f"已添加管理员: {username}")
     return 0
@@ -93,13 +93,16 @@ def _cmd_del(args):
         print(f"错误: {username} 不是管理员（普通用户请使用 userctl del）", file=sys.stderr)
         return 1
     try:
-        data_db.del_user(username)
+        removed = data_db.del_user(username)
     except ValueError as e:
         print(f"错误: {e}", file=sys.stderr)
         return 1
     except Exception as e:
         print(f"删除管理员失败: {e}", file=sys.stderr)
-        print(f"数据库路径: {data_db.DB_PATH}", file=sys.stderr)
+        print(f"数据库: {data_db.db_location()}", file=sys.stderr)
+        return 1
+    if not removed:
+        print(f"错误: 管理员不存在: {username}", file=sys.stderr)
         return 1
     print(f"已删除管理员: {username}")
     return 0
@@ -110,8 +113,12 @@ def _cmd_password(args):
         print("用法: adminctl password <用户名>", file=sys.stderr)
         return 1
     username = args[0].strip()
-    if data_db.user_role(username) != 'admin':
+    role = data_db.user_role(username)
+    if role is None:
         print(f"错误: 管理员不存在: {username}", file=sys.stderr)
+        return 1
+    if role != 'admin':
+        print(f"错误: {username} 不是管理员（普通用户请使用 userctl password 修改密码）", file=sys.stderr)
         return 1
     password = _prompt_password("新密码")
     if password is None:
@@ -123,7 +130,7 @@ def _cmd_password(args):
         return 1
     except Exception as e:
         print(f"修改密码失败: {e}", file=sys.stderr)
-        print(f"数据库路径: {data_db.DB_PATH}", file=sys.stderr)
+        print(f"数据库: {data_db.db_location()}", file=sys.stderr)
         return 1
     print(f"已修改管理员密码: {username}")
     return 0
@@ -134,7 +141,7 @@ def _cmd_list(_args):
         users = data_db.list_users_full()
     except Exception as e:
         print(f"读取用户列表失败: {e}", file=sys.stderr)
-        print(f"数据库路径: {data_db.DB_PATH}", file=sys.stderr)
+        print(f"数据库: {data_db.db_location()}", file=sys.stderr)
         return 1
     if not users:
         print("（无用户）")
@@ -187,7 +194,13 @@ def main():
 
     handler = _SUBMAP.get(subcmd)
     if handler is not None:
-        sys.exit(handler(rest))
+        try:
+            sys.exit(handler(rest))
+        except Exception as e:
+            # 兜底：前置检查阶段的数据库异常（连接失败/文件损坏等）统一清晰报错，不抛堆栈
+            print(f"操作失败: {e}", file=sys.stderr)
+            print(f"数据库: {data_db.db_location()}", file=sys.stderr)
+            sys.exit(1)
     print(f"未知子命令: {subcmd}", file=sys.stderr)
     _print_usage()
     sys.exit(1)

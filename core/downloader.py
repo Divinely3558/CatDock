@@ -79,6 +79,23 @@ FORMAT_MAP = {
 }
 
 
+class TaskLimitExceeded(RuntimeError):
+    """并发任务数达到 MAX_CONCURRENT_TASKS 上限（创建任务时抛出）"""
+
+
+def _count_active_tasks():
+    """当前活跃任务数（running/collecting），须在持有 cfg.tasks_lock 时调用"""
+    return sum(1 for t in cfg.tasks.values()
+               if t.get('status') in ('running', 'collecting'))
+
+
+def _ensure_task_slot():
+    """并发上限最终防线：在 tasks_lock 内创建任务前调用，超限抛 TaskLimitExceeded"""
+    if _count_active_tasks() >= cfg.max_concurrent_tasks:
+        raise TaskLimitExceeded(
+            f"并发任务数已达上限({cfg.max_concurrent_tasks})")
+
+
 def convert_to_format(input_file, output_file, target_format):
     fmt = FORMAT_MAP.get(target_format, 'mp4')
 
@@ -308,7 +325,7 @@ def is_video_file(file_name):
     return os.path.splitext(file_name)[1].lower() in VIDEO_EXTS
 
 
-def plan_direct_output(base_name, video_ext, fmt):
+def plan_direct_output(base_name, video_ext):
     """规划直链视频的 curl 下载目标与最终成品路径。
 
     .f4v：curl 先下载为 <base_name>.f4v 源文件（可断点续传），完成后统一产出
@@ -514,7 +531,8 @@ def _check_network_ready(max_wait=30):
         try:
             # 尝试连接阿里云DNS
             socket.setdefaulttimeout(3)
-            socket.socket(socket.AF_INET, socket.SOCK_STREAM).connect(('223.5.5.5', 53))
+            with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
+                sock.connect(('223.5.5.5', 53))
             return True
         except Exception:
             pass
@@ -727,7 +745,7 @@ def _do_single_download_attempt(base_name, url, referer, cookie, user_agent, tas
 
     if is_direct_video:
         # .f4v 等：curl_target 为源文件（.f4v），output_file 为转封装后的成品
-        curl_target, output_file, needs_convert = plan_direct_output(base_name, video_ext, fmt)
+        curl_target, output_file, needs_convert = plan_direct_output(base_name, video_ext)
     else:
         curl_target, output_file, needs_convert = None, os.path.join(get_download_dir(), f"{base_name}.{fmt}"), False
 
@@ -916,7 +934,7 @@ def _finalize_download_outputs(base_name, output_file, target_format):
 
     # (C) 有 source_file → 转换/重命名
     _conversion_done = False
-    if source_file.endswith('.ts') or source_file.endswith('.MUX.mp4'):
+    if source_file.endswith('.ts') or source_file.lower().endswith('.mux.mp4'):
         for _ in range(3):
             if convert_to_format(source_file, output_file, target_format):
                 _conversion_done = True
@@ -1485,7 +1503,7 @@ def _run_worker(task_id, cmd, base_name, output_file, target_format, initial_ret
 
         # 在转格式阶段把进度更新到 90%（与原逻辑保持一致）
         source_file = find_existing_source_file(base_name)
-        if source_file and (source_file.endswith('.ts') or source_file.endswith('.MUX.mp4')):
+        if source_file and (source_file.endswith('.ts') or source_file.lower().endswith('.mux.mp4')):
             with cfg.tasks_lock:
                 if task_id in cfg.tasks:
                     cfg.tasks[task_id]['progress'] = 90
@@ -1613,8 +1631,7 @@ def _resume_single_task(task):
 
     if is_direct_video:
         # .f4v 等：curl 目标为源文件，成品统一为 .mp4
-        curl_target, output_file, needs_convert = plan_direct_output(
-            base_name, video_ext, cfg.output_format)
+        curl_target, output_file, needs_convert = plan_direct_output(base_name, video_ext)
     else:
         curl_target, output_file, needs_convert = None, \
             os.path.join(get_download_dir(), f"{base_name}.{cfg.output_format}"), False
@@ -1830,6 +1847,7 @@ def run_download(url, save_name=None, referer=None, cookie=None, user_agent=None
 
         # 创建对应的 tasks 记录（用于进度查询），然后启动调度器
         with cfg.tasks_lock:
+            _ensure_task_slot()
             cfg.tasks[task_id] = {
                 'id': task_id,
                 'url': normalized_url,
@@ -1898,7 +1916,7 @@ def run_download(url, save_name=None, referer=None, cookie=None, user_agent=None
 
     if is_direct_video:
         # .f4v 等：curl 目标为源文件（.f4v），成品为转封装后的目标格式
-        curl_target, output_file, needs_convert = plan_direct_output(base_name, video_ext, fmt)
+        curl_target, output_file, needs_convert = plan_direct_output(base_name, video_ext)
     else:
         curl_target, output_file, needs_convert = None, \
             os.path.join(get_download_dir(), f"{base_name}.{fmt}"), False
@@ -1924,6 +1942,7 @@ def run_download(url, save_name=None, referer=None, cookie=None, user_agent=None
             return None, False
 
     with cfg.tasks_lock:
+        _ensure_task_slot()
         cfg.tasks[task_id] = {
             'id': task_id,
             'url': url,

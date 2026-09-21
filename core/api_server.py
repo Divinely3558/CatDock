@@ -27,7 +27,7 @@ import data_db
 from security import is_safe_url, sanitize_url_for_log, check_rate_limit
 from filters import is_ad_content, get_user_rules, save_user_rules
 from task_store import load_tasks
-from downloader import run_download, resume_tasks, pause_task, resume_paused_task, delete_task, cleanup_user_data
+from downloader import run_download, resume_tasks, pause_task, resume_paused_task, delete_task, cleanup_user_data, TaskLimitExceeded
 from webui import get_login_html, get_user_html, get_admin_html
 
 
@@ -137,20 +137,25 @@ def get_token_claims(token):
         return None
 
 
-def verify_auth_token(token):
-    """完整校验令牌（签名/有效期/未吊销/用户存在且未禁用），返回用户名；无效返回 None"""
+def verify_auth_token_full(token):
+    """完整校验令牌（签名/有效期/未吊销/用户存在且未禁用）。
+
+    返回 (username, claims)；无效返回 (None, None)。
+    相比先 verify_token_claims 再 verify_auth_token 的两次验签，
+    本函数只验一次签名。
+    """
     data = verify_token_claims(token)
     if data is None:
-        return None
+        return None, None
     jti = data.get('jti')
     username = data.get('user')
     # 吊销校验：jti 必须登记在册且未被吊销（改密码/注销/删用户/禁用/换 KEY 后失效）
     if not jti or not data_db.is_token_valid(jti):
-        return None
+        return None, None
     # 用户在有效期内被删除或禁用后，令牌立即失效
     if not username or not data_db.is_user_active(username):
-        return None
-    return username
+        return None, None
+    return username, data
 
 
 class DownloadHandler(http.server.BaseHTTPRequestHandler):
@@ -304,11 +309,14 @@ class DownloadHandler(http.server.BaseHTTPRequestHandler):
                 return None
             body = self.rfile.read(content_length).decode('utf-8')
             return json.loads(body) if content_length > 0 else {}
+        except UnicodeDecodeError:
+            self.send_json({'success': False, 'message': '请求体必须是 UTF-8 编码'}, 400)
+            return None
         except json.JSONDecodeError:
             self.send_json({'success': False, 'message': 'JSON格式错误'}, 400)
             return None
         except Exception as e:
-            self.send_json({'success': False, 'message': str(e)}, 500)
+            self._server_error(e)
             return None
 
     def _get_param(self, data, *names):
@@ -353,11 +361,12 @@ class DownloadHandler(http.server.BaseHTTPRequestHandler):
         auth_header = self.headers.get('Authorization', '')
         if auth_header.startswith('Bearer '):
             token = auth_header[len('Bearer '):].strip()
-            claims = verify_token_claims(token) if token else None
-            username = verify_auth_token(token) if token else None
+            username, claims = verify_auth_token_full(token) if token else (None, None)
             if username:
-                # 认证成功：清除该 IP 的失败计数，避免历史偶发失误累积导致误封
+                # 认证成功：清除该 IP 的失败计数，避免历史偶发失误累积导致误封；
+                # 同时移除"已封禁账号首次警告"标记，防止集合长期残留导致内存增长
                 data_db.clear_auth_failure(self._client_ip)
+                _banned_account_warned_ips.discard(self._client_ip)
                 self.authenticated_user = username
                 self.authenticated_role = (claims.get('role') if claims else None) \
                     or data_db.user_role(username) or 'user'
@@ -438,7 +447,7 @@ class DownloadHandler(http.server.BaseHTTPRequestHandler):
             if locked:
                 log_error(f"账号 {request_user} 因连续 {data_db.MAX_ACCOUNT_FAILURES} 次密码错误已被自动禁用")
                 self.send_json({'success': False,
-                                'message': f'密码错误次数过多，账号已被禁用，请联系管理员'}, 403)
+                                    'message': '密码错误次数过多，账号已被禁用，请联系管理员'}, 403)
             else:
                 remaining = data_db.MAX_ACCOUNT_FAILURES - data_db.get_account_failure_count(request_user)
                 self.send_json({'success': False,
@@ -446,9 +455,10 @@ class DownloadHandler(http.server.BaseHTTPRequestHandler):
             return False
 
         # 记录已认证用户与角色，供下载目录分流与管理员鉴权
-        # 认证成功：清除该 IP 和该账号的失败计数
+        # 认证成功：清除该 IP 和该账号的失败计数，并移除"已封禁账号首次警告"标记
         data_db.clear_auth_failure(self._client_ip)
         data_db.clear_account_failure(request_user)
+        _banned_account_warned_ips.discard(self._client_ip)
         self.authenticated_user = request_user
         self.authenticated_role = data_db.user_role(request_user) or 'user'
         return True
@@ -469,6 +479,66 @@ class DownloadHandler(http.server.BaseHTTPRequestHandler):
                             'message': '管理员账户不能发起下载，请使用下载用户账号'}, 403)
             return False
         return True
+
+    def _send_404_text(self):
+        """发送纯文本 404 响应（页面与 API 共用）"""
+        self.send_response(404)
+        self.send_header('Content-Type', 'text/plain')
+        self.end_headers()
+        self.wfile.write(b'404 Not Found')
+
+    def _bearer_token(self):
+        """从 Authorization 请求头提取 Bearer 令牌；缺失返回 None"""
+        auth_header = self.headers.get('Authorization', '')
+        if auth_header.startswith('Bearer '):
+            token = auth_header[len('Bearer '):].strip()
+            return token or None
+        return None
+
+    def _server_error(self, e):
+        """统一 500 响应：错误详情只写入日志与调试响应，避免向客户端泄露内部信息"""
+        log_error(f"接口处理异常 {self.path}: {e}")
+        detail = f"（{e}）" if cfg.debug_mode else ""
+        self.send_json({'success': False, 'message': f'服务器内部错误{detail}'}, 500)
+
+    def _parse_filter_payload(self, data):
+        """解析并校验过滤规则请求体（用户规则与管理员模板共用）。
+
+        返回 (rules, None) 或 (None, 错误消息)。
+        """
+        kw = data.get('keywords') if isinstance(data.get('keywords'), dict) else None
+        ff = data.get('filename_filter') if isinstance(data.get('filename_filter'), dict) else None
+        dd = data.get('filename_dedup') if isinstance(data.get('filename_dedup'), dict) else None
+        if kw is None or ff is None or dd is None:
+            return None, '缺少 keywords / filename_filter / filename_dedup 字段'
+
+        kw_list = kw.get('list', [])
+        ff_list = ff.get('list', [])
+        dd_rules = dd.get('rules', [])
+        if not isinstance(kw_list, list) or not isinstance(ff_list, list) or not isinstance(dd_rules, list):
+            return None, 'list / rules 字段必须为数组'
+
+        rules_out = []
+        for rule in dd_rules:
+            if not isinstance(rule, dict):
+                continue
+            pattern = str(rule.get('pattern', '') or '').strip()
+            replacement = str(rule.get('replacement', '') or '')
+            if not pattern:
+                continue
+            try:
+                re.compile(pattern)
+            except re.error as e:
+                return None, f'正则表达式不合法: {pattern} ({e})'
+            rules_out.append({'pattern': pattern, 'replacement': replacement})
+
+        return {
+            'keywords': {'enabled': bool(kw.get('enabled', False)),
+                         'list': [str(k).strip() for k in kw_list if str(k).strip()]},
+            'filename_filter': {'enabled': bool(ff.get('enabled', False)),
+                                'list': [str(k).strip() for k in ff_list if str(k).strip()]},
+            'filename_dedup': {'enabled': bool(dd.get('enabled', False)), 'rules': rules_out},
+        }, None
 
     def get_path(self):
         parsed = urllib.parse.urlparse(self.path)
@@ -513,10 +583,7 @@ class DownloadHandler(http.server.BaseHTTPRequestHandler):
 
         path = self.get_path()
         if path is None:
-            self.send_response(404)
-            self.send_header('Content-Type', 'text/plain')
-            self.end_headers()
-            self.wfile.write(b'404 Not Found')
+            self._send_404_text()
             return
 
         # 网页规范地址统一为 /login.html、/user.html、/admin.html；
@@ -701,10 +768,7 @@ class DownloadHandler(http.server.BaseHTTPRequestHandler):
     def do_POST(self):
         path = self.get_path()
         if path is None:
-            self.send_response(404)
-            self.send_header('Content-Type', 'text/plain')
-            self.end_headers()
-            self.wfile.write(b'404 Not Found')
+            self._send_404_text()
             return
 
         # 登录接口：请求体提交 key/user/password，两层认证通过后签发访问令牌。
@@ -772,9 +836,8 @@ class DownloadHandler(http.server.BaseHTTPRequestHandler):
             data_db.clear_account_failure(target_user)
 
             # 吊销当前令牌（切换后旧令牌立即失效）
-            auth_header = self.headers.get('Authorization', '')
-            token = auth_header[len('Bearer '):].strip()
-            claims = get_token_claims(token)
+            token = self._bearer_token()
+            claims = get_token_claims(token) if token else None
             if claims and claims.get('jti'):
                 data_db.revoke_auth_token(claims['jti'])
 
@@ -798,9 +861,8 @@ class DownloadHandler(http.server.BaseHTTPRequestHandler):
             if not self._check_rate_limit():
                 return
 
-            auth_header = self.headers.get('Authorization', '')
-            token = auth_header[len('Bearer '):].strip()
-            claims = get_token_claims(token)
+            token = self._bearer_token()
+            claims = get_token_claims(token) if token else None
             if claims and claims.get('jti'):
                 data_db.revoke_auth_token(claims['jti'])
             self.send_json({'success': True, 'message': '已注销，令牌已失效'})
@@ -838,7 +900,7 @@ class DownloadHandler(http.server.BaseHTTPRequestHandler):
                 self.send_json({'success': True,
                                 'message': '密码已修改，所有登录已失效，请使用新密码重新登录'})
             except Exception as e:
-                self.send_json({'success': False, 'message': str(e)}, 500)
+                self._server_error(e)
         # 全局过滤规则模板编辑：保存到 config/filter_rules.json，新用户首启时复制
         elif path == '/admin/filters':
             try:
@@ -855,42 +917,19 @@ class DownloadHandler(http.server.BaseHTTPRequestHandler):
                 if not self._require_admin():
                     return
 
-                kw = data.get('keywords') if isinstance(data.get('keywords'), dict) else None
-                ff = data.get('filename_filter') if isinstance(data.get('filename_filter'), dict) else None
-                dd = data.get('filename_dedup') if isinstance(data.get('filename_dedup'), dict) else None
-                if kw is None or ff is None or dd is None:
-                    self.send_json({'success': False, 'message': '缺少 keywords / filename_filter / filename_dedup 字段'}, 400)
+                new_rules, err = self._parse_filter_payload(data)
+                if err:
+                    self.send_json({'success': False, 'message': err}, 400)
                     return
 
-                kw_list = [str(k).strip() for k in kw.get('list', []) if str(k).strip()]
-                ff_list = [str(k).strip() for k in ff.get('list', []) if str(k).strip()]
-                rules_out = []
-                for rule in dd.get('rules', []):
-                    if not isinstance(rule, dict):
-                        continue
-                    pattern = str(rule.get('pattern', '') or '').strip()
-                    replacement = str(rule.get('replacement', '') or '')
-                    if not pattern:
-                        continue
-                    try:
-                        re.compile(pattern)
-                    except re.error as e:
-                        self.send_json({'success': False,
-                                        'message': f'正则表达式不合法: {pattern} ({e})'}, 400)
-                        return
-                    rules_out.append({'pattern': pattern, 'replacement': replacement})
-
-                new_rules = {
-                    'keywords': {'enabled': bool(kw.get('enabled', False)), 'list': kw_list},
-                    'filename_filter': {'enabled': bool(ff.get('enabled', False)), 'list': ff_list},
-                    'filename_dedup': {'enabled': bool(dd.get('enabled', False)), 'rules': rules_out},
-                }
                 cfg._write_json_atomic(cfg.FILTER_RULES_FILE, new_rules, mode=0o644)
                 cfg.load_filters()
-                log_info(f"管理员更新过滤规则模板（拦截关键字 {len(kw_list)} / 文件名过滤 {len(ff_list)} / 去重规则 {len(rules_out)}）")
+                log_info(f"管理员更新过滤规则模板（拦截关键字 {len(new_rules['keywords']['list'])} / "
+                         f"文件名过滤 {len(new_rules['filename_filter']['list'])} / "
+                         f"去重规则 {len(new_rules['filename_dedup']['rules'])}）")
                 self.send_json({'success': True, 'message': '过滤规则模板已保存，新用户将使用此模板'})
             except Exception as e:
-                self.send_json({'success': False, 'message': str(e)}, 500)
+                self._server_error(e)
         # 用户过滤规则编辑：读取见 GET /filters；此处整体保存（原子写回，立即生效）
         elif path == '/filters':
             try:
@@ -908,49 +947,19 @@ class DownloadHandler(http.server.BaseHTTPRequestHandler):
                     return
 
                 username = self.authenticated_user
-                kw = data.get('keywords') if isinstance(data.get('keywords'), dict) else None
-                ff = data.get('filename_filter') if isinstance(data.get('filename_filter'), dict) else None
-                dd = data.get('filename_dedup') if isinstance(data.get('filename_dedup'), dict) else None
-                if kw is None or ff is None or dd is None:
-                    self.send_json({'success': False, 'message': '缺少 keywords / filename_filter / filename_dedup 字段'}, 400)
+                new_rules, err = self._parse_filter_payload(data)
+                if err:
+                    self.send_json({'success': False, 'message': err}, 400)
                     return
 
-                kw_list = kw.get('list', [])
-                ff_list = ff.get('list', [])
-                dd_rules = dd.get('rules', [])
-                if not isinstance(kw_list, list) or not isinstance(ff_list, list) or not isinstance(dd_rules, list):
-                    self.send_json({'success': False, 'message': 'list / rules 字段必须为数组'}, 400)
-                    return
-                kw_list = [str(k).strip() for k in kw_list if str(k).strip()]
-                ff_list = [str(k).strip() for k in ff_list if str(k).strip()]
-
-                rules_out = []
-                for rule in dd_rules:
-                    if not isinstance(rule, dict):
-                        continue
-                    pattern = str(rule.get('pattern', '') or '').strip()
-                    replacement = str(rule.get('replacement', '') or '')
-                    if not pattern:
-                        continue
-                    try:
-                        re.compile(pattern)
-                    except re.error as e:
-                        self.send_json({'success': False,
-                                        'message': f'正则表达式不合法: {pattern} ({e})'}, 400)
-                        return
-                    rules_out.append({'pattern': pattern, 'replacement': replacement})
-
-                new_rules = {
-                    'keywords': {'enabled': bool(kw.get('enabled', False)), 'list': kw_list},
-                    'filename_filter': {'enabled': bool(ff.get('enabled', False)), 'list': ff_list},
-                    'filename_dedup': {'enabled': bool(dd.get('enabled', False)), 'rules': rules_out},
-                }
                 save_user_rules(username, new_rules)
-                log_info(f"用户更新过滤规则: {username}（拦截关键字 {len(kw_list)} / 文件名过滤 {len(ff_list)} / 去重规则 {len(rules_out)}）")
+                log_info(f"用户更新过滤规则: {username}（拦截关键字 {len(new_rules['keywords']['list'])} / "
+                         f"文件名过滤 {len(new_rules['filename_filter']['list'])} / "
+                         f"去重规则 {len(new_rules['filename_dedup']['rules'])}）")
                 self.send_json({'success': True,
                                 'message': '过滤规则已保存，对新增下载任务立即生效'})
             except Exception as e:
-                self.send_json({'success': False, 'message': str(e)}, 500)
+                self._server_error(e)
         elif path == '/download':
             try:
                 data = self._read_json_body()
@@ -1022,8 +1031,11 @@ class DownloadHandler(http.server.BaseHTTPRequestHandler):
                         'duplicate': is_duplicate,
                         'output_format': _fmt
                     })
+            except TaskLimitExceeded:
+                self.send_json({'success': False,
+                                'message': f'并发任务数已达上限({cfg.max_concurrent_tasks})，请稍后再试'}, 429)
             except Exception as e:
-                self.send_json({'success': False, 'message': str(e)}, 500)
+                self._server_error(e)
         elif path == '/reload':
             try:
                 data = self._read_json_body()
@@ -1061,7 +1073,7 @@ class DownloadHandler(http.server.BaseHTTPRequestHandler):
 
                 self.send_json({'success': True, 'message': '配置已重新加载'})
             except Exception as e:
-                self.send_json({'success': False, 'message': str(e)}, 500)
+                self._server_error(e)
         elif path.startswith('/admin/'):
             try:
                 data = self._read_json_body()
@@ -1194,7 +1206,7 @@ class DownloadHandler(http.server.BaseHTTPRequestHandler):
                 else:
                     self.send_json({'success': False, 'message': '路径不存在'}, 404)
             except Exception as e:
-                self.send_json({'success': False, 'message': str(e)}, 500)
+                self._server_error(e)
         elif path in ('/task/pause', '/task/resume', '/task/delete'):
             try:
                 data = self._read_json_body()
@@ -1222,7 +1234,7 @@ class DownloadHandler(http.server.BaseHTTPRequestHandler):
                 debug_print(f"[HTTP] 任务操作 {path}: taskId={task_id}, 结果={ok}")
                 self.send_json({'success': ok, 'message': message}, 200 if ok else 400)
             except Exception as e:
-                self.send_json({'success': False, 'message': str(e)}, 500)
+                self._server_error(e)
         else:
             self.send_json({'success': False, 'message': '路径不存在'}, 404)
 

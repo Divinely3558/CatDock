@@ -141,8 +141,6 @@
       (function () {
         "use strict";
 
-        // 页面由服务端托管在 /{prefix}/ 下，相对路径自动适配 URL 前缀
-        var BASE = location.pathname.replace(/[^/]*$/, "");
         var LS = {
           token: "catdock_token",
           user: "catdock_user",
@@ -150,88 +148,13 @@
           fmt: "catdock_fmt",
         };
 
-        // 登录成功后仅持有短期访问令牌（POST /login 签发），
-        // 密钥/账号/密码不再持久化，也不出现在 URL 中
-        var creds = { token: "", user: "" };
-        var pollTimer = null,
-          healthTimer = null;
-
         var $ = function (id) {
           return document.getElementById(id);
         };
 
-        // 主题色板（会话随机）与亮暗切换由 shared.js 统一接管
-
-        function esc(s) {
-          return String(s == null ? "" : s).replace(/[&<>"']/g, function (c) {
-            return {
-              "&": "&amp;",
-              "<": "&lt;",
-              ">": "&gt;",
-              '"': "&quot;",
-              "'": "&#39;",
-            }[c];
-          });
-        }
-
-        function showAlert(el, msg, ok) {
-          el.textContent = msg;
-          el.className = "alert show " + (ok ? "alert-success" : "alert-error");
-        }
-        function hideAlert(el) {
-          el.className = "alert";
-        }
-
-        // ---------- API 封装 ----------
-        function authHeaders() {
-          var h = {};
-          if (creds.token) h["Authorization"] = "Bearer " + creds.token;
-          return h;
-        }
-
-        function apiGet(path) {
-          return fetch(BASE + path, { method: "GET", headers: authHeaders() })
-            .catch(function () {
-              throw new Error(
-                "无法连接服务器：连接被拒绝。可能 IP 已被封禁（服务器执行 banip show 查看并 banip del 解封），或地址前缀有误",
-              );
-            })
-            .then(handleResp);
-        }
-
-        function apiPost(path, body) {
-          var headers = Object.assign(
-            { "Content-Type": "application/json" },
-            authHeaders(),
-          );
-          return fetch(BASE + path, {
-            method: "POST",
-            headers: headers,
-            body: JSON.stringify(body),
-          })
-            .catch(function () {
-              throw new Error(
-                "无法连接服务器：连接被拒绝。可能 IP 已被封禁（服务器执行 banip show 查看并 banip del 解封），或地址前缀有误",
-              );
-            })
-            .then(handleResp);
-        }
-
-        function handleResp(resp) {
-          return resp
-            .json()
-            .catch(function () {
-              throw new Error("服务器响应格式错误");
-            })
-            .then(function (data) {
-              if (!resp.ok || data.success === false) {
-                throw new Error(
-                  data.message || "请求失败 (HTTP " + resp.status + ")",
-                );
-              }
-              return data;
-            });
-        }
+        // 主题色板（会话随机）与亮暗切换、提示条与 API 封装等公共工具
+        // 由 shared.js 注入的 window.CD 提供；
+        // 登录页不注册 CD.onUnauthorized：登录失败只展示错误信息，不跳转
 
         // ---------- 登录 ----------
         $("loginForm").addEventListener("submit", function (e) {
@@ -240,13 +163,13 @@
           var user = $("loginUser").value.trim();
           var pwd = $("loginPwd").value;
           if (!key || !user || !pwd) {
-            showAlert($("loginAlert"), "请填写完整的认证信息", false);
+            CD.showAlert($("loginAlert"), "请填写完整的认证信息", false);
             return;
           }
           var btn = $("loginBtn");
           btn.disabled = true;
           btn.textContent = "登录中…";
-          apiPost("login", { key: key, user: user, password: pwd })
+          CD.apiPost("login", { key: key, user: user, password: pwd })
             .then(function (data) {
               localStorage.setItem(LS.token, data.data.token);
               localStorage.setItem(LS.user, user);
@@ -262,7 +185,7 @@
               }
             })
             .catch(function (e) {
-              showAlert($("loginAlert"), e.message, false);
+              CD.showAlert($("loginAlert"), e.message, false);
             })
             .finally(function () {
               btn.disabled = false;

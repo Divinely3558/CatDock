@@ -778,128 +778,25 @@
         localStorage.removeItem(LS.role);
         location.href = BASE + "login.html";
       }
+      // API 层遇到 403（凭证失效）时由 shared.js 回调本函数
+      CD.onUnauthorized = backToLogin;
 
       // ---------- API ----------
-      function api(method, path, body) {
-        return fetch(BASE + path, {
-          method: method,
-          headers: {
-            "Content-Type": "application/json",
-            Authorization: token ? "Bearer " + token : "",
-          },
-          body: body ? JSON.stringify(body) : undefined,
-        }).then(function (resp) {
-          if (resp.status === 403 || resp.status === 401) {
-            backToLogin();
-            throw new Error("未登录或登录已过期");
-          }
-          return resp.json().then(function (j) {
-            if (!j.success) throw new Error(j.message || "请求失败");
-            return j;
-          });
-        });
-      }
-
-      // ---------- Toast ----------
-      var toastTimer = null;
-      function toast(msg, isErr) {
-        var el = document.getElementById("toast");
-        el.textContent = msg;
-        el.className = "toast show" + (isErr ? " err" : "");
-        clearTimeout(toastTimer);
-        toastTimer = setTimeout(function () {
-          el.className = "toast" + (isErr ? " err" : "");
-        }, 2600);
-      }
+      // 统一 API 封装由 shared.js 注入的 CD.apiGet / CD.apiPost 提供
 
       // ---------- 通用弹层 ----------
-      function openModal(spec) {
-        document.getElementById("modalTitle").textContent =
-          spec.title || "提示";
-        // 标题右侧附加内容（如复选框），可选
-        var extraEl = document.getElementById("modalTitleExtra");
-        extraEl.innerHTML = spec.titleExtra || "";
-        document.getElementById("modalMsg").innerHTML = spec.msg || "";
-        var form = document.getElementById("modalForm");
-        form.innerHTML = "";
-        (spec.fields || []).forEach(function (f) {
-          var lab = document.createElement("label");
-          lab.className = "field";
-          if (f.type === "checkbox") {
-            // 复选框：勾选框与文字同行排列
-            lab.style.display = "flex";
-            lab.style.alignItems = "center";
-            lab.style.gap = "8px";
-            var inp = document.createElement("input");
-            inp.type = "checkbox";
-            inp.id = "mf_" + f.id;
-            inp.style.width = "auto";
-            inp.style.cursor = "pointer";
-            if (f.checked) inp.checked = true;
-            var span = document.createElement("span");
-            span.textContent = f.label;
-            span.style.marginBottom = "0";
-            lab.appendChild(inp);
-            lab.appendChild(span);
-          } else {
-            var span = document.createElement("span");
-            span.textContent = f.label;
-            if (f.required) span.innerHTML += '<span class="req">*</span>';
-            var inp = document.createElement("input");
-            inp.type = f.type || "text";
-            inp.id = "mf_" + f.id;
-            inp.placeholder = f.placeholder || "";
-            inp.autocomplete = "off";
-            lab.appendChild(span);
-            lab.appendChild(inp);
-          }
-          form.appendChild(lab);
-        });
-        var okBtn = document.getElementById("modalOk");
-        okBtn.textContent = spec.okText || "确定";
-        okBtn.className = "btn " + (spec.danger ? "btn-danger" : "btn-primary");
-        document.getElementById("mask").classList.add("show");
-        setTimeout(function () {
-          var first = form.querySelector("input");
-          if (first) first.focus();
-        }, 50);
-        okBtn.onclick = function () {
-          var values = {};
-          for (var i = 0; i < (spec.fields || []).length; i++) {
-            var f = spec.fields[i];
-            var inp = document.getElementById("mf_" + f.id);
-            values[f.id] =
-              f.type === "checkbox" ? inp.checked : inp.value.trim();
-          }
-          if (spec.onOk && spec.onOk(values) === false) return;
-          closeModal();
-        };
-        document.getElementById("modalCancel").onclick = closeModal;
-      }
-      function closeModal() {
-        document.getElementById("mask").classList.remove("show");
-      }
+      // 由 shared.js 注入的 CD.openModal（超集实现：支持 titleExtra/checkbox）
+      // 与 CD.closeModal 提供
 
       // ---------- 用户列表 ----------
       function loadUsers() {
-        return api("GET", "admin/users")
+        return CD.apiGet("admin/users")
           .then(function (j) {
             renderUsers(j.data || []);
           })
           .catch(function (e) {
-            toast(e.message, true);
+            CD.toast(e.message, true);
           });
-      }
-      function esc(s) {
-        return String(s == null ? "" : s).replace(/[&<>"']/g, function (c) {
-          return {
-            "&": "&amp;",
-            "<": "&lt;",
-            ">": "&gt;",
-            '"': "&quot;",
-            "'": "&#39;",
-          }[c];
-        });
       }
       function renderUsers(users) {
         var tbody = document.getElementById("userRows");
@@ -929,7 +826,7 @@
           }
           tr.innerHTML =
             "<td><strong>" +
-            esc(u.username) +
+            CD.esc(u.username) +
             "</strong></td>" +
             "<td>" +
             role +
@@ -938,7 +835,7 @@
             status +
             "</td>" +
             "<td>" +
-            esc(u.created_at || "-") +
+            CD.esc(u.created_at || "-") +
             "</td>" +
             '<td class="actions">' +
             actions +
@@ -957,7 +854,7 @@
 
       function handleUserAction(act, u) {
         if (act === "pwd") {
-          openModal({
+          CD.openModal({
             title: "重置用户密码 - " + u.username,
             fields: [
               {
@@ -976,50 +873,50 @@
               },
             ],
             onOk: function (v) {
-              if (!v.pwd) return (toast("密码不能为空", true), false);
+              if (!v.pwd) return (CD.toast("密码不能为空", true), false);
               if (v.pwd !== v.pwd2)
-                return (toast("两次输入的密码不一致", true), false);
-              api("POST", "admin/users/password", {
+                return (CD.toast("两次输入的密码不一致", true), false);
+              CD.apiPost("admin/users/password", {
                 username: u.username,
                 newPassword: v.pwd,
               })
                 .then(function (j) {
-                  toast(j.message);
+                  CD.toast(j.message);
                   loadUsers();
                 })
                 .catch(function (e) {
-                  toast(e.message, true);
+                  CD.toast(e.message, true);
                 });
             },
           });
         } else if (act === "ban") {
-          openModal({
+          CD.openModal({
             title: "禁用用户 - " + u.username,
             msg: "禁用后该用户立即无法登录、已登录的令牌立即失效；可随时解禁。",
             danger: true,
             okText: "禁用",
             onOk: function () {
-              api("POST", "admin/users/ban", { username: u.username })
+              CD.apiPost("admin/users/ban", { username: u.username })
                 .then(function (j) {
-                  toast(j.message);
+                  CD.toast(j.message);
                   loadUsers();
                 })
                 .catch(function (e) {
-                  toast(e.message, true);
+                  CD.toast(e.message, true);
                 });
             },
           });
         } else if (act === "unban") {
-          api("POST", "admin/users/unban", { username: u.username })
+          CD.apiPost("admin/users/unban", { username: u.username })
             .then(function (j) {
-              toast(j.message);
+              CD.toast(j.message);
               loadUsers();
             })
             .catch(function (e) {
-              toast(e.message, true);
+              CD.toast(e.message, true);
             });
         } else if (act === "del") {
-          openModal({
+          CD.openModal({
             title: "删除用户 - " + u.username,
             msg:
               "将删除该用户<b>全部数据</b>并吊销全部令牌：配置目录（任务记录、下载记录、过滤规则）、" +
@@ -1027,13 +924,13 @@
             danger: true,
             okText: "全部删除",
             onOk: function () {
-              api("POST", "admin/users/delete", { username: u.username })
+              CD.apiPost("admin/users/delete", { username: u.username })
                 .then(function (j) {
-                  toast(j.message);
+                  CD.toast(j.message);
                   loadUsers();
                 })
                 .catch(function (e) {
-                  toast(e.message, true);
+                  CD.toast(e.message, true);
                 });
             },
           });
@@ -1044,7 +941,7 @@
         loadUsers();
       };
       document.getElementById("btnAddUser").onclick = function () {
-        openModal({
+        CD.openModal({
           title: "添加用户",
           // 标题右侧附加：添加为管理员复选框（字号小于标题）
           titleExtra:
@@ -1075,22 +972,22 @@
           okText: "添加",
           onOk: function (v) {
             if (!v.username || !v.pwd)
-              return (toast("用户名和密码不能为空", true), false);
+              return (CD.toast("用户名和密码不能为空", true), false);
             if (v.pwd !== v.pwd2)
-              return (toast("两次输入的密码不一致", true), false);
+              return (CD.toast("两次输入的密码不一致", true), false);
             // 复选框在标题行，需单独读取
             var isAdmin = document.getElementById("mf_isAdmin").checked;
-            api("POST", "admin/users/add", {
+            CD.apiPost("admin/users/add", {
               username: v.username,
               password: v.pwd,
               role: isAdmin ? "admin" : "user",
             })
               .then(function (j) {
-                toast(j.message);
+                CD.toast(j.message);
                 loadUsers();
               })
               .catch(function (e) {
-                toast(e.message, true);
+                CD.toast(e.message, true);
               });
           },
         });
@@ -1103,12 +1000,12 @@
         manual: '<span class="badge off">手动添加</span>',
       };
       function loadBans() {
-        return api("GET", "admin/bans")
+        return CD.apiGet("admin/bans")
           .then(function (j) {
             renderBans(j.data || []);
           })
           .catch(function (e) {
-            toast(e.message, true);
+            CD.toast(e.message, true);
           });
       }
       function renderBans(bans) {
@@ -1125,13 +1022,13 @@
           var tr = document.createElement("tr");
           tr.innerHTML =
             "<td><strong>" +
-            esc(b.ip) +
+            CD.esc(b.ip) +
             "</strong></td>" +
             "<td>" +
-            esc(b.banned_at || "-") +
+            CD.esc(b.banned_at || "-") +
             "</td>" +
             "<td>" +
-            (REASON_BADGE[b.reason] || esc(b.reason)) +
+            (REASON_BADGE[b.reason] || CD.esc(b.reason)) +
             "</td>" +
             '<td class="actions">' +
             '<div class="action-btns">' +
@@ -1151,19 +1048,19 @@
       }
       function handleBanAction(act, b) {
         if (act === "del") {
-          openModal({
+          CD.openModal({
             title: "解封 IP - " + b.ip,
             msg: "解封后该 IP 恢复访问，同时清除其认证失败计数与阶梯封禁统计。",
             danger: true,
             okText: "解封",
             onOk: function () {
-              api("POST", "admin/bans/delete", { ip: b.ip })
+              CD.apiPost("admin/bans/delete", { ip: b.ip })
                 .then(function (j) {
-                  toast(j.message);
+                  CD.toast(j.message);
                   loadBans();
                 })
                 .catch(function (e) {
-                  toast(e.message, true);
+                  CD.toast(e.message, true);
                 });
             },
           });
@@ -1174,7 +1071,7 @@
         loadBans();
       };
       document.getElementById("btnAddBan").onclick = function () {
-        openModal({
+        CD.openModal({
           title: "封禁 IP",
           fields: [
             {
@@ -1186,14 +1083,14 @@
           ],
           okText: "封禁",
           onOk: function (v) {
-            if (!v.ip) return (toast("IP 地址不能为空", true), false);
-            api("POST", "admin/bans/add", { ip: v.ip })
+            if (!v.ip) return (CD.toast("IP 地址不能为空", true), false);
+            CD.apiPost("admin/bans/add", { ip: v.ip })
               .then(function (j) {
-                toast(j.message);
+                CD.toast(j.message);
                 loadBans();
               })
               .catch(function (e) {
-                toast(e.message, true);
+                CD.toast(e.message, true);
               });
           },
         });
@@ -1241,8 +1138,8 @@
       document.getElementById("btnSaveKey").onclick = function () {
         var key = document.getElementById("newKey").value.trim();
         if (!key)
-          return (toast("请先点击「🎲 随机」生成 AUTH_KEY", true), false);
-        openModal({
+          return (CD.toast("请先点击「🎲 随机」生成 AUTH_KEY", true), false);
+        CD.openModal({
           title: "确认修改 AUTH_KEY？",
           msg:
             "修改后立即写入 admin_config.json 并生效，<b>包括管理员在内的所有登录都会失效</b>，" +
@@ -1250,13 +1147,13 @@
           danger: true,
           okText: "修改并全员下线",
           onOk: function () {
-            api("POST", "admin/auth-key", { newKey: key })
+            CD.apiPost("admin/auth-key", { newKey: key })
               .then(function (j) {
-                toast(j.message + " 即将返回登录页…");
+                CD.toast(j.message + " 即将返回登录页…");
                 setTimeout(backToLogin, 1500);
               })
               .catch(function (e) {
-                toast(e.message, true);
+                CD.toast(e.message, true);
               });
           },
         });
@@ -1412,23 +1309,23 @@
         var start = document.getElementById("logStart").value;
         var end = document.getElementById("logEnd").value;
         if (!start || !end) {
-          toast("请选择起止日期", true);
+          CD.toast("请选择起止日期", true);
           return;
         }
         var sd = new Date(start);
         var ed = new Date(end);
         if (sd > ed) {
-          toast("开始日期不能晚于结束日期", true);
+          CD.toast("开始日期不能晚于结束日期", true);
           return;
         }
         // 与本地今天比较（同为 YYYY-MM-DD 字符串，可直接比较，无时区偏差）
         if (end > localDateStr(new Date())) {
-          toast("不能导出未来日期的日志", true);
+          CD.toast("不能导出未来日期的日志", true);
           return;
         }
         var span = Math.round((ed - sd) / 86400000) + 1;
         if (span > 15) {
-          toast("导出范围不能超过 15 天", true);
+          CD.toast("导出范围不能超过 15 天", true);
           return;
         }
         var btn = document.getElementById("btnExportLog");
@@ -1464,11 +1361,11 @@
               a.click();
               document.body.removeChild(a);
               URL.revokeObjectURL(a.href);
-              toast("日志已导出：" + filename);
+              CD.toast("日志已导出：" + filename);
             });
           })
           .catch(function (e) {
-            toast(e.message, true);
+            CD.toast(e.message, true);
           })
           .finally(function () {
             btn.disabled = false;
@@ -1480,7 +1377,7 @@
       // 修改密码：旧密码 1 遍 + 新密码 2 遍；成功后全部令牌吊销，回登录页
       document.getElementById("menuPass").onclick = function () {
         menu.classList.remove("show");
-        openModal({
+        CD.openModal({
           title: "修改密码 - " + (userName || "管理员"),
           fields: [
             {
@@ -1508,27 +1405,27 @@
           okText: "保存并重新登录",
           onOk: function (v) {
             if (!v.old || !v.new1) {
-              toast("旧密码与新密码不能为空", true);
+              CD.toast("旧密码与新密码不能为空", true);
               return false;
             }
             if (v.new1.length < 6) {
-              toast("新密码至少 6 位", true);
+              CD.toast("新密码至少 6 位", true);
               return false;
             }
             if (v.new1 !== v.new2) {
-              toast("两次输入的新密码不一致", true);
+              CD.toast("两次输入的新密码不一致", true);
               return false;
             }
-            api("POST", "password", {
+            CD.apiPost("password", {
               oldPassword: v.old,
               newPassword: v.new1,
             })
               .then(function (j) {
-                toast(j.message + " 即将返回登录页…");
+                CD.toast(j.message + " 即将返回登录页…");
                 setTimeout(backToLogin, 1500);
               })
               .catch(function (e) {
-                toast(e.message, true);
+                CD.toast(e.message, true);
                 return false;
               });
           },
@@ -1537,7 +1434,7 @@
       // 切换用户：输入目标账户用户名+密码（无需 AUTH_KEY），成功后吊销旧令牌并跳转
       document.getElementById("menuSwitch").onclick = function () {
         menu.classList.remove("show");
-        openModal({
+        CD.openModal({
           title: "切换用户",
           fields: [
             {
@@ -1557,10 +1454,10 @@
           okText: "切换并登录",
           onOk: function (v) {
             if (!v.username || !v.password) {
-              toast("用户名和密码不能为空", true);
+              CD.toast("用户名和密码不能为空", true);
               return false;
             }
-            api("POST", "switch-user", {
+            CD.apiPost("switch-user", {
               username: v.username,
               password: v.password,
             })
@@ -1569,7 +1466,7 @@
                 localStorage.setItem(LS.token, j.data.token);
                 localStorage.setItem(LS.user, v.username);
                 localStorage.setItem(LS.role, j.data.role || "user");
-                toast("切换成功，正在跳转…");
+                CD.toast("切换成功，正在跳转…");
                 setTimeout(function () {
                   if (j.data.role === "admin") {
                     location.reload();
@@ -1579,7 +1476,7 @@
                 }, 800);
               })
               .catch(function (e) {
-                toast(e.message, true);
+                CD.toast(e.message, true);
                 return false;
               });
           },
@@ -1596,220 +1493,8 @@
         }).then(backToLogin, backToLogin);
       };
 
-      // ---------- 过滤规则模板编辑器 ----------
-      var filterState = {
-        keywords: { enabled: false, list: [] },
-        filename_filter: { enabled: false, list: [] },
-        filename_dedup: { enabled: false, rules: [] },
-      };
-
-      function showAlert(el, msg, ok) {
-        el.textContent = msg;
-        el.style.color = ok ? "var(--green, #059669)" : "var(--red)";
-      }
-      function hideAlert(el) {
-        el.textContent = "";
-      }
-
-      function renderChips(key, listId, inputId) {
-        var wrap = document.getElementById(listId);
-        wrap.innerHTML = "";
-        var list = filterState[key].list;
-        if (!list.length) {
-          var tip = document.createElement("span");
-          tip.className = "empty-tip";
-          tip.textContent = "暂无关键字";
-          wrap.appendChild(tip);
-          return;
-        }
-        list.forEach(function (item, idx) {
-          var chip = document.createElement("span");
-          chip.className = "chip";
-          var text = document.createElement("span");
-          text.textContent = item;
-          var del = document.createElement("button");
-          del.type = "button";
-          del.textContent = "✕";
-          del.title = "删除";
-          del.onclick = function () {
-            filterState[key].list.splice(idx, 1);
-            renderChips(key, listId, inputId);
-          };
-          chip.appendChild(text);
-          chip.appendChild(del);
-          wrap.appendChild(chip);
-        });
-      }
-
-      function addKeywords(key, listId, inputId) {
-        var raw = document.getElementById(inputId).value.trim();
-        if (!raw) return;
-        raw
-          .split(/[,，\n]/)
-          .map(function (s) {
-            return s.trim();
-          })
-          .filter(function (s) {
-            return s;
-          })
-          .forEach(function (s) {
-            if (filterState[key].list.indexOf(s) === -1)
-              filterState[key].list.push(s);
-          });
-        document.getElementById(inputId).value = "";
-        renderChips(key, listId, inputId);
-      }
-
-      function renderDdRules() {
-        var wrap = document.getElementById("ddRules");
-        wrap.innerHTML = "";
-        var rules = filterState.filename_dedup.rules;
-        rules.forEach(function (rule, idx) {
-          var row = document.createElement("div");
-          row.className = "dd-rule";
-          var p = document.createElement("input");
-          p.type = "text";
-          p.placeholder = "正则 pattern";
-          p.value = rule.pattern || "";
-          p.oninput = function () {
-            rules[idx].pattern = p.value;
-          };
-          var arrow = document.createElement("span");
-          arrow.className = "dd-arrow";
-          arrow.textContent = "→";
-          var r = document.createElement("input");
-          r.type = "text";
-          r.placeholder = "替换为";
-          r.value = rule.replacement || "";
-          r.oninput = function () {
-            rules[idx].replacement = r.value;
-          };
-          var del = document.createElement("button");
-          del.type = "button";
-          del.className = "btn";
-          del.textContent = "✕";
-          del.title = "删除规则";
-          del.onclick = function () {
-            rules.splice(idx, 1);
-            renderDdRules();
-          };
-          row.appendChild(p);
-          row.appendChild(arrow);
-          row.appendChild(r);
-          row.appendChild(del);
-          wrap.appendChild(row);
-        });
-      }
-
-      function loadFilters() {
-        api("GET", "admin/filters")
-          .then(function (data) {
-            filterState = {
-              keywords: {
-                enabled: !!data.data.keywords.enabled,
-                list: data.data.keywords.list || [],
-              },
-              filename_filter: {
-                enabled: !!data.data.filename_filter.enabled,
-                list: data.data.filename_filter.list || [],
-              },
-              filename_dedup: {
-                enabled: !!data.data.filename_dedup.enabled,
-                rules: data.data.filename_dedup.rules || [],
-              },
-            };
-            document.getElementById("kwEnabled").checked =
-              filterState.keywords.enabled;
-            document.getElementById("ffEnabled").checked =
-              filterState.filename_filter.enabled;
-            document.getElementById("ddEnabled").checked =
-              filterState.filename_dedup.enabled;
-            renderChips("keywords", "kwChips", "kwInput");
-            renderChips("filename_filter", "ffChips", "ffInput");
-            renderDdRules();
-            hideAlert(document.getElementById("filterAlert"));
-          })
-          .catch(function (e) {
-            showAlert(document.getElementById("filterAlert"), e.message, false);
-          });
-      }
-
-      document.getElementById("menuFilters").onclick = function () {
-        var menu = document.getElementById("userMenu");
-        menu.classList.remove("show");
-        document.getElementById("filterMask").classList.add("show");
-        loadFilters();
-      };
-      // 点击弹窗外部不再关闭，仅可通过「取消」按钮关闭
-      document.getElementById("filterCancel").onclick = function () {
-        document.getElementById("filterMask").classList.remove("show");
-        hideAlert(document.getElementById("filterAlert"));
-      };
-      document.getElementById("kwAdd").onclick = function () {
-        addKeywords("keywords", "kwChips", "kwInput");
-      };
-      document
-        .getElementById("kwInput")
-        .addEventListener("keydown", function (e) {
-          if (e.key === "Enter") {
-            e.preventDefault();
-            addKeywords("keywords", "kwChips", "kwInput");
-          }
-        });
-      document.getElementById("ffAdd").onclick = function () {
-        addKeywords("filename_filter", "ffChips", "ffInput");
-      };
-      document
-        .getElementById("ffInput")
-        .addEventListener("keydown", function (e) {
-          if (e.key === "Enter") {
-            e.preventDefault();
-            addKeywords("filename_filter", "ffChips", "ffInput");
-          }
-        });
-      document.getElementById("ddAdd").onclick = function () {
-        filterState.filename_dedup.rules.push({ pattern: "", replacement: "" });
-        renderDdRules();
-      };
-      document.getElementById("filterSave").onclick = function () {
-        filterState.keywords.enabled =
-          document.getElementById("kwEnabled").checked;
-        filterState.filename_filter.enabled =
-          document.getElementById("ffEnabled").checked;
-        filterState.filename_dedup.enabled =
-          document.getElementById("ddEnabled").checked;
-        try {
-          filterState.filename_dedup.rules.forEach(function (rule) {
-            if ((rule.pattern || "").trim()) new RegExp(rule.pattern.trim());
-          });
-        } catch (err) {
-          showAlert(
-            document.getElementById("filterAlert"),
-            "正则表达式不合法: " + err.message,
-            false,
-          );
-          return;
-        }
-        var btn = document.getElementById("filterSave");
-        btn.disabled = true;
-        api("POST", "admin/filters", filterState)
-          .then(function (data) {
-            showAlert(
-              document.getElementById("filterAlert"),
-              data.message || "已保存",
-              true,
-            );
-            setTimeout(function () {
-              document.getElementById("filterMask").classList.remove("show");
-            }, 1200);
-          })
-          .catch(function (e) {
-            showAlert(document.getElementById("filterAlert"), e.message, false);
-          })
-          .finally(function () {
-            btn.disabled = false;
-          });
-      };
+      // ---------- 过滤规则模板编辑器（与 user 端共用 shared.js 的实现） ----------
+      CD.initFilterEditor({ basePath: "admin/filters" });
 
       // ---------- 启动：无令牌直接回登录页；有令牌则拉用户列表验证管理员身份 ----------
       if (!token) {

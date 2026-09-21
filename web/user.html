@@ -559,10 +559,18 @@
               ><span class="logo">🐱</span>CatDock</span
             >
             <div class="user-menu" id="brandMenu">
-              <button class="user-menu-item" data-theme-palette title="切换主题色">
+              <button
+                class="user-menu-item"
+                data-theme-palette
+                title="切换主题色"
+              >
                 <span class="btn-icon">🎨</span>主题色
               </button>
-              <button class="user-menu-item" data-theme-mode title="切换亮色/暗色">
+              <button
+                class="user-menu-item"
+                data-theme-mode
+                title="切换亮色/暗色"
+              >
                 <span class="btn-icon">🌙</span>亮暗切换
               </button>
             </div>
@@ -625,9 +633,7 @@
                   <span class="dropdown-arrow"></span>
                 </button>
                 <div class="dropdown-menu" id="fFormatMenu" role="listbox">
-                  <div class="dropdown-option active" data-value="mp4">
-                    MP4
-                  </div>
+                  <div class="dropdown-option active" data-value="mp4">MP4</div>
                   <div class="dropdown-option" data-value="mkv">MKV</div>
                 </div>
               </div>
@@ -685,7 +691,10 @@
 
     <!-- ================= 任务详情弹窗（外框风格与管理端 admin.html 一致） ================= -->
     <div class="mask" id="modalMask">
-      <div class="modal" style="max-width: 560px; max-height: 85vh; overflow-y: auto">
+      <div
+        class="modal"
+        style="max-width: 560px; max-height: 85vh; overflow-y: auto"
+      >
         <h3>任务详情</h3>
         <dl class="detail-grid" id="modalBody"></dl>
       </div>
@@ -719,7 +728,10 @@
 
     <!-- ================= 过滤规则弹窗（结构与管理端 admin.html 过滤模板一致） ================= -->
     <div class="mask" id="filterMask">
-      <div class="modal" style="max-width: 520px; max-height: 85vh; overflow-y: auto">
+      <div
+        class="modal"
+        style="max-width: 520px; max-height: 85vh; overflow-y: auto"
+      >
         <h3>我的过滤规则</h3>
         <div class="msg">仅对您自己的下载任务生效，保存后立即生效</div>
         <div class="filter-editor">
@@ -773,7 +785,9 @@
           </div>
 
           <div class="filter-actions">
-            <button class="btn btn-primary" id="filterSave">保存过滤规则</button>
+            <button class="btn btn-primary" id="filterSave">
+              保存过滤规则
+            </button>
             <button type="button" class="btn btn-ghost" id="filterCancel">
               取消
             </button>
@@ -807,140 +821,8 @@
           return document.getElementById(id);
         };
 
-        // 主题色板（会话随机）与亮暗切换由 shared.js 统一接管
-
-        function esc(s) {
-          return String(s == null ? "" : s).replace(/[&<>"']/g, function (c) {
-            return {
-              "&": "&amp;",
-              "<": "&lt;",
-              ">": "&gt;",
-              '"': "&quot;",
-              "'": "&#39;",
-            }[c];
-          });
-        }
-
-        function showAlert(el, msg, ok) {
-          el.textContent = msg;
-          el.className = "alert show " + (ok ? "alert-success" : "alert-error");
-        }
-        function hideAlert(el) {
-          el.className = "alert";
-        }
-
-        // ---------- Toast（与管理端一致） ----------
-        var toastTimer = null;
-        function toast(msg, isErr) {
-          var el = $("toast");
-          el.textContent = msg;
-          el.className = "toast show" + (isErr ? " err" : "");
-          clearTimeout(toastTimer);
-          toastTimer = setTimeout(function () {
-            el.className = "toast" + (isErr ? " err" : "");
-          }, 2600);
-        }
-
-        // ---------- 通用弹层（与管理端 admin.html 共用同一套代码） ----------
-        function openModal(spec) {
-          $("modalTitle").textContent = spec.title || "提示";
-          $("modalMsg").innerHTML = spec.msg || "";
-          var form = $("modalForm");
-          form.innerHTML = "";
-          (spec.fields || []).forEach(function (f) {
-            var lab = document.createElement("label");
-            lab.className = "field";
-            var span = document.createElement("span");
-            span.textContent = f.label;
-            if (f.required) span.innerHTML += '<span class="req">*</span>';
-            var inp = document.createElement("input");
-            inp.type = f.type || "text";
-            inp.id = "mf_" + f.id;
-            inp.placeholder = f.placeholder || "";
-            // 统一 autocomplete="off"：避免移动端唤起密码管理器/自动填充条
-            inp.autocomplete = "off";
-            lab.appendChild(span);
-            lab.appendChild(inp);
-            form.appendChild(lab);
-          });
-          var okBtn = $("modalOk");
-          okBtn.textContent = spec.okText || "确定";
-          okBtn.className = "btn " + (spec.danger ? "btn-danger" : "btn-primary");
-          $("mask").classList.add("show");
-          setTimeout(function () {
-            var first = form.querySelector("input");
-            if (first) first.focus();
-          }, 50);
-          okBtn.onclick = function () {
-            var values = {};
-            for (var i = 0; i < (spec.fields || []).length; i++) {
-              var f = spec.fields[i];
-              values[f.id] = $("mf_" + f.id).value.trim();
-            }
-            if (spec.onOk && spec.onOk(values) === false) return;
-            closeModal();
-          };
-          $("modalCancel").onclick = closeModal;
-        }
-        function closeModal() {
-          $("mask").classList.remove("show");
-        }
-
-        // ---------- API 封装 ----------
-        function authHeaders() {
-          var h = {};
-          if (creds.token) h["Authorization"] = "Bearer " + creds.token;
-          return h;
-        }
-
-        function apiGet(path) {
-          return fetch(BASE + path, { method: "GET", headers: authHeaders() })
-            .catch(function () {
-              throw new Error(
-                "无法连接服务器：连接被拒绝。可能 IP 已被封禁（服务器执行 banip show 查看并 banip del 解封），或地址前缀有误",
-              );
-            })
-            .then(handleResp);
-        }
-
-        function apiPost(path, body) {
-          var headers = Object.assign(
-            { "Content-Type": "application/json" },
-            authHeaders(),
-          );
-          return fetch(BASE + path, {
-            method: "POST",
-            headers: headers,
-            body: JSON.stringify(body),
-          })
-            .catch(function () {
-              throw new Error(
-                "无法连接服务器：连接被拒绝。可能 IP 已被封禁（服务器执行 banip show 查看并 banip del 解封），或地址前缀有误",
-              );
-            })
-            .then(handleResp);
-        }
-
-        function handleResp(resp) {
-          return resp
-            .json()
-            .catch(function () {
-              throw new Error("服务器响应格式错误");
-            })
-            .then(function (data) {
-              if (resp.status === 403) {
-                // 凭证失效：跳转登录页
-                backToLogin();
-                throw new Error(data.message || "认证失败");
-              }
-              if (!resp.ok || data.success === false) {
-                throw new Error(
-                  data.message || "请求失败 (HTTP " + resp.status + ")",
-                );
-              }
-              return data;
-            });
-        }
+        // 主题色板（会话随机）与亮暗切换、esc/提示条/Toast/通用弹层/API 封装等
+        // 公共工具由 shared.js 注入的 window.CD 提供
 
         // ---------- 登录 / 退出 ----------
         function loadCreds() {
@@ -961,7 +843,7 @@
         }
 
         function tryLogin() {
-          return apiGet("tasks")
+          return CD.apiGet("tasks")
             .then(enterApp)
             .catch(function () {
               backToLogin();
@@ -974,13 +856,12 @@
           localStorage.removeItem(LS.role);
           location.href = BASE + "login.html";
         }
+        // API 层遇到 403（凭证失效）时由 shared.js 回调本函数
+        CD.onUnauthorized = backToLogin;
 
         // ---------- 菜单关闭（展开/互斥/点外关闭由 shared.js 接管） ----------
         function closeUserMenu() {
           $("userMenu").classList.remove("show");
-        }
-        function closeBrandMenu() {
-          $("brandMenu").classList.remove("show");
         }
 
         $("menuLogout").addEventListener("click", function () {
@@ -990,13 +871,13 @@
             creds = { token: "", user: "" };
             backToLogin();
           };
-          apiPost("logout", {}).then(done).catch(done);
+          CD.apiPost("logout", {}).then(done).catch(done);
         });
 
         // ---------- 修改密码（弹层代码与管理端 admin.html 完全一致） ----------
         $("menuPass").addEventListener("click", function () {
           closeUserMenu();
-          openModal({
+          CD.openModal({
             title: "修改密码 - " + (creds.user || "用户"),
             fields: [
               {
@@ -1024,18 +905,18 @@
             okText: "保存并重新登录",
             onOk: function (v) {
               if (!v.old || !v.new1) {
-                toast("旧密码与新密码不能为空", true);
+                CD.toast("旧密码与新密码不能为空", true);
                 return false;
               }
               if (v.new1.length < 6) {
-                toast("新密码至少 6 位", true);
+                CD.toast("新密码至少 6 位", true);
                 return false;
               }
               if (v.new1 !== v.new2) {
-                toast("两次输入的新密码不一致", true);
+                CD.toast("两次输入的新密码不一致", true);
                 return false;
               }
-              apiPost("password", {
+              CD.apiPost("password", {
                 oldPassword: v.old,
                 newPassword: v.new1,
               })
@@ -1045,11 +926,13 @@
                   localStorage.removeItem(LS.user);
                   localStorage.removeItem(LS.role);
                   creds = { token: "", user: "" };
-                  toast((data.message || "密码已修改") + "，即将返回登录页…");
+                  CD.toast(
+                    (data.message || "密码已修改") + "，即将返回登录页…",
+                  );
                   setTimeout(backToLogin, 1500);
                 })
                 .catch(function (e) {
-                  toast(e.message, true);
+                  CD.toast(e.message, true);
                   return false;
                 });
             },
@@ -1060,7 +943,7 @@
         // 输入目标账户用户名+密码（无需 AUTH_KEY），成功后吊销旧令牌并跳转
         $("menuSwitch").addEventListener("click", function () {
           closeUserMenu();
-          openModal({
+          CD.openModal({
             title: "切换用户",
             fields: [
               {
@@ -1080,10 +963,10 @@
             okText: "切换并登录",
             onOk: function (v) {
               if (!v.username || !v.password) {
-                toast("用户名和密码不能为空", true);
+                CD.toast("用户名和密码不能为空", true);
                 return false;
               }
-              apiPost("switch-user", {
+              CD.apiPost("switch-user", {
                 username: v.username,
                 password: v.password,
               })
@@ -1093,7 +976,7 @@
                   localStorage.setItem(LS.user, v.username);
                   localStorage.setItem(LS.role, data.data.role || "user");
                   creds = { token: data.data.token, user: v.username };
-                  toast("切换成功，正在跳转…");
+                  CD.toast("切换成功，正在跳转…");
                   // 按目标角色跳转：管理员 → 管理控制台，用户 → 刷新当前页
                   setTimeout(function () {
                     if (data.data.role === "admin") {
@@ -1104,208 +987,15 @@
                   }, 800);
                 })
                 .catch(function (e) {
-                  toast(e.message, true);
+                  CD.toast(e.message, true);
                   return false;
                 });
             },
           });
         });
 
-        // ---------- 过滤规则编辑器 ----------
-        var filterState = {
-          keywords: { enabled: false, list: [] },
-          filename_filter: { enabled: false, list: [] },
-          filename_dedup: { enabled: false, rules: [] },
-        };
-
-        function renderChips(key, listId, inputId) {
-          var wrap = $(listId);
-          wrap.innerHTML = "";
-          var list = filterState[key].list;
-          if (!list.length) {
-            var tip = document.createElement("span");
-            tip.className = "empty-tip";
-            tip.textContent = "暂无关键字";
-            wrap.appendChild(tip);
-            return;
-          }
-          list.forEach(function (item, idx) {
-            var chip = document.createElement("span");
-            chip.className = "chip";
-            var text = document.createElement("span");
-            text.textContent = item;
-            var del = document.createElement("button");
-            del.type = "button";
-            del.textContent = "✕";
-            del.title = "删除";
-            del.onclick = function () {
-              filterState[key].list.splice(idx, 1);
-              renderChips(key, listId, inputId);
-            };
-            chip.appendChild(text);
-            chip.appendChild(del);
-            wrap.appendChild(chip);
-          });
-        }
-
-        function addKeywords(key, listId, inputId) {
-          var raw = $(inputId).value.trim();
-          if (!raw) return;
-          raw
-            .split(/[,，\n]/)
-            .map(function (s) {
-              return s.trim();
-            })
-            .filter(function (s) {
-              return s;
-            })
-            .forEach(function (s) {
-              if (filterState[key].list.indexOf(s) === -1)
-                filterState[key].list.push(s);
-            });
-          $(inputId).value = "";
-          renderChips(key, listId, inputId);
-        }
-
-        function renderDdRules() {
-          var wrap = $("ddRules");
-          wrap.innerHTML = "";
-          var rules = filterState.filename_dedup.rules;
-          rules.forEach(function (rule, idx) {
-            var row = document.createElement("div");
-            row.className = "dd-rule";
-            var p = document.createElement("input");
-            p.type = "text";
-            p.placeholder = "正则 pattern";
-            p.value = rule.pattern || "";
-            p.oninput = function () {
-              rules[idx].pattern = p.value;
-            };
-            var arrow = document.createElement("span");
-            arrow.className = "dd-arrow";
-            arrow.textContent = "→";
-            var r = document.createElement("input");
-            r.type = "text";
-            r.placeholder = "替换为";
-            r.value = rule.replacement || "";
-            r.oninput = function () {
-              rules[idx].replacement = r.value;
-            };
-            var del = document.createElement("button");
-            del.type = "button";
-            del.className = "btn";
-            del.textContent = "✕";
-            del.title = "删除规则";
-            del.onclick = function () {
-              rules.splice(idx, 1);
-              renderDdRules();
-            };
-            row.appendChild(p);
-            row.appendChild(arrow);
-            row.appendChild(r);
-            row.appendChild(del);
-            wrap.appendChild(row);
-          });
-        }
-
-        function loadFilters() {
-          apiGet("filters")
-            .then(function (data) {
-              filterState = {
-                keywords: {
-                  enabled: !!data.data.keywords.enabled,
-                  list: data.data.keywords.list || [],
-                },
-                filename_filter: {
-                  enabled: !!data.data.filename_filter.enabled,
-                  list: data.data.filename_filter.list || [],
-                },
-                filename_dedup: {
-                  enabled: !!data.data.filename_dedup.enabled,
-                  rules: data.data.filename_dedup.rules || [],
-                },
-              };
-              $("kwEnabled").checked = filterState.keywords.enabled;
-              $("ffEnabled").checked = filterState.filename_filter.enabled;
-              $("ddEnabled").checked = filterState.filename_dedup.enabled;
-              renderChips("keywords", "kwChips", "kwInput");
-              renderChips("filename_filter", "ffChips", "ffInput");
-              renderDdRules();
-              hideAlert($("filterAlert"));
-            })
-            .catch(function (e) {
-              showAlert($("filterAlert"), e.message, false);
-            });
-        }
-
-        $("menuFilters").addEventListener("click", function () {
-          closeUserMenu();
-          $("filterMask").classList.add("show");
-          loadFilters();
-        });
-        // 点击弹窗外部不再关闭，仅可通过「取消」按钮关闭
-        $("filterCancel").addEventListener("click", function () {
-          $("filterMask").classList.remove("show");
-          hideAlert($("filterAlert"));
-        });
-        $("kwAdd").addEventListener("click", function () {
-          addKeywords("keywords", "kwChips", "kwInput");
-        });
-        $("kwInput").addEventListener("keydown", function (e) {
-          if (e.key === "Enter") {
-            e.preventDefault();
-            addKeywords("keywords", "kwChips", "kwInput");
-          }
-        });
-        $("ffAdd").addEventListener("click", function () {
-          addKeywords("filename_filter", "ffChips", "ffInput");
-        });
-        $("ffInput").addEventListener("keydown", function (e) {
-          if (e.key === "Enter") {
-            e.preventDefault();
-            addKeywords("filename_filter", "ffChips", "ffInput");
-          }
-        });
-        $("ddAdd").addEventListener("click", function () {
-          filterState.filename_dedup.rules.push({
-            pattern: "",
-            replacement: "",
-          });
-          renderDdRules();
-        });
-        $("filterSave").addEventListener("click", function () {
-          filterState.keywords.enabled = $("kwEnabled").checked;
-          filterState.filename_filter.enabled = $("ffEnabled").checked;
-          filterState.filename_dedup.enabled = $("ddEnabled").checked;
-          // 前端正则预校验，避免提交后被后端拒绝
-          try {
-            filterState.filename_dedup.rules.forEach(function (rule) {
-              if ((rule.pattern || "").trim()) new RegExp(rule.pattern.trim());
-            });
-          } catch (err) {
-            showAlert(
-              $("filterAlert"),
-              "正则表达式不合法: " + err.message,
-              false,
-            );
-            return;
-          }
-          var btn = $("filterSave");
-          btn.disabled = true;
-          apiPost("filters", filterState)
-            .then(function (data) {
-              showAlert($("filterAlert"), data.message || "已保存", true);
-              setTimeout(function () {
-                $("filterMask").classList.remove("show");
-              }, 1200);
-            })
-            .catch(function (e) {
-              showAlert($("filterAlert"), e.message, false);
-            })
-            .finally(function () {
-              btn.disabled = false;
-            });
-        });
+        // ---------- 过滤规则编辑器（与 admin 端共用 shared.js 的实现） ----------
+        CD.initFilterEditor({ basePath: "filters" });
 
         // ---------- 输出格式自绘下拉框 ----------
         var fmtWrap = $("fFormatWrap");
@@ -1363,7 +1053,7 @@
           e.preventDefault();
           var body = { url: $("fUrl").value.trim() };
           if (!body.url) {
-            showAlert($("dlAlert"), "URL 不能为空", false);
+            CD.showAlert($("dlAlert"), "URL 不能为空", false);
             return;
           }
           var name = $("fName").value.trim();
@@ -1383,14 +1073,14 @@
           var btn = $("dlBtn");
           btn.disabled = true;
           btn.textContent = "提交中…";
-          hideAlert($("dlAlert"));
-          apiPost("download", body)
+          CD.hideAlert($("dlAlert"));
+          CD.apiPost("download", body)
             .then(function (data) {
               var msg = data.message || "下载任务已添加";
               if (data.blocked) {
-                showAlert($("dlAlert"), "🚫 " + msg, false);
+                CD.showAlert($("dlAlert"), "🚫 " + msg, false);
               } else {
-                showAlert(
+                CD.showAlert(
                   $("dlAlert"),
                   "✅ " +
                     msg +
@@ -1402,7 +1092,7 @@
               }
             })
             .catch(function (err) {
-              showAlert($("dlAlert"), "❌ " + err.message, false);
+              CD.showAlert($("dlAlert"), "❌ " + err.message, false);
             })
             .finally(function () {
               btn.disabled = false;
@@ -1420,7 +1110,7 @@
         };
 
         function taskActionButtons(t) {
-          var id = esc(t.id);
+          var id = CD.esc(t.id);
           var btns = "";
           if (t.status === "paused") {
             btns +=
@@ -1441,7 +1131,7 @@
         }
 
         function refreshTasks() {
-          return apiGet("tasks", true)
+          return CD.apiGet("tasks")
             .then(function (data) {
               var tasks = data.data || [];
               $("taskCount").textContent = tasks.length;
@@ -1453,13 +1143,13 @@
                   var pct = Math.max(0, Math.min(100, Number(t.progress) || 0));
                   return (
                     '<div class="task-item" data-id="' +
-                    esc(t.id) +
+                    CD.esc(t.id) +
                     '">' +
                     '<div class="task-row1">' +
                     '<span class="task-name" title="' +
-                    esc(t.save_name || "") +
+                    CD.esc(t.save_name || "") +
                     '">' +
-                    esc(t.save_name || "(未命名)") +
+                    CD.esc(t.save_name || "(未命名)") +
                     "</span>" +
                     '<span class="badge ' +
                     st[1] +
@@ -1472,9 +1162,9 @@
                     '%"></div></div>' +
                     '<div class="task-row2">' +
                     '<span class="task-id">ID: ' +
-                    esc(t.id) +
+                    CD.esc(t.id) +
                     "</span>" +
-                    (t.user ? "<span>👤 " + esc(t.user) + "</span>" : "") +
+                    (t.user ? "<span>👤 " + CD.esc(t.user) + "</span>" : "") +
                     '<span style="flex:1"></span>' +
                     '<span class="pct">' +
                     pct +
@@ -1525,12 +1215,12 @@
         }
 
         function taskActionRequest(path, id) {
-          apiPost(path, { taskId: id })
+          CD.apiPost(path, { taskId: id })
             .then(function () {
               refreshTasks(); // 状态徽标变化即是操作反馈，成功无需弹窗
             })
             .catch(function (err) {
-              toast("操作失败：" + err.message, true);
+              CD.toast("操作失败：" + err.message, true);
             });
         }
 
@@ -1559,22 +1249,22 @@
         });
 
         function showDetail(id) {
-          apiGet("tasks/" + encodeURIComponent(id), true)
+          CD.apiGet("tasks/" + encodeURIComponent(id))
             .then(function (data) {
               var t = data.data || {};
               var st = STATUS_MAP[t.status] || [t.status, "badge-running"];
               var urls =
                 t.urls && t.urls.length ? t.urls : t.url ? [t.url] : [];
               var rows = [
-                ["任务 ID", esc(t.id), true],
-                ["文件名", esc(t.save_name || "(未命名)"), false],
+                ["任务 ID", CD.esc(t.id), true],
+                ["文件名", CD.esc(t.save_name || "(未命名)"), false],
                 [
                   "状态",
                   '<span class="badge ' + st[1] + '">' + st[0] + "</span>",
                   false,
                 ],
                 ["进度", (Number(t.progress) || 0) + "%", false],
-                ["所属用户", esc(t.user || "-"), false],
+                ["所属用户", CD.esc(t.user || "-"), false],
                 ["重试次数", String(t._retry_count || 0), false],
                 ["链接数", String(urls.length), false],
               ];
@@ -1595,7 +1285,7 @@
                 '<dt>全部链接</dt><dd><div class="url-list">' +
                 urls
                   .map(function (u) {
-                    return '<div class="url-item">' + esc(u) + "</div>";
+                    return '<div class="url-item">' + CD.esc(u) + "</div>";
                   })
                   .join("") +
                 "</div></dd>";
@@ -1603,7 +1293,7 @@
               $("modalMask").classList.add("show");
             })
             .catch(function (err) {
-              toast("获取任务详情失败：" + err.message, true);
+              CD.toast("获取任务详情失败：" + err.message, true);
             });
         }
 
@@ -1633,7 +1323,7 @@
 
         // ---------- 服务信息 ----------
         function loadConfigInfo() {
-          apiGet("config")
+          CD.apiGet("config")
             .then(function (data) {
               var c = data.data || {};
               var on = function (v) {
@@ -1697,7 +1387,7 @@
                       '<span class="val ' +
                       (it[3] || "") +
                       '">' +
-                      esc(it[2]) +
+                      CD.esc(it[2]) +
                       "</span></div>"
                     );
                   })
@@ -1712,12 +1402,12 @@
               html += '<div class="info-section-title">— 猫抓插件配置 —</div>';
               html +=
                 '<div style="margin-bottom:8px;font-size:12px;color:var(--text-2);">发送地址：</div>';
-              html += '<div class="info-code">' + esc(sendUrl) + "</div>";
+              html += '<div class="info-code">' + CD.esc(sendUrl) + "</div>";
               html +=
                 '<div style="margin:10px 0 6px;font-size:12px;color:var(--text-2);">请求体：</div>';
               html +=
                 '<div class="info-code">' +
-                esc(
+                CD.esc(
                   [
                     "{",
                     '  "url": "${url}",',

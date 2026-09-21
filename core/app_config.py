@@ -212,6 +212,7 @@ def load_filters():
         keywords_enabled = False
         filename_filters = []
         filename_filter_enabled = False
+        filename_dedup_enabled = False
         filename_dedup_rules = []
 
     globals().update({

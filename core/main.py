@@ -55,7 +55,12 @@ def main():
 
     register_signal_handlers()
 
-    port = int(os.environ.get('API_PORT', cfg.server_port))
+    port = cfg.server_port
+    env_port = os.environ.get('API_PORT', '').strip()
+    if env_port.isdigit() and 0 < int(env_port) < 65536:
+        port = int(env_port)
+    elif env_port:
+        print(f"警告: API_PORT 环境变量值无效: {env_port}，使用默认端口 {cfg.server_port}")
 
     api_prefix = f"/{cfg.url_prefix}" if cfg.url_prefix else ""
     #╔════════════════════════════════════════════════════════╗
