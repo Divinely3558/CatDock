@@ -352,6 +352,37 @@ def _get_mysql_conn():
         params['connect_timeout'] = 10
         try:
             raw_conn = pymysql.connect(**params)
+        except pymysql.err.OperationalError as e:
+            code = e.args[0] if e.args else 0
+            host_port = f"{params['host']}:{params['port']}"
+            if code == 2003:
+                # Can't connect to MySQL server on '<host>'
+                raise RuntimeError(
+                    f"无法连接 MySQL 服务器 {host_port}："
+                    f"目标主机端口拒绝连接。\n"
+                    f"请依次排查：\n"
+                    f"  1. MySQL 服务是否在 {host_port} 正常监听（宿主机执行 ss -lntp | grep 3306）\n"
+                    f"  2. DATABASE_URL 中的 IP/端口是否填错\n"
+                    f"  3. 容器到该 IP 的网络是否通（docker exec catdock ping {params['host']}）\n"
+                    f"  4. 宿主机防火墙是否放行 3306（iptables -L / ufw status）\n"
+                    f"  5. MySQL 是否只监听了 127.0.0.1（my.cnf bind-address 应改为 0.0.0.0 或该主机 IP）\n"
+                    f"  6. MySQL 服务是否根本没启动") from e
+            if code == 1045:
+                # Access denied for user
+                raise RuntimeError(
+                    f"MySQL 认证失败：用户名或密码错误。"
+                    f"请检查 DATABASE_URL 中的账号密码是否与 MySQL 中创建的一致") from e
+            raise RuntimeError(
+                f"MySQL 连接失败（错误码 {code}）: {e.args[1] if len(e.args) > 1 else e}") from e
+        except ConnectionRefusedError as e:
+            host_port = f"{params['host']}:{params['port']}"
+            raise RuntimeError(
+                f"无法连接 MySQL 服务器 {host_port}：ConnectionRefused。\n"
+                f"排查要点同上：MySQL 服务是否启动？端口是否监听？IP 是否正确？") from e
+        except TimeoutError as e:
+            host_port = f"{params['host']}:{params['port']}"
+            raise RuntimeError(
+                f"连接 MySQL {host_port} 超时（10 秒）。网络不通或目标主机不可达。") from e
         except RuntimeError as e:
             # MySQL 8 默认 caching_sha2_password：服务端无该用户认证缓存时，
             # 完整认证路径需要 cryptography（镜像已内置 python3-cryptography）
@@ -367,7 +398,12 @@ def _get_mysql_conn():
             _db_conn.execute(stmt)
         _db_conn.commit()
     else:
-        _db_conn.ping()
+        try:
+            _db_conn.ping()
+        except Exception as e:
+            # 运行期连接断开（MySQL 重启/网络闪断）：丢弃旧连接、下次重新建立
+            _db_conn = None
+            raise
     return _db_conn
 
 
