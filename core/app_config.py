@@ -167,7 +167,7 @@ def load_filters():
     注意：本函数内部惰性导入 app_logger，以避免 app_config <-> app_logger
     的顶层循环导入（app_logger 顶层会 import app_config）。
     """
-    from app_logger import log_info, log_error, debug_print
+    from app_logger import log_info, log_error
 
     ad_keywords = []
     keywords_enabled = False
@@ -202,10 +202,6 @@ def load_filters():
                         filename_dedup_rules.append((compiled, replacement))
                     except re.error as e:
                         log_info(f"文件名去重正则编译失败 [{pattern_str}]: {e}")
-
-        debug_print(f"[启动] 过滤规则加载: 拦截关键字 {'启用' if keywords_enabled else '禁用'} ({len(ad_keywords)} 个), "
-                    f"文件名过滤 {'启用' if filename_filter_enabled else '禁用'} ({len(filename_filters)} 个), "
-                    f"文件名去重 {'启用' if filename_dedup_enabled else '禁用'} ({len(filename_dedup_rules)} 条正则规则)")
     except Exception as e:
         log_error(f"过滤规则加载失败: {e}")
         ad_keywords = []
@@ -297,7 +293,7 @@ def load_config():
                           管理网页修改即时写回并生效；
       - filter_rules.json 过滤规则，/reload 热加载。
     """
-    from app_logger import debug_print
+    from app_logger import log_error
 
     # 版本号（web/VERSION），与系统配置无关，仅用于展示一致性
     load_version()
@@ -320,12 +316,9 @@ def load_config():
     if env_max.isdigit() and int(env_max) > 0:
         max_concurrent_tasks = int(env_max)
 
-    debug_print(f"[启动] 系统配置(环境变量): 同视频模式={'启用' if same_video_by_filename_enabled else '关闭'}, "
-                f"SSRF防护={'启用' if ssrf_protection else '关闭'}, 最大并发={max_concurrent_tasks}；"
-                f"调试模式运行时开关(debug yes/no)，当前关闭")
-
     # 安全校验：URL_PREFIX 必须设置（AUTH_KEY 为空时由 main.py 首启自动生成并写回）
     if not url_prefix:
+        log_error("启动失败：URL_PREFIX 未设置，请在 docker-compose.yml 环境变量中指定")
         raise RuntimeError("URL_PREFIX 未设置，请在 docker-compose.yml 环境变量中指定")
 
     # 把加载结果写回模块属性（load_config 内的局部变量 -> 全局状态）
@@ -411,10 +404,8 @@ def save_auth_key(new_key):
     管理网页修改 AUTH_KEY 与首启自动生成共用此入口；调用方负责令牌吊销。
     """
     global auth_key
-    from app_logger import debug_print
     admin = _read_admin_dict()
     admin['auth_key'] = new_key
     # 含认证密钥：文件权限限制为仅所有者可读写（0600）
     _write_json_atomic(ADMIN_CONFIG_FILE, admin, mode=0o600)
     auth_key = new_key
-    debug_print(f"[启动] AUTH_KEY 已写回配置文件: {ADMIN_CONFIG_FILE}")

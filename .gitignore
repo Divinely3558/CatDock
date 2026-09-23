@@ -63,3 +63,7 @@ admin_config.json
 *.db-wal
 # SQLite 共享内存文件
 *.db-shm
+
+# 本地临时/含敏感信息文件（勿提交）
+ghcr_cleanup.py
+banner_preview.txt
