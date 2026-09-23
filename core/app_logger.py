@@ -105,10 +105,10 @@ def log_error(*args, **kwargs):
 
 
 def debug_print(*args, **kwargs):
-    """调试模式下输出日志，带时间戳"""
-    if cfg.debug_mode:
-        timestamp = time.strftime('%y%m%d %H:%M:%S')
-        print(f"[{timestamp}] DEBUG: ", end='')
-        print(*args, **kwargs)
-    # DEBUG 级别同样写入文件，便于排查历史问题（调试模式关闭时不输出到控制台但仍写文件）
+    """调试模式下输出日志，带时间戳；debug 关闭时不输出控制台也不写入文件"""
+    if not cfg.debug_mode:
+        return
+    timestamp = time.strftime('%y%m%d %H:%M:%S')
+    print(f"[{timestamp}] DEBUG: ", end='')
+    print(*args, **kwargs)
     _write_to_file('DEBUG', *args, **kwargs)
