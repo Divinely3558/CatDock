@@ -310,6 +310,9 @@ services:
       - 114.114.114.114
       - 119.29.29.29
     environment:
+      # 🗄️ 数据库后端：不配置 DATABASE_URL 默认使用 SQLite（config/data.db，零依赖）
+      # 取消下行注释并填连接串可切换为 MySQL（目标库需提前建好、账号有建表权限，切换视为全新部署不迁移数据）：
+      # - DATABASE_URL=mysql://catdock:你的密码@your-mysql-host:3306/catdock
       - URL_PREFIX=qj52lajx # 🔒 必须设置：URL 路径前缀（建议 8 位以上随机字符串）
       - API_PORT=5000 # 📡 监听端口（host 模式下直接占用宿主端口）
       - SSRF_PROTECTION=true # 🛡️ SSRF防护: true=拦截内网地址, false=允许内网下载
@@ -804,7 +807,7 @@ services:
       - SAME_VIDEO_BY_FILENAME=true # 🎬 同视频模式：true=同名视频多链接轮流调度（默认开启）
       # 🗄️ 数据库后端：不配置默认使用 SQLite（config/data.db，零依赖）
       # 配置后切换为 MySQL（目标库需提前建好、账号有建表权限；切换视为全新部署不自动迁移数据）：
-      # - DATABASE_URL=mysql://catdock:你的密码@192.168.123.2:3306/catdock
+      # - DATABASE_URL=mysql://catdock:你的密码@your-mysql-host:3306/catdock
 ```
 
 > 四个挂载卷缺一不可：`config`（配置、data.db 与每日日志 log/）、`user`（每用户任务/日志/个人过滤规则）、`temp`（下载缓存分片）、`downloads`（成品视频）。重建容器（`up -d --build` / 换新镜像）后数据全部保留。
@@ -842,7 +845,7 @@ services:
 2. **配置连接串**：在 `docker-compose.yml` 的 `environment` 添加：
 
    ```yaml
-   - DATABASE_URL=mysql://catdock:你的密码@192.168.123.2:3306/catdock
+   - DATABASE_URL=mysql://catdock:你的密码@your-mysql-host:3306/catdock
    ```
 
 3. **重建容器**：`docker compose up -d --build`
