@@ -393,9 +393,26 @@ def load_admin_config():
     auth_key = current_key
 
 
-def generate_random_key(nbytes=24):
-    """生成随机密钥（URL 安全字符，约 nbytes*4/3 长度），用于首启 AUTH_KEY 自动生成"""
-    return secrets.token_urlsafe(nbytes)
+def generate_random_key(length=14):
+    """生成随机密钥（与网页「🎲 随机」规则一致）：14 位，至少 1 个大写、
+    1 个小写、1 个数字、1-3 个符号（!@#$%^&*），其余由字母/数字补足，
+    用于首启 AUTH_KEY 自动生成"""
+    upper = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ'
+    lower = 'abcdefghijklmnopqrstuvwxyz'
+    digit = '0123456789'
+    symbol = '!@#$%^&*'
+    # 符号 1-3 个
+    sym_count = 1 + secrets.randbelow(3)
+    chars = [secrets.choice(upper), secrets.choice(lower), secrets.choice(digit)]
+    chars += [secrets.choice(symbol) for _ in range(sym_count)]
+    # 其余位由字母/数字补足
+    pool = upper + lower + digit
+    chars += [secrets.choice(pool) for _ in range(length - len(chars))]
+    # Fisher-Yates 洗牌，避免各类字符位置固定
+    for i in range(len(chars) - 1, 0, -1):
+        j = secrets.randbelow(i + 1)
+        chars[i], chars[j] = chars[j], chars[i]
+    return ''.join(chars)
 
 
 def save_auth_key(new_key):
