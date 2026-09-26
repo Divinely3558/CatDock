@@ -423,9 +423,27 @@ def _post_process_direct_download(source_file, final_file, target_format, base_n
 
 
 def extract_percent(line):
-    match = re.search(r'(\d{1,3})%', line)
+    # 兼容小数百分比（N_m3u8DL-RE 输出形如 "... 13/30 43.33% ..."，
+    # 旧正则 (\d{1,3})% 会误取小数部分，导致 43.33% 被解析为 33%）
+    match = re.search(r'(\d{1,3}(?:\.\d+)?)%', line)
     if match:
-        return int(match.group(1))
+        # 已检测到下载输出但进度不足 1% 时显示 1%，避免被误认为未开始下载
+        return min(100, max(1, int(float(match.group(1)))))
+    return None
+
+
+def extract_segments(line):
+    """从 N_m3u8DL-RE 进度行解析已下载分片数/总分片数（仅 m3u8 下载有）。
+
+    进度行形如 "Vid Kbps ━━━ 13/30 43.33% 1.07MB/6.45MB 1.07MBps 00:00:01"。
+    正则锚定 N/M 后必须紧跟百分比，避免误匹配行内的 "1.07MB/6.45MB"
+    （其后是 MBps 速率而非百分比数字）。匹配返回 (done, total)，否则 None。
+    """
+    match = re.search(r'(\d{1,5})\s*/\s*(\d{1,5})\s+\d{1,3}(?:\.\d+)?%', line)
+    if match:
+        done, total = int(match.group(1)), int(match.group(2))
+        if 0 <= done <= total and total > 0:
+            return done, total
     return None
 
 
@@ -682,6 +700,11 @@ def _run_download_with_retry(cmd, task_id, max_retries=5, initial_retry_count=0,
                         percent = extract_percent(line)
                         if percent:
                             cfg.tasks[task_id]['progress'] = percent
+                        # m3u8 分片计数（直链 curl 无此信息，不写该字段）
+                        segs = extract_segments(line)
+                        if segs:
+                            cfg.tasks[task_id]['segments'] = {
+                                'done': segs[0], 'total': segs[1]}
         finally:
             process.stdout.close()
 

@@ -67,3 +67,5 @@ admin_config.json
 # 本地临时/含敏感信息文件（勿提交）
 ghcr_cleanup.py
 banner_preview.txt
+# 本地测试文件目录（模拟下载产物）
+.test

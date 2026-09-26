@@ -1141,6 +1141,10 @@
                 .map(function (t) {
                   var st = STATUS_MAP[t.status] || [t.status, "badge-running"];
                   var pct = Math.max(0, Math.min(100, Number(t.progress) || 0));
+                  var seg =
+                    t.segments && t.segments.total > 0
+                      ? t.segments.done + "/" + t.segments.total + " "
+                      : "";
                   return (
                     '<div class="task-item" data-id="' +
                     CD.esc(t.id) +
@@ -1167,6 +1171,7 @@
                     (t.user ? "<span>👤 " + CD.esc(t.user) + "</span>" : "") +
                     '<span style="flex:1"></span>' +
                     '<span class="pct">' +
+                    seg +
                     pct +
                     "%</span>" +
                     taskActionButtons(t) +
@@ -1263,7 +1268,15 @@
                   '<span class="badge ' + st[1] + '">' + st[0] + "</span>",
                   false,
                 ],
-                ["进度", (Number(t.progress) || 0) + "%", false],
+                [
+                  "进度",
+                  (t.segments && t.segments.total > 0
+                    ? t.segments.done + "/" + t.segments.total + " "
+                    : "") +
+                    (Number(t.progress) || 0) +
+                    "%",
+                  false,
+                ],
                 ["所属用户", CD.esc(t.user || "-"), false],
                 ["重试次数", String(t._retry_count || 0), false],
                 ["链接数", String(urls.length), false],
