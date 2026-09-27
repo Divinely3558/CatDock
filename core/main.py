@@ -77,15 +77,15 @@ def main():
 ║                          下载器启动成功                         ║
 ╚═════════════════════════════════════════════════════════════════╝
 
-  🏷️ 版本: {cfg.version or '未知'}
-  📡 API 端口: {port}
-  🔗 URL前缀: {cfg.url_prefix}
-  🛡️ SSRF防护: {'启用' if cfg.ssrf_protection else '关闭'}
-  📊 最大并发: {cfg.max_concurrent_tasks}
-  🎬 同视频模式: {'启用' if cfg.same_video_by_filename_enabled else '禁用'}
-  📋 过滤规则: 拦截关键字{'✓' if cfg.keywords_enabled else '✗'}({len(cfg.ad_keywords)}) 文件名过滤{'✓' if cfg.filename_filter_enabled else '✗'} 去重{'✓' if cfg.filename_dedup_enabled else '✗'}
-  👥 {f"下载用户: {_user_count}" if _user_count > 0 else "未创建任何用户，请在容器内执行 userctl add <用户名>"}
- 
+    版本: {cfg.version or '未知'}
+    API 端口: {port}
+    URL前缀: {cfg.url_prefix}
+    SSRF防护: {'启用' if cfg.ssrf_protection else '关闭'}
+    最大并发: {cfg.max_concurrent_tasks}
+    同视频模式: {'启用' if cfg.same_video_by_filename_enabled else '禁用'}
+    过滤规则: 拦截关键字{'✓' if cfg.keywords_enabled else '✗'}({len(cfg.ad_keywords)}) 文件名过滤{'✓' if cfg.filename_filter_enabled else '✗'} 去重{'✓' if cfg.filename_dedup_enabled else '✗'}
+    {f"下载用户: {_user_count}" if _user_count > 0 else "未创建任何用户，请在容器内执行 userctl add <用户名>"}
+
  ═════════════════════════ 猫抓插件配置 ══════════════════════════
 
     发送地址: http://你的容器IP:{port}{api_prefix}/download
@@ -105,27 +105,26 @@ def main():
     }}
 
  ══════════════════════════ 命令行参考 ═══════════════════════════
- 
-  别名: adminctl→actl  userctl→uctl  banip→bip  debug→dbg
-    adminctl — 管理员账户管理
-    添加管理员（-a）           adminctl add <用户名>
-    修改管理员密码（-p / pw）  adminctl password <用户名>
-    删除管理员（-d / rm）      adminctl del <用户名>
-    列出全部用户（-l / ls）    adminctl list
-    userctl — 下载用户管理
-    添加用户（-a）             userctl add <用户名>
-    修改用户密码（-p / pw）    userctl password <用户名>
-    删除用户（-d / rm）        userctl del <用户名>
-    禁用用户（-b）             userctl ban <用户名>
-    解禁用户（-u）             userctl unban <用户名>
-    banip — IP 封禁管理
-    封禁 IP（-a）              banip add <IP>
-    解封 IP（-d / rm）         banip del <IP>
-    查看封禁列表（-s / ls）    banip show
-    debug — 调试模式开关
-    开启调试模式（-y）         debug yes
-    关闭调试模式（-n）         debug no
-    查看当前状态（-s）         debug show
+
+    adminctl/actl — 管理员账户管理
+      添加管理员（-a）           adminctl add <用户名>
+      修改管理员密码（-p / pw）  adminctl password <用户名>
+      删除管理员（-d / rm）      adminctl del <用户名>
+      列出全部用户（-l / ls）    adminctl list
+    userctl/uctl — 下载用户管理
+      添加用户（-a）             userctl add <用户名>
+      修改用户密码（-p / pw）    userctl password <用户名>
+      删除用户（-d / rm）        userctl del <用户名>
+      禁用用户（-b）             userctl ban <用户名>
+      解禁用户（-u）             userctl unban <用户名>
+    banip/bip — IP 封禁管理
+      封禁 IP（-a）              banip add <IP>
+      解封 IP（-d / rm）         banip del <IP>
+      查看封禁列表（-s / ls）    banip show
+    debug/dbg — 调试模式开关
+      开启调试模式（-y）         debug yes
+      关闭调试模式（-n）         debug no
+      查看当前状态（-s）         debug show
 
  ═══════════════════════════ API 接口 ════════════════════════════
 
