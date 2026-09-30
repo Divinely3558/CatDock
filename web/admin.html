@@ -9,6 +9,27 @@
       /*__SHARED_CSS__*/
 
       /* ---------- 顶栏（与下载控制台一致） ---------- */
+      .health {
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+        font-size: 13px;
+        color: var(--text-2);
+      }
+      .dot {
+        width: 9px;
+        height: 9px;
+        border-radius: 50%;
+        background: var(--text-3);
+      }
+      .dot.ok {
+        background: var(--green);
+        box-shadow: 0 0 0 3px var(--green-soft);
+      }
+      .dot.bad {
+        background: var(--red);
+        box-shadow: 0 0 0 3px var(--red-soft);
+      }
       .brand .tag {
         font-size: 11px;
         font-weight: 600;
@@ -376,12 +397,16 @@
         }
       }
       @media (max-width: 600px) {
+        /* 顶栏单行：brand + 健康状态（仅圆点）靠左，用户名靠右，与 PC 分布一致 */
         .topbar-inner {
           padding: 10px 12px;
           gap: 6px;
         }
         .brand {
           font-size: 16px;
+        }
+        #healthText {
+          display: none;
         }
         .user-chip {
           max-width: 90px;
@@ -619,7 +644,7 @@
           style="fill: var(--card, #ffffff)"
         ></path>
       </symbol>
-                  <symbol id="ic-avatar" viewBox="0 0 1024 1024">
+      <symbol id="ic-avatar" viewBox="0 0 1024 1024">
         <path
           d="M202.5984 392.3456l266.4448-275.5072c24.2688-25.088 64.3584-25.344 88.9344-0.6656l280.8832 282.1632-324.1472 306.0736-312.1152-312.064z"
           fill="#FFAC48"
@@ -802,6 +827,10 @@
               <span class="btn-icon">🌙</span>亮暗切换
             </button>
           </div>
+        </span>
+        <span class="health">
+          <span class="dot" id="healthDot"></span
+          ><span id="healthText">检测中…</span>
         </span>
         <span class="brand-version">v __VERSION__</span>
         <span class="spacer"></span>
@@ -1902,12 +1931,48 @@
       // ---------- 过滤规则模板编辑器（与 user 端共用 shared.js 的实现） ----------
       CD.initFilterEditor({ basePath: "admin/filters" });
 
+      // ---------- 健康检查（与下载控制台一致） ----------
+      var healthTimer = null;
+      function checkHealth() {
+        return fetch(BASE + "health", { method: "GET" })
+          .then(function (r) {
+            return r.json();
+          })
+          .then(function (data) {
+            var t = data.success ? "服务正常" : "服务异常";
+            var dot = document.getElementById("healthDot");
+            var txt = document.getElementById("healthText");
+            if (!dot) return;
+            dot.className = "dot " + (data.success ? "ok" : "bad");
+            txt.textContent = t;
+            dot.parentNode.setAttribute("title", t);
+          })
+          .catch(function () {
+            var dot = document.getElementById("healthDot");
+            var txt = document.getElementById("healthText");
+            if (!dot) return;
+            dot.className = "dot bad";
+            txt.textContent = "连接失败";
+            dot.parentNode.setAttribute("title", "连接失败");
+          });
+      }
+      function scheduleHealth() {
+        if (document.hidden) {
+          healthTimer = setTimeout(scheduleHealth, 10000);
+          return;
+        }
+        checkHealth().then(function () {
+          healthTimer = setTimeout(scheduleHealth, 10000);
+        });
+      }
+
       // ---------- 启动：无令牌直接回登录页；有令牌则拉用户列表验证管理员身份 ----------
       if (!token) {
         backToLogin();
       } else {
         loadUsers();
         loadBans();
+        scheduleHealth();
       }
     </script>
   </body>

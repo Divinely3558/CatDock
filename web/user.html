@@ -98,7 +98,7 @@
         font-weight: 600;
       }
 
-      /* ---------- 主界面 ---------- */
+      /* ---------- 顶栏（与管理控制台一致） ---------- */
       .health {
         display: inline-flex;
         align-items: center;
@@ -120,10 +120,28 @@
         background: var(--red);
         box-shadow: 0 0 0 3px var(--red-soft);
       }
+      .brand .tag {
+        font-size: 11px;
+        font-weight: 600;
+        color: var(--amber);
+        background: var(--amber-soft);
+        border-radius: 6px;
+        padding: 1px 7px;
+        margin-left: 8px;
+      }
+      .brand-version {
+        font-size: 11px;
+        font-weight: 500;
+        color: var(--text-3);
+        margin-left: 6px;
+        letter-spacing: 0.3px;
+      }
       .user-chip {
         color: var(--primary);
         background: var(--primary-soft);
       }
+
+      /* ---------- 主界面 ---------- */
 
       .container {
         max-width: 1080px;
@@ -560,6 +578,9 @@
         details.adv summary {
           padding: 4px 0;
         }
+        .brand-version {
+          display: none;
+        }
       }
     </style>
     <script>
@@ -907,51 +928,52 @@
 
     <!-- ================= 主视图 ================= -->
     <div id="appView">
-      <div class="topbar">
-        <div class="topbar-inner">
-          <span class="user-menu-wrap">
-            <span class="brand" id="brandBtn" title="外观菜单"
-              ><span class="logo"
-                ><svg class="i logo-svg" aria-hidden="true">
-                  <use href="#ic-logo"></use></svg></span
-              >CatDock</span
+    <div class="topbar">
+      <div class="topbar-inner">
+        <span class="user-menu-wrap">
+          <span class="brand" id="brandBtn" title="外观菜单"
+            ><span class="logo"
+              ><svg class="i logo-svg" aria-hidden="true">
+                <use href="#ic-logo"></use></svg></span
+            >CatDock<span class="tag">下载控制台</span></span
+          >
+          <div class="user-menu" id="brandMenu">
+            <button
+              class="user-menu-item"
+              data-theme-palette
+              title="切换主题色"
             >
-            <div class="user-menu" id="brandMenu">
-              <button
-                class="user-menu-item"
-                data-theme-palette
-                title="切换主题色"
-              >
-                <span class="btn-icon">🎨</span>主题色
-              </button>
-              <button
-                class="user-menu-item"
-                data-theme-mode
-                title="切换亮色/暗色"
-              >
-                <span class="btn-icon">🌙</span>亮暗切换
-              </button>
-            </div>
-          </span>
-          <span class="health">
-            <span class="dot" id="healthDot"></span
-            ><span id="healthText">检测中…</span>
-          </span>
-          <span class="spacer"></span>
-          <span class="user-menu-wrap">
-            <span class="user-chip" id="userChip" title="账号菜单"></span>
-            <div class="user-menu" id="userMenu">
-              <button class="user-menu-item" id="menuPass">修改密码</button>
-              <button class="user-menu-item" id="menuSwitch">切换用户</button>
-              <button class="user-menu-item" id="menuFilters">过滤规则</button>
-              <button class="user-menu-item danger" id="menuLogout">
-                退出
-              </button>
-            </div>
-          </span>
-          <span class="topbar-break" aria-hidden="true"></span>
-        </div>
+              <span class="btn-icon">🎨</span>主题色
+            </button>
+            <button
+              class="user-menu-item"
+              data-theme-mode
+              title="切换亮色/暗色"
+            >
+              <span class="btn-icon">🌙</span>亮暗切换
+            </button>
+          </div>
+        </span>
+        <span class="health">
+          <span class="dot" id="healthDot"></span
+          ><span id="healthText">检测中…</span>
+        </span>
+        <span class="brand-version">v __VERSION__</span>
+        <span class="spacer"></span>
+        <span class="user-menu-wrap">
+          <span class="user-chip" id="userChip" title="账号菜单"
+            ><svg class="i chip-avatar" aria-hidden="true">
+              <use href="#ic-avatar"></use></svg
+          ></span>
+          <div class="user-menu" id="userMenu">
+            <button class="user-menu-item" id="menuPass">修改密码</button>
+            <button class="user-menu-item" id="menuSwitch">切换用户</button>
+            <button class="user-menu-item" id="menuFilters">过滤规则</button>
+            <button class="user-menu-item danger" id="menuLogout">退出</button>
+          </div>
+        </span>
       </div>
+    </div>
 
       <div class="container">
         <!-- 提交任务 -->
