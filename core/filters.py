@@ -205,13 +205,19 @@ def filter_filename(name, user=None):
                 filtered_name = filtered_name.replace(keyword, '')
                 ad_count += 1
 
-    # 2. 正则规则（按顺序，每条循环到不再变化）
+    # 2. 正则规则（按顺序，每条循环到不再变化；设迭代上限与长度护栏，
+    #    防止自造振荡/增长规则（如替换文本再次命中 pattern）挂死下载
+    #    线程或撑爆内存，并长期占用并发任务名额）
     if rules['dd_enabled'] and rules['dd_rules']:
+        limit = max(512, len(name) * 3)
         for compiled, replacement in rules['dd_rules']:
-            prev = None
-            while prev != filtered_name:
-                prev = filtered_name
-                filtered_name = compiled.sub(replacement, filtered_name)
+            for _ in range(50):
+                new_name = compiled.sub(replacement, filtered_name)
+                if new_name == filtered_name:
+                    break
+                filtered_name = new_name
+                if len(filtered_name) > limit:
+                    break
 
     # 3. 段级去重（按 _ 分割，去除所有重复段，保留首次出现，始终执行）
     if rules['dd_enabled']:

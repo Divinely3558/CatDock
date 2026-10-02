@@ -548,8 +548,8 @@ def _check_network_ready(max_wait=30):
 
         try:
             # 尝试连接阿里云DNS
-            socket.setdefaulttimeout(3)
             with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
+                sock.settimeout(3)  # 仅作用于本连接，不改全局默认超时
                 sock.connect(('223.5.5.5', 53))
             return True
         except Exception:
@@ -1581,7 +1581,14 @@ def _resume_single_task(task):
     # 设置 per-user 上下文（恢复期文件检查在主线程执行）
     user = task.get('user') or 'default'
     _ddir = task.get('_download_dir') or os.path.join(cfg.DOWNLOAD_DIR, user)
-    _set_thread_context(user, _ddir, cfg.user_temp_dir(user))
+    _tdir = cfg.user_temp_dir(user)
+    _set_thread_context(user, _ddir, _tdir)
+    # 确保 per-user 目录存在（卷内目录被删除后，恢复下载不致因目录缺失直接失败）
+    try:
+        os.makedirs(_ddir, exist_ok=True)
+        os.makedirs(_tdir, exist_ok=True)
+    except Exception as e:
+        debug_print(f"[恢复] 创建用户目录失败: {e}")
 
     normalized_url = url.strip().rstrip('/')
 
@@ -1704,12 +1711,17 @@ def _resume_single_task(task):
 
 # ---- 网页端任务控制（暂停 / 继续 / 删除）----
 
-def pause_task(task_id):
+def pause_task(task_id, owner=None):
     """暂停任务：SIGINT 终止下载进程（N_m3u8DL-RE 保存进度 / curl 保留断点），
-    任务状态置为 paused，worker 线程检测到后自行退出"""
+    任务状态置为 paused，worker 线程检测到后自行退出。
+
+    owner 非 None 时校验任务所有权（不匹配按任务不存在处理，防止跨用户操作）。
+    """
     with cfg.tasks_lock:
         task = cfg.tasks.get(task_id)
         if not task:
+            return False, '任务不存在或已结束'
+        if owner is not None and task.get('user', '') != owner:
             return False, '任务不存在或已结束'
         status = task['status']
         if status == 'paused':
@@ -1726,11 +1738,16 @@ def pause_task(task_id):
     return True, '任务已暂停'
 
 
-def resume_paused_task(task_id):
-    """继续暂停的任务：走与重启恢复相同的检查流程后重新启动下载"""
+def resume_paused_task(task_id, owner=None):
+    """继续暂停的任务：走与重启恢复相同的检查流程后重新启动下载。
+
+    owner 非 None 时校验任务所有权（不匹配按任务不存在处理）。
+    """
     with cfg.tasks_lock:
         task = cfg.tasks.get(task_id)
         if not task:
+            return False, '任务不存在或已结束'
+        if owner is not None and task.get('user', '') != owner:
             return False, '任务不存在或已结束'
         if task['status'] != 'paused':
             return False, '任务不在暂停状态'
@@ -1741,12 +1758,19 @@ def resume_paused_task(task_id):
     return True, '任务已继续下载'
 
 
-def delete_task(task_id):
-    """删除任务：杀进程、移除任务与视频组、删除已下载文件（含临时文件）"""
+def delete_task(task_id, owner=None):
+    """删除任务：杀进程、移除任务与视频组、删除已下载文件（含临时文件）。
+
+    owner 非 None 时校验任务所有权（不匹配按任务不存在处理，不执行任何删除）。
+    """
     with cfg.tasks_lock:
-        task = cfg.tasks.pop(task_id, None)
+        task = cfg.tasks.get(task_id)
         if not task:
             return False, '任务不存在或已结束'
+        if owner is not None and task.get('user', '') != owner:
+            return False, '任务不存在或已结束'
+        # 校验通过，同一锁内移出任务表
+        cfg.tasks.pop(task_id, None)
         proc = task.get('_proc')
 
     # 强杀下载进程（删除无需保留进度）
@@ -1870,22 +1894,30 @@ def run_download(url, save_name=None, referer=None, cookie=None, user_agent=None
             debug_print(f"[调度器] 新建视频组 {base_name}, task_id={task_id}, 链接数=1")
 
         # 创建对应的 tasks 记录（用于进度查询），然后启动调度器
-        with cfg.tasks_lock:
-            _ensure_task_slot()
-            cfg.tasks[task_id] = {
-                'id': task_id,
-                'url': normalized_url,
-                'urls': [normalized_url],
-                'save_name': base_name,
-                'status': 'running',
-                'progress': 0,
-                'user': user,
-                '_download_dir': download_dir,
-                '_referer': referer,
-                '_cookie': cookie,
-                '_user_agent': user_agent,
-                '_retry_count': 0
-            }
+        try:
+            with cfg.tasks_lock:
+                _ensure_task_slot()
+                cfg.tasks[task_id] = {
+                    'id': task_id,
+                    'url': normalized_url,
+                    'urls': [normalized_url],
+                    'save_name': base_name,
+                    'status': 'running',
+                    'progress': 0,
+                    'user': user,
+                    '_download_dir': download_dir,
+                    '_referer': referer,
+                    '_cookie': cookie,
+                    '_user_agent': user_agent,
+                    '_retry_count': 0
+                }
+        except TaskLimitExceeded:
+            # 并发名额已满：回滚刚创建的视频组，避免无任务、无调度器的
+            # 'collecting' 空组把 base_name 永久占住
+            with cfg.video_groups_lock:
+                if cfg.video_groups.get(base_name) is new_group:
+                    cfg.video_groups.pop(base_name, None)
+            raise
         save_tasks()
 
         debug_print(f"[入口] 任务启动: {base_name} (ID: {task_id}) | 模式=同视频调度"

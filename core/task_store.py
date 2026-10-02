@@ -79,21 +79,27 @@ def load_tasks():
 
             with cfg.tasks_lock:
                 for task in tasks_data:
-                    task_urls = task['urls']
-                    cfg.tasks[task['id']] = {
-                        'id': task['id'],
-                        'url': task_urls[0],
-                        'urls': task_urls,
-                        'save_name': task.get('save_name', ''),
-                        'status': task.get('status', 'running'),
-                        'progress': task.get('progress', 0),
-                        'user': task.get('user', '') or username,
-                        '_referer': '',
-                        '_cookie': '',
-                        '_user_agent': '',
-                        '_retry_count': 0
-                    }
-                    loaded_count += 1
+                    try:
+                        task_urls = task['urls']
+                        if not task_urls:
+                            raise ValueError('urls 为空')
+                        cfg.tasks[task['id']] = {
+                            'id': task['id'],
+                            'url': task_urls[0],
+                            'urls': task_urls,
+                            'save_name': task.get('save_name', ''),
+                            'status': task.get('status', 'running'),
+                            'progress': task.get('progress', 0),
+                            'user': task.get('user', '') or username,
+                            '_referer': '',
+                            '_cookie': '',
+                            '_user_agent': '',
+                            '_retry_count': 0
+                        }
+                        loaded_count += 1
+                    except Exception as e:
+                        # 单条坏记录仅跳过自身，不中止其余用户/条目的加载
+                        log_error(f"跳过损坏的任务条目 {tasks_file}: {e}")
 
         if loaded_count:
             debug_print(f"[启动] 已加载 {loaded_count} 个未完成任务")

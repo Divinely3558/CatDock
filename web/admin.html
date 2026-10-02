@@ -15,6 +15,7 @@
         gap: 6px;
         font-size: 13px;
         color: var(--text-2);
+        cursor: pointer;
       }
       .dot {
         width: 9px;
@@ -27,6 +28,11 @@
         box-shadow: 0 0 0 3px var(--green-soft);
       }
       .dot.bad {
+        background: var(--red);
+        box-shadow: 0 0 0 3px var(--red-soft);
+      }
+      /* 有新聊天消息：状态灯变红提醒（与服务异常同色，点开聊天后恢复） */
+      .dot.newmsg {
         background: var(--red);
         box-shadow: 0 0 0 3px var(--red-soft);
       }
@@ -382,6 +388,77 @@
         margin-top: 6px;
       }
 
+      /* ---------- 状态灯彩蛋：聊天室弹窗（与下载控制台一致） ---------- */
+      .chat-box {
+        background: var(--code-bg);
+        border: 1px solid var(--border);
+        border-radius: 8px;
+        height: 280px;
+        overflow-y: auto;
+        padding: 12px;
+        font-size: 13px;
+        margin-bottom: 10px;
+        display: flex;
+        flex-direction: column;
+      }
+      .chat-date {
+        text-align: center;
+        color: var(--text-3);
+        font-size: 12px;
+        margin: 4px 0 10px;
+      }
+      .chat-msg {
+        max-width: 85%;
+        align-self: flex-start;
+        margin-bottom: 10px;
+      }
+      /* 自己的消息靠右（微信式布局），头部与正文右对齐 */
+      .chat-msg.self {
+        align-self: flex-end;
+        text-align: right;
+      }
+      .chat-msg:last-child {
+        margin-bottom: 2px;
+      }
+      .chat-msg .chat-head {
+        color: var(--text-3);
+        font-size: 12px;
+        line-height: 1.4;
+        margin-bottom: 2px;
+      }
+      .chat-msg .chat-sender {
+        font-weight: 600;
+        color: var(--text-2);
+      }
+      .chat-msg.self .chat-sender {
+        color: var(--primary);
+      }
+      .chat-msg .chat-text {
+        color: var(--text);
+        line-height: 1.5;
+        word-break: break-all;
+      }
+      .chat-empty {
+        text-align: center;
+        color: var(--text-3);
+        font-size: 13px;
+        padding: 48px 12px;
+      }
+      .chat-tools {
+        display: flex;
+        justify-content: flex-start;
+        gap: 10px;
+        margin-bottom: 10px;
+      }
+      .chat-input-row {
+        margin-bottom: 14px;
+      }
+      @media (max-width: 480px) {
+        .chat-box {
+          height: 200px;
+        }
+      }
+
       /* ---------- 响应式适配（与下载控制台一致） ---------- */
       @media (max-width: 860px) {
         .btn {
@@ -404,9 +481,6 @@
         }
         .brand {
           font-size: 16px;
-        }
-        #healthText {
-          display: none;
         }
         .user-chip {
           max-width: 90px;
@@ -828,9 +902,8 @@
             </button>
           </div>
         </span>
-        <span class="health">
-          <span class="dot" id="healthDot"></span
-          ><span id="healthText">检测中…</span>
+        <span class="health" id="health" title="点击进入聊天室">
+          <span class="dot" id="healthDot"></span>
         </span>
         <span class="brand-version">v __VERSION__</span>
         <span class="spacer"></span>
@@ -857,8 +930,8 @@
           >用户管理
         </div>
         <div class="sub">
-          管理下载用户与管理员账户；勾选「添加为管理员」可创建管理员账户，管理员的改密、删除仍需在容器内使用
-          <code>adminctl</code> 命令行工具操作。
+          管理下载用户与管理员账户；管理员的改密、删除需在容器内用
+          <code>adminctl</code> 操作。
         </div>
         <div
           style="
@@ -901,9 +974,8 @@
           封禁管理
         </div>
         <div class="sub">
-          被封禁的 IP 将无法访问任何接口；认证连续失败会自动封禁（首次临时 30
-          分钟，再次触发永久封禁）。若管理员自身 IP
-          被误封导致网页无法访问，请在容器内执行
+          封禁的 IP 无法访问任何接口；认证连续失败自动封禁（首次临时 30
+          分钟，再犯永久）。误封时在容器内执行
           <code>banip del &lt;IP&gt;</code> 解封。
         </div>
         <div style="margin-bottom: 12px">
@@ -972,8 +1044,8 @@
             >日志导出
           </div>
           <div class="sub">
-            选择日期范围导出每日日志（合并为单个文件），单次最多 15
-            天，不可选择未来日期；无日志的日期会自动跳过。
+            按日期范围导出每日日志（合并为单文件），单次最多 15
+            天；无日志的日期自动跳过。
           </div>
           <div class="date-range-row">
             <label class="field">
@@ -998,9 +1070,8 @@
           >命令行参考
         </div>
         <div class="sub">
-          在容器内执行（docker exec -it catdock bash）。命令可用别名代替全称：
-          adminctl→<code>actl</code>、userctl→<code>uctl</code>、banip→<code>bip</code>、debug→<code>dbg</code>；
-          各行括号内为子命令缩写。
+          在容器内执行（docker exec -it catdock bash）；命令可用别名：
+          adminctl→<code>actl</code>、userctl→<code>uctl</code>、banip→<code>bip</code>、debug→<code>dbg</code>。
         </div>
         <div class="cmd-row">
           <div class="cmd-group">
@@ -1127,14 +1198,14 @@
     <div class="mask" id="filterMask">
       <div class="modal" style="max-width: 520px">
         <h3>过滤规则模板</h3>
-        <div class="msg">新用户首次登录时复制此模板；已有用户不受影响</div>
+        <div class="msg">作为新用户首次登录的初始规则</div>
         <div class="filter-editor">
           <div class="fe-section">
             <div class="fe-head">
               <label class="fe-switch"
                 ><input type="checkbox" id="kwEnabled" /> 拦截广告关键字</label
               >
-              <span class="hint">URL 或文件名包含关键字时整个任务被拦截</span>
+              <span class="hint">链接或文件名含关键字即拦截</span>
             </div>
             <div class="chips" id="kwChips"></div>
             <div class="fe-add">
@@ -1153,7 +1224,7 @@
                 ><input type="checkbox" id="ffEnabled" />
                 文件名过滤（删除关键字）</label
               >
-              <span class="hint">从保存文件名中删除这些关键字，不拦截下载</span>
+              <span class="hint">从文件名中删除这些关键字</span>
             </div>
             <div class="chips" id="ffChips"></div>
             <div class="fe-add">
@@ -1172,7 +1243,7 @@
                 ><input type="checkbox" id="ddEnabled" />
                 文件名去重（正则规则）</label
               >
-              <span class="hint">按顺序应用正则替换；默认规则已去除重复段</span>
+              <span class="hint">按顺序应用正则替换</span>
             </div>
             <div id="ddRules"></div>
             <button type="button" class="btn" id="ddAdd">+ 添加规则</button>
@@ -1191,11 +1262,41 @@
       </div>
     </div>
 
+    <!-- ================= 状态灯彩蛋：聊天室弹窗（结构与下载控制台一致） ================= -->
+    <div class="mask" id="chatMask">
+      <div class="modal" style="max-width: 520px">
+        <h3>聊天室</h3>
+        <div class="chat-box" id="chatBox"></div>
+        <div class="chat-tools">
+          <button type="button" class="btn btn-primary" id="chatClear">
+            清除聊天记录
+          </button>
+          <button type="button" class="btn btn-ghost" id="chatExport">
+            导出聊天记录
+          </button>
+        </div>
+        <div class="chat-input-row">
+          <input
+            type="text"
+            id="chatInput"
+            placeholder="输入消息，回车发送"
+            autocomplete="off"
+            maxlength="500"
+          />
+        </div>
+        <div class="btns">
+          <button class="btn btn-primary" id="chatSend">发送</button>
+          <button class="btn btn-ghost" id="chatCancel">取消</button>
+        </div>
+      </div>
+    </div>
+
     <script>
       var LS = {
         token: "catdock_token",
         user: "catdock_user",
         role: "catdock_role",
+        chatSeen: "catdock_chat_seen2", // 聊天已读水位（未读红点跨刷新保持；v2：存档改按天分文件后 id 重排，作废旧值）
       };
       var token = localStorage.getItem(LS.token) || "";
       var userName = localStorage.getItem(LS.user) || "";
@@ -1353,9 +1454,7 @@
         } else if (act === "del") {
           CD.openModal({
             title: "删除用户 - " + u.username,
-            msg:
-              "将删除该用户<b>全部数据</b>并吊销全部令牌：配置目录（任务记录、下载记录、过滤规则）、" +
-              "下载缓存、已下载文件，<b>删除后不可恢复</b>。",
+            msg: "将删除该用户<b>全部数据</b>（任务记录、过滤规则、下载文件）并吊销登录，<b>不可恢复</b>。",
             danger: true,
             okText: "全部删除",
             onOk: function () {
@@ -1576,9 +1675,7 @@
           return (CD.toast("请先点击「随机」生成 AUTH_KEY", true), false);
         CD.openModal({
           title: "确认修改 AUTH_KEY？",
-          msg:
-            "修改后立即写入 admin_config.json 并生效，<b>包括管理员在内的所有登录都会失效</b>，" +
-            "需使用新 KEY 重新登录；猫抓插件也要同步更换 key。用户密码不受影响。",
+          msg: "修改后所有用户（含管理员）需重新登录，确认继续？",
           danger: true,
           okText: "修改并全员下线",
           onOk: function () {
@@ -1931,29 +2028,21 @@
       // ---------- 过滤规则模板编辑器（与 user 端共用 shared.js 的实现） ----------
       CD.initFilterEditor({ basePath: "admin/filters" });
 
-      // ---------- 健康检查（与下载控制台一致） ----------
+      // ---------- 健康检查（只看灯：状态由圆点颜色表达，悬停可见文字提示；与下载控制台一致） ----------
       var healthTimer = null;
+      var healthState = null; // null=检测中 / "ok" / "bad"
       function checkHealth() {
         return fetch(BASE + "health", { method: "GET" })
           .then(function (r) {
             return r.json();
           })
           .then(function (data) {
-            var t = data.success ? "服务正常" : "服务异常";
-            var dot = document.getElementById("healthDot");
-            var txt = document.getElementById("healthText");
-            if (!dot) return;
-            dot.className = "dot " + (data.success ? "ok" : "bad");
-            txt.textContent = t;
-            dot.parentNode.setAttribute("title", t);
+            healthState = data.success ? "ok" : "bad";
+            applyDot();
           })
           .catch(function () {
-            var dot = document.getElementById("healthDot");
-            var txt = document.getElementById("healthText");
-            if (!dot) return;
-            dot.className = "dot bad";
-            txt.textContent = "连接失败";
-            dot.parentNode.setAttribute("title", "连接失败");
+            healthState = "bad";
+            applyDot();
           });
       }
       function scheduleHealth() {
@@ -1966,6 +2055,278 @@
         });
       }
 
+      // ---------- 顶栏彩蛋：点击状态灯进入聊天室（与下载控制台一致） ----------
+      // 有新消息时状态灯变红；「清除聊天记录」记录服务端清理水位，
+      // 本账号之后（含刷新/重登）不再返回已清理的消息（存档不删除）。
+      var chatLastId = 0; // 服务端最新消息 id
+      // 已读消息 id（红点判断：chatLastId > chatSeenId 即有新消息）。
+      // 持久化到 localStorage：刷新/重开浏览器后，未读消息的红点仍然保留。
+      // 只有点开弹窗或自己发消息才算已读；换浏览器/清缓存后历史消息按未读处理
+      var chatSeenId =
+        parseInt(localStorage.getItem(LS.chatSeen) || "", 10) || 0;
+      var chatLastDay = ""; // 已渲染的最后日期（YYYY-MM-DD），用于日期分隔线
+      var chatRenderedId = 0; // 已渲染的最大消息 id（发送与轮询竞态时按 id 去重）
+      var chatOpened = false; // 聊天弹窗是否打开
+
+      // 更新已读水位并持久化；写入失败（如隐私模式）降级为仅内存
+      function markChatSeen(id) {
+        if (id <= chatSeenId) return;
+        chatSeenId = id;
+        try {
+          localStorage.setItem(LS.chatSeen, String(chatSeenId));
+        } catch (e) {}
+      }
+      var chatTimer = null;
+
+      // 状态灯颜色 = 服务状态 + 新消息提醒（异常优先）
+      function applyDot() {
+        var dot = document.getElementById("healthDot");
+        if (!dot) return;
+        var hasNew = chatLastId > chatSeenId;
+        var cls = "dot";
+        var title;
+        if (healthState === "bad") {
+          cls += " bad";
+          title = "服务异常";
+        } else if (healthState === "ok") {
+          cls += hasNew ? " newmsg" : " ok";
+          title = hasNew ? "有新消息" : "服务正常";
+        } else {
+          title = "检测中";
+        }
+        dot.className = cls;
+        document
+          .getElementById("health")
+          .setAttribute("title", title + " · 点击进入聊天室");
+      }
+
+      // 聊天轮询：固定 10 秒节拍（setInterval 启动，见底部启动块）。
+      // 不用「上轮完成再排下轮」的链式自调度：公网/移动网络下单次请求挂起
+      // 会永久断链，表现为弹窗内收不到新消息；chatInFlight 防重入兜底。
+      var chatInFlight = false;
+      function pollChat() {
+        if (chatInFlight) return;
+        chatInFlight = true;
+        return CD.apiGet("chat?after=" + chatLastId)
+          .then(function (res) {
+            var d = res.data || {};
+            chatLastId = d.last_id || chatLastId;
+            var list = d.messages || [];
+            if (list.length && chatOpened) {
+              appendChatMessages(list);
+              markChatSeen(chatLastId);
+            }
+            applyDot();
+          })
+          .catch(function () {
+            // 轮询失败静默跳过，下一轮自动重试
+          })
+          .finally(function () {
+            chatInFlight = false;
+          });
+      }
+      function scheduleChat() {
+        if (!document.hidden) pollChat();
+      }
+
+      function chatDateText(day) {
+        var p = day.split("-");
+        return (
+          p[0] + "年" + parseInt(p[1], 10) + "月" + parseInt(p[2], 10) + "日"
+        );
+      }
+      // 单条消息：第一行「发送者（HH:MM）」，第二行正文（textContent 防注入）
+      function buildChatMsg(m) {
+        var wrap = document.createElement("div");
+        wrap.className =
+          "chat-msg" +
+          (m.user === (localStorage.getItem(LS.user) || "") ? " self" : "");
+        var head = document.createElement("div");
+        head.className = "chat-head";
+        var name = document.createElement("span");
+        name.className = "chat-sender";
+        name.textContent = m.user || "?";
+        head.appendChild(name);
+        var t = (m.time || "").slice(11, 16);
+        if (t) head.appendChild(document.createTextNode("（" + t + "）"));
+        var body = document.createElement("div");
+        body.className = "chat-text";
+        body.textContent = m.msg || "";
+        wrap.appendChild(head);
+        wrap.appendChild(body);
+        return wrap;
+      }
+      // 追加一条消息（跨天时先插入日期分隔线；分隔线仅本页显示，不入库）
+      function appendChatLine(m) {
+        var box = document.getElementById("chatBox");
+        var day = (m.time || "").slice(0, 10);
+        if (day && day !== chatLastDay) {
+          chatLastDay = day;
+          var sep = document.createElement("div");
+          sep.className = "chat-date";
+          sep.textContent = chatDateText(day);
+          box.appendChild(sep);
+        }
+        box.appendChild(buildChatMsg(m));
+      }
+      function renderChatMessages(list) {
+        var box = document.getElementById("chatBox");
+        box.innerHTML = "";
+        chatLastDay = "";
+        chatRenderedId = 0;
+        if (!list.length) {
+          box.innerHTML =
+            '<div class="chat-empty">还没有消息，来说第一句吧</div>';
+          return;
+        }
+        list.forEach(appendChatLine);
+        chatRenderedId = list[list.length - 1].id || 0;
+        box.scrollTop = box.scrollHeight;
+      }
+      function appendChatMessages(list) {
+        // 发送与轮询可能带回同一条消息：按已渲染最大 id 去重，防止重复上屏
+        list = list.filter(function (m) {
+          return m.id > chatRenderedId;
+        });
+        if (!list.length) return;
+        var box = document.getElementById("chatBox");
+        var tip = box.querySelector(".chat-empty");
+        if (tip) tip.remove();
+        list.forEach(appendChatLine);
+        chatRenderedId = list[list.length - 1].id || chatRenderedId;
+        box.scrollTop = box.scrollHeight;
+      }
+
+      function openChat() {
+        chatOpened = true;
+        document.getElementById("chatMask").classList.add("show");
+        document.getElementById("chatBox").innerHTML =
+          '<div class="chat-empty">加载中…</div>';
+        CD.apiGet("chat?after=0")
+          .then(function (res) {
+            var d = res.data || {};
+            chatLastId = d.last_id || 0;
+            markChatSeen(chatLastId);
+            renderChatMessages(d.messages || []);
+            applyDot();
+            setTimeout(function () {
+              document.getElementById("chatInput").focus();
+            }, 50);
+          })
+          .catch(function (e) {
+            document.getElementById("chatBox").innerHTML = "";
+            CD.toast(e.message, true);
+          });
+      }
+      function closeChat() {
+        chatOpened = false;
+        document.getElementById("chatMask").classList.remove("show");
+      }
+      function sendChat() {
+        var input = document.getElementById("chatInput");
+        var text = input.value.trim();
+        if (!text) return;
+        var btn = document.getElementById("chatSend");
+        btn.disabled = true;
+        CD.apiPost("chat", { message: text })
+          .then(function (res) {
+            var m = res.data || {};
+            if (m.id) {
+              chatLastId = Math.max(chatLastId, m.id);
+              markChatSeen(chatLastId);
+              appendChatMessages([m]);
+              applyDot();
+            }
+            input.value = "";
+            input.focus();
+          })
+          .catch(function (e) {
+            CD.toast(e.message, true);
+          })
+          .finally(function () {
+            btn.disabled = false;
+          });
+      }
+
+      document.getElementById("health").addEventListener("click", openChat);
+      document.getElementById("chatSend").addEventListener("click", sendChat);
+      document
+        .getElementById("chatInput")
+        .addEventListener("keydown", function (e) {
+          if (e.key === "Enter") {
+            e.preventDefault();
+            sendChat();
+          }
+        });
+      // 清除聊天记录：请求服务端记录本账号的清理水位，
+      // 之后（含刷新/重新登录）不再返回水位之前的消息（存档不删除）
+      document
+        .getElementById("chatClear")
+        .addEventListener("click", function () {
+          CD.apiPost("chat/clear", {})
+            .then(function (res) {
+              var clearedId = (res.data || {}).cleared_id || 0;
+              chatRenderedId = Math.max(chatRenderedId, clearedId);
+              chatLastId = Math.max(chatLastId, clearedId);
+              markChatSeen(chatLastId);
+              document.getElementById("chatBox").innerHTML =
+                '<div class="chat-empty">已清除聊天记录</div>';
+              chatLastDay = "";
+              applyDot();
+            })
+            .catch(function (e) {
+              CD.toast(e.message, true);
+            });
+        });
+      document
+        .getElementById("chatCancel")
+        .addEventListener("click", closeChat);
+      // 导出聊天记录：服务端固定导出最近 7 天（含今天），合并为单个 .log 文件下载
+      document
+        .getElementById("chatExport")
+        .addEventListener("click", function () {
+          var btn = document.getElementById("chatExport");
+          btn.disabled = true;
+          fetch(BASE + "chat/export", {
+            headers: {
+              Authorization:
+                "Bearer " + (localStorage.getItem("catdock_token") || ""),
+            },
+          })
+            .then(function (resp) {
+              if (resp.status === 403 || resp.status === 401) {
+                backToLogin();
+                throw new Error("未登录或登录已过期");
+              }
+              if (!resp.ok) {
+                return resp.json().then(function (j) {
+                  throw new Error(j.message || "导出失败");
+                });
+              }
+              return resp.blob().then(function (blob) {
+                // 从 Content-Disposition 提取文件名，取不到则用默认名
+                var cd = resp.headers.get("Content-Disposition") || "";
+                var m = cd.match(/filename="?([^";]+)"?/);
+                var filename = m ? m[1] : "chat_export.log";
+                var a = document.createElement("a");
+                a.href = URL.createObjectURL(blob);
+                a.download = filename;
+                document.body.appendChild(a);
+                a.click();
+                document.body.removeChild(a);
+                URL.revokeObjectURL(a.href);
+                CD.toast("聊天记录已导出：" + filename);
+              });
+            })
+            .catch(function (e) {
+              CD.toast(e.message, true);
+            })
+            .finally(function () {
+              btn.disabled = false;
+            });
+        });
+      // 与其他弹层一致：点击遮罩不关闭，仅通过「取消」退出
+
       // ---------- 启动：无令牌直接回登录页；有令牌则拉用户列表验证管理员身份 ----------
       if (!token) {
         backToLogin();
@@ -1973,6 +2334,8 @@
         loadUsers();
         loadBans();
         scheduleHealth();
+        scheduleChat(); // 启动立即查一次（未读红点无需等首个 10 秒节拍）
+        chatTimer = setInterval(scheduleChat, 10000);
       }
     </script>
   </body>

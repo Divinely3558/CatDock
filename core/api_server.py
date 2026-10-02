@@ -24,9 +24,10 @@ import http.server
 import app_config as cfg
 from app_logger import log_info, log_error, debug_print
 import data_db
-from security import is_safe_url, sanitize_url_for_log, check_rate_limit
+from security import is_safe_url, sanitize_url_for_log, check_rate_limit, check_redirect_chain
 from filters import is_ad_content, get_user_rules, save_user_rules
 from task_store import load_tasks
+import chat
 from downloader import run_download, resume_tasks, pause_task, resume_paused_task, delete_task, cleanup_user_data, TaskLimitExceeded
 from webui import get_login_html, get_user_html, get_admin_html
 
@@ -270,6 +271,64 @@ class DownloadHandler(http.server.BaseHTTPRequestHandler):
         except Exception as e:
             debug_print(f"[HTTP] 日志文件发送失败: {e}")
 
+    def _handle_chat_export(self):
+        """聊天记录导出：合并最近 7 天（含今天）的每日聊天存档为单个文件下载。
+
+        无需传参（前端一键导出，服务端固定日期范围）；任何登录用户均可使用。
+        无记录的日期自动跳过；输出文件名 chat_YYYYMMDD_HHMMSS.log，
+        文件内每个日期前加一行分隔标记。
+        """
+        import datetime as _dt
+
+        end_date = _dt.date.today()
+        start_date = end_date - _dt.timedelta(days=6)
+
+        # 逐日期读取聊天存档并合并（无记录的日期跳过）
+        lines = []
+        exported_days = 0
+        cur = start_date
+        while cur <= end_date:
+            day_path = os.path.join(chat.CHAT_DIR, cur.isoformat() + '.log')
+            if os.path.isfile(day_path):
+                try:
+                    with open(day_path, 'r', encoding='utf-8') as f:
+                        content = f.read()
+                    if content.strip():
+                        lines.append(f"===== {cur.isoformat()} =====\n")
+                        if not content.endswith('\n'):
+                            content += '\n'
+                        lines.append(content)
+                        exported_days += 1
+                except OSError as e:
+                    debug_print(f"[聊天导出] 读取 {day_path} 失败: {e}")
+            cur += _dt.timedelta(days=1)
+
+        if exported_days == 0:
+            self.send_json({'success': False,
+                            'message': '最近 7 天内没有聊天记录'}, 400)
+            return
+
+        merged = ''.join(lines)
+        body = merged.encode('utf-8')
+        # 文件名：chat_YYYYMMDD_HHMMSS.log（导出时刻，东八区）
+        now = _dt.datetime.now()
+        filename = f"chat_{now.strftime('%Y%m%d_%H%M%S')}.log"
+        log_info(f"{self.authenticated_user} 导出聊天记录: "
+                 f"{start_date.isoformat()} ~ {end_date.isoformat()}"
+                 f"（{exported_days} 天，{len(body)} 字节）")
+
+        try:
+            self.send_response(200)
+            self.send_header('Content-Type', 'text/plain; charset=utf-8')
+            self.send_header('Content-Length', str(len(body)))
+            self.send_header('Content-Disposition',
+                             f'attachment; filename="{filename}"')
+            self.send_header('Connection', 'close')
+            self.end_headers()
+            self.wfile.write(body)
+        except Exception as e:
+            debug_print(f"[HTTP] 聊天记录文件发送失败: {e}")
+
     def handle(self):
         # IP 封禁检查：被封禁的 IP 直接断开连接，不返回任何响应
         # dual-stack 监听下 IPv4 客户端呈现为 ::ffff:1.2.3.4，统一规范化为纯 IPv4，
@@ -411,9 +470,10 @@ class DownloadHandler(http.server.BaseHTTPRequestHandler):
             return False
 
         # 第二层：用户名+密码（data.db 的 users 表），通过 user/password 字段传入
-        # 分两种失败路径：
+        # 分三种失败路径：
         #   - 用户不存在 → IP 级封禁（10 次触发，防扫描爆破）
-        #   - 用户存在但密码错误 → 账号级封禁（5 次触发，自动禁用该账号）
+        #   - 用户存在但密码错误 → 账号级锁定（5 次触发，锁定 30 分钟自动解锁）
+        #   - 账号已被管理员手动禁用 → 提示警告后封 IP
         request_user = _get_field('user', 'usr')
         request_password = _get_field('password')
 
@@ -424,7 +484,7 @@ class DownloadHandler(http.server.BaseHTTPRequestHandler):
             self.send_json({'success': False, 'message': '认证失败，用户名或密码不正确'}, 403)
             return False
 
-        # 账号已禁用（管理员手动禁用 或 密码错误自动禁用）
+        # 账号已被管理员手动禁用：
         # 首次尝试：提示警告
         # 再次尝试：直接封 IP（封禁后连接会被直接断开，无需返回响应）
         if not data_db.is_user_active(request_user):
@@ -440,14 +500,26 @@ class DownloadHandler(http.server.BaseHTTPRequestHandler):
                                 'message': '该账号已被封禁，再次尝试将封禁您的 IP 地址'}, 403)
             return False
 
-        # 密码错误（用户存在）→ 账号级封禁
+        # 账号临时锁定中（连续密码错误触发，30 分钟后自动解锁）
+        # 不计入 IP 封禁：密码尚未验证，无爆破收益
+        lock_remaining = data_db.account_lock_remaining(request_user)
+        if lock_remaining > 0:
+            minutes = max(1, lock_remaining // 60 + (1 if lock_remaining % 60 else 0))
+            log_error(f"认证失败：账号 {request_user} 处于锁定期（剩余约 {minutes} 分钟）")
+            self.send_json({'success': False,
+                            'message': f'密码错误次数过多，账号已锁定，请约 {minutes} 分钟后再试'}, 403)
+            return False
+
+        # 密码错误（用户存在）→ 账号级锁定
         if not request_password or not data_db.verify_user(request_user, request_password):
             log_error(f"认证失败：密码不正确（用户: {request_user}）")
             locked = data_db.record_account_failure(request_user)
             if locked:
-                log_error(f"账号 {request_user} 因连续 {data_db.MAX_ACCOUNT_FAILURES} 次密码错误已被自动禁用")
+                log_error(f"账号 {request_user} 连续 {data_db.MAX_ACCOUNT_FAILURES} 次密码错误，已临时锁定 "
+                          f"{data_db.ACCOUNT_LOCK_MINUTES} 分钟")
                 self.send_json({'success': False,
-                                    'message': '密码错误次数过多，账号已被禁用，请联系管理员'}, 403)
+                                    'message': f'密码错误次数过多，账号已锁定 '
+                                               f'{data_db.ACCOUNT_LOCK_MINUTES} 分钟'}, 403)
             else:
                 remaining = data_db.MAX_ACCOUNT_FAILURES - data_db.get_account_failure_count(request_user)
                 self.send_json({'success': False,
@@ -762,6 +834,28 @@ class DownloadHandler(http.server.BaseHTTPRequestHandler):
                     ],
                 },
             }})
+        elif path == '/chat/export':
+            # 状态灯彩蛋聊天室：导出最近 7 天（含今天）的聊天记录
+            # （固定日期范围无需传参，任何登录用户可用）
+            self._handle_chat_export()
+        elif path == '/chat':
+            # 状态灯彩蛋聊天室：增量拉取消息（?after=N 返回 id > N 的消息）。
+            # 叠加当前用户的清理水位：已清理的消息刷新/重登后不再返回
+            query = urllib.parse.urlparse(self.path).query
+            params = urllib.parse.parse_qs(query)
+            try:
+                after = int((params.get('after') or ['0'])[0])
+            except (TypeError, ValueError):
+                after = 0
+            try:
+                messages, last_id = chat.read_messages(after, user=self.authenticated_user)
+            except Exception as e:
+                self._server_error(e)
+                return
+            self.send_json({'success': True, 'data': {
+                'messages': messages,
+                'last_id': last_id,
+            }})
         else:
             self.send_json({'success': False, 'message': '路径不存在'}, 404)
 
@@ -820,12 +914,21 @@ class DownloadHandler(http.server.BaseHTTPRequestHandler):
                 self.send_json({'success': False, 'message': '目标账号已被禁用'}, 403)
                 return
 
-            # 校验目标密码（密码错误计入目标账号失败计数，连续错误会自动禁用目标账号）
+            # 校验目标密码（密码错误计入目标账号失败计数，连续错误会临时锁定目标账号）
+            # 目标账号处于锁定期（连续密码错误触发，30 分钟后自动解锁）
+            lock_remaining = data_db.account_lock_remaining(target_user)
+            if lock_remaining > 0:
+                minutes = max(1, lock_remaining // 60 + (1 if lock_remaining % 60 else 0))
+                self.send_json({'success': False,
+                                'message': f'目标账号已锁定，请约 {minutes} 分钟后再试'}, 403)
+                return
+
             if not data_db.verify_user(target_user, target_password):
                 locked = data_db.record_account_failure(target_user)
                 if locked:
                     self.send_json({'success': False,
-                                    'message': '密码错误次数过多，目标账号已被禁用'}, 403)
+                                    'message': f'密码错误次数过多，目标账号已锁定 '
+                                               f'{data_db.ACCOUNT_LOCK_MINUTES} 分钟'}, 403)
                 else:
                     remaining = data_db.MAX_ACCOUNT_FAILURES - data_db.get_account_failure_count(target_user)
                     self.send_json({'success': False,
@@ -960,6 +1063,53 @@ class DownloadHandler(http.server.BaseHTTPRequestHandler):
                                 'message': '过滤规则已保存，对新增下载任务立即生效'})
             except Exception as e:
                 self._server_error(e)
+        elif path == '/chat/clear':
+            # 状态灯彩蛋聊天室：清除聊天记录（按用户记录清理水位，
+            # 本账号刷新/重登后不再返回水位之前的消息；存档不删除）
+            try:
+                data = self._read_json_body()
+                if data is None:
+                    return
+
+                if not self._check_auth(data):
+                    return
+
+                if not self._check_rate_limit():
+                    return
+
+                cleared_id = chat.clear_chat(self.authenticated_user)
+                log_info(f"[聊天] {self.authenticated_user} 清除聊天记录（水位 #{cleared_id}）")
+                self.send_json({'success': True, 'data': {'cleared_id': cleared_id}})
+            except Exception as e:
+                self._server_error(e)
+        elif path == '/chat':
+            # 状态灯彩蛋聊天室：发送消息（发送后即写入 chat.log 存档，无法撤回）
+            try:
+                data = self._read_json_body()
+                if data is None:
+                    return
+
+                if not self._check_auth(data):
+                    return
+
+                if not self._check_rate_limit():
+                    return
+
+                msg = str(self._get_param(data, 'message', 'msg') or '').strip()
+                if not msg:
+                    self.send_json({'success': False, 'message': '消息不能为空'}, 400)
+                    return
+                if len(msg) > chat.MAX_LENGTH:
+                    self.send_json({'success': False,
+                                    'message': f'消息过长（最多 {chat.MAX_LENGTH} 字）'}, 400)
+                    return
+
+                item = chat.append_message(self.authenticated_user, msg)
+                debug_print(f"[聊天] {self.authenticated_user} 发送消息 #{item['id']}"
+                            f"（{len(msg)} 字）")
+                self.send_json({'success': True, 'data': item})
+            except Exception as e:
+                self._server_error(e)
         elif path == '/download':
             try:
                 data = self._read_json_body()
@@ -984,6 +1134,13 @@ class DownloadHandler(http.server.BaseHTTPRequestHandler):
                 if not is_safe_url(url):
                     log_error(f"SSRF 防护：拦截不安全的 URL: {sanitize_url_for_log(url)}")
                     self.send_json({'success': False, 'message': 'URL不合法或指向内网地址，已拒绝'}, 400)
+                    return
+
+                # 重定向链预检：提交时安全的 URL 可能经 302 跳向内网
+                safe, bad_url = check_redirect_chain(url)
+                if not safe:
+                    log_error(f"SSRF 防护：重定向链指向不安全地址: {sanitize_url_for_log(bad_url)}")
+                    self.send_json({'success': False, 'message': 'URL重定向指向内网地址，已拒绝'}, 400)
                     return
 
                 save_name = self._get_sanitized_param(data, 'saveName', 'save_name', 'name', 'filename', 'title')
@@ -1225,11 +1382,11 @@ class DownloadHandler(http.server.BaseHTTPRequestHandler):
                     return
 
                 if path == '/task/pause':
-                    ok, message = pause_task(task_id)
+                    ok, message = pause_task(task_id, owner=self.authenticated_user)
                 elif path == '/task/resume':
-                    ok, message = resume_paused_task(task_id)
+                    ok, message = resume_paused_task(task_id, owner=self.authenticated_user)
                 else:
-                    ok, message = delete_task(task_id)
+                    ok, message = delete_task(task_id, owner=self.authenticated_user)
 
                 debug_print(f"[HTTP] 任务操作 {path}: taskId={task_id}, 结果={ok}")
                 self.send_json({'success': ok, 'message': message}, 200 if ok else 400)

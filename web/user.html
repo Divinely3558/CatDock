@@ -105,6 +105,7 @@
         gap: 6px;
         font-size: 13px;
         color: var(--text-2);
+        cursor: pointer;
       }
       .dot {
         width: 9px;
@@ -117,6 +118,11 @@
         box-shadow: 0 0 0 3px var(--green-soft);
       }
       .dot.bad {
+        background: var(--red);
+        box-shadow: 0 0 0 3px var(--red-soft);
+      }
+      /* 有新聊天消息：状态灯变红提醒（与服务异常同色，点开聊天后恢复） */
+      .dot.newmsg {
         background: var(--red);
         box-shadow: 0 0 0 3px var(--red-soft);
       }
@@ -384,6 +390,77 @@
         gap: 9px;
         margin-top: 6px;
       }
+
+      /* ---------- 状态灯彩蛋：聊天室弹窗（与管理控制台一致） ---------- */
+      .chat-box {
+        background: var(--code-bg);
+        border: 1px solid var(--border);
+        border-radius: 8px;
+        height: 280px;
+        overflow-y: auto;
+        padding: 12px;
+        font-size: 13px;
+        margin-bottom: 10px;
+        display: flex;
+        flex-direction: column;
+      }
+      .chat-date {
+        text-align: center;
+        color: var(--text-3);
+        font-size: 12px;
+        margin: 4px 0 10px;
+      }
+      .chat-msg {
+        max-width: 85%;
+        align-self: flex-start;
+        margin-bottom: 10px;
+      }
+      /* 自己的消息靠右（微信式布局），头部与正文右对齐 */
+      .chat-msg.self {
+        align-self: flex-end;
+        text-align: right;
+      }
+      .chat-msg:last-child {
+        margin-bottom: 2px;
+      }
+      .chat-msg .chat-head {
+        color: var(--text-3);
+        font-size: 12px;
+        line-height: 1.4;
+        margin-bottom: 2px;
+      }
+      .chat-msg .chat-sender {
+        font-weight: 600;
+        color: var(--text-2);
+      }
+      .chat-msg.self .chat-sender {
+        color: var(--primary);
+      }
+      .chat-msg .chat-text {
+        color: var(--text);
+        line-height: 1.5;
+        word-break: break-all;
+      }
+      .chat-empty {
+        text-align: center;
+        color: var(--text-3);
+        font-size: 13px;
+        padding: 48px 12px;
+      }
+      .chat-tools {
+        display: flex;
+        justify-content: flex-start;
+        gap: 10px;
+        margin-bottom: 10px;
+      }
+      .chat-input-row {
+        margin-bottom: 14px;
+      }
+      @media (max-width: 480px) {
+        .chat-box {
+          height: 200px;
+        }
+      }
       .filter-editor .fe-head .hint {
         flex: none;
       }
@@ -531,9 +608,6 @@
         }
         .brand {
           font-size: 16px;
-        }
-        #healthText {
-          display: none;
         }
         .user-chip {
           max-width: 90px;
@@ -780,7 +854,7 @@
           fill="#F27233"
         ></path>
       </symbol>
-                  <symbol id="ic-avatar" viewBox="0 0 1024 1024">
+      <symbol id="ic-avatar" viewBox="0 0 1024 1024">
         <path
           d="M202.5984 392.3456l266.4448-275.5072c24.2688-25.088 64.3584-25.344 88.9344-0.6656l280.8832 282.1632-324.1472 306.0736-312.1152-312.064z"
           fill="#FFAC48"
@@ -854,7 +928,7 @@
           fill="#FFFFFF"
         ></path>
       </symbol>
-          <symbol id="ic-pause" viewBox="0 0 1024 1024">
+      <symbol id="ic-pause" viewBox="0 0 1024 1024">
         <path
           d="M481.108528 62.220009C452.706833 64.537267 422.796761 69.755437 397.64149 76.709422 381.411864 81.230263 335.272253 99.431636 314.17428 109.516093 295.393587 118.675785 271.512733 132.470035 255.748795 143.367729 236.968102 156.235046 221.317882 169.799693 197.552914 193.446673 162.890252 227.99345 142.835055 254.773049 119.765249 296.737266 118.259017 299.636011 113.390585 309.490886 109.101472 318.764296 87.885447 364.090714 75.018129 406.752261 67.598522 456.715384 65.281285 472.71311 64.933672 479.090006 64.933672 513.520919 64.933672 553.049847 65.397128 560.469433 70.265582 589.336643 81.394961 656.108711 106.434455 717.435087 146.31312 775.51298 184.451723 831.041865 246.820832 885.759703 305.711918 915.322183 312.550039 918.798102 318.347529 921.580983 318.695121 921.580983 318.926849 921.580983 322.986379 923.318943 327.736803 925.522504 338.51859 930.506801 355.790905 936.881466 366.688556 940.011939 371.209397 941.404452 378.510973 943.490004 382.918096 944.764507 390.801138 946.968069 421.86985 953.229015 432.417763 954.619383 435.6641 955.082839 440.069077 955.893886 442.272638 956.357342 447.722537 957.749856 478.325647 960.762319 499.887118 962.038969 527.24593 963.776928 574.544246 960.996193 601.671436 956.241478 669.720068 944.069324 742.405405 908.132179 798.747484 858.980104 852.302391 812.145308 893.57357 757.197888 920.119295 697.37989 945.62439 639.995036 956.869633 593.394114 958.839321 536.472715 960.347698 495.087753 954.202616 440.9493 944.581614 408.606084 940.640093 395.507018 935.655796 380.436118 933.799827 375.567685 932.641187 372.671086 930.55349 367.221187 929.047258 363.39553 924.292544 350.757774 915.366726 329.777811 911.425205 321.547177 909.223789 317.140055 906.093316 310.64738 904.353211 307.171461 902.615251 303.695542 900.761428 299.983603 900.179962 299.056691 899.600642 298.129779 896.124723 292.100561 892.530794 285.725896 874.097693 253.148807 847.897414 218.951768 817.989487 188.57824 792.718266 162.843563 773.474117 146.498159 750.635996 131.311395 735.565139 121.340656 731.971167 119.255104 711.80015 109.168501 689.311852 97.925404 683.630269 95.490115 656.736866 85.866967 612.103443 69.753292 527.477722 58.278466 481.108528 62.220009ZM281.135881 154.497065C281.135881 157.277779 282.526248 158.322722 289.945834 161.105625 298.176468 164.11811 302.581445 172.92802 299.219244 179.420695 295.164005 187.187915 279.279911 187.4196 272.441791 179.768308 270.585821 177.682756 270.467812 176.871687 271.628597 175.015696 272.787237 173.159748 272.671373 172.580429 270.701685 171.537653 269.427182 170.842469 267.805086 170.610784 267.225766 170.958333 265.485661 172.001109 262.70278 164.581523 263.397963 160.755866 264.324875 155.771569 269.890638 151.830048 276.03572 151.830048 280.554415 151.830048 281.135881 152.061776 281.135881 154.497065ZM543.825314 166.319482C602.598391 172.812178 642.245286 185.565777 686.181336 211.879774 727.682097 236.68754 758.519081 266.25002 787.733969 308.909421 818.452943 353.658665 833.755571 390.522721 848.013278 453.237319 854.969408 484.190167 855.664592 531.604282 849.637519 572.641501 847.20223 589.684321 839.203324 621.098479 834.103163 634.083827 826.567713 652.862288 823.784832 659.354963 817.75776 671.527246 799.906124 707.232577 782.515799 730.765946 751.678751 761.139409 713.540255 798.466922 670.762844 825.362385 621.958361 842.518836 598.656913 850.74947 583.470063 853.995807 552.633144 857.242144 489.802618 863.850682 441.809182 858.28492 385.467104 837.882131 345.590584 823.506415 302.349717 794.754983 267.22362 759.399304 213.782432 705.494574 185.380738 651.58787 172.858845 580.410911 167.411136 549.458063 166.136589 532.87885 166.715909 501.928084 167.411136 463.439786 170.541566 444.427365 182.250265 408.606084 192.218858 378.116693 202.884738 355.512488 218.998457 330.934305 252.268584 280.62359 309.071974 229.385963 359.500698 204.578198 369.239709 199.823483 377.470343 195.881962 377.817935 195.881962 378.281391 195.881962 380.832544 194.95505 383.497416 193.68059 407.841725 182.89876 453.865473 170.610784 488.062512 165.858172 499.423619 164.233909 527.477722 164.465659 543.823126 166.321628ZM250.298897 179.652423C253.195496 183.478122 255.169475 186.608553 254.703874 186.608553 254.240418 186.608553 252.036856 186.029233 249.833295 185.449913 244.851144 183.941578 241.836535 185.331903 238.93779 190.202482 237.083966 193.214945 237.083966 193.796411 238.706062 196.11369 239.748838 197.506225 240.559886 200.055233 240.559886 201.563589 240.559886 203.185684 241.952399 205.968565 243.692504 207.706525L246.820832 210.952862 228.619459 210.952862C218.650865 210.952862 210.420231 210.60527 210.420231 210.257678 210.420231 208.865165 243.574495 172.696292 244.851144 172.696292 244.967008 172.696292 247.400152 175.828911 250.298897 179.652423ZM287.626409 198.662698C294.350811 205.3871 292.496987 211.068726 283.45316 211.18459 274.643206 211.300454 269.774774 202.606364 275.33839 197.040602 278.816455 193.564683 283.105568 194.144003 287.626409 198.664843ZM230.127836 228.341042C228.156003 229.617691 222.592386 231.239787 215.983848 232.398427 209.145727 233.443348 210.651959 235.5289 217.492225 234.601988 225.838723 233.443348 224.680083 236.339948 215.636256 239.006965 209.145727 240.860789 197.089437 242.137438 196.046618 240.976653 195.001739 240.049741 198.248076 234.947434 201.146822 232.861883 202.884738 231.587379 208.448398 230.081147 215.636256 229.036226 230.591292 226.950674 232.445116 226.83481 230.127836 228.341042ZM860.651034 758.354383C850.332703 778.643453 820.077185 816.086829 797.470835 836.489618 765.706939 865.24105 738.811476 882.860958 704.148836 897.70013 695.918202 901.294059 675.167907 907.784587 673.777453 907.321131 672.966406 906.973539 673.313912 906.394219 674.704365 905.930763 681.428767 903.495474 696.267939 895.496568 701.368186 891.670911 704.496385 889.353632 708.671822 885.296247 710.64151 882.745094 712.495333 880.19394 715.278215 876.484147 716.786592 874.630324L719.451464 871.152259 718.988008 877.181477C718.75628 880.541532 718.75628 883.324414 719.103872 883.324414 719.799055 883.324414 725.828274 879.614621 737.421152 872.195035 748.0848 865.356914 750.288447 861.878849 749.013944 853.995807L748.20075 849.125229 751.912689 852.950886C753.882376 854.922719 755.967928 856.662824 756.431384 856.662824 760.257041 856.662824 763.27165 845.183708 763.387514 829.649352 763.387514 820.839398 766.865579 798.69865 768.258092 798.69865 770.111916 798.69865 777.18391 805.886508 781.473023 812.145308 783.906167 815.623373 786.225592 818.406254 786.573184 818.406254 788.660881 818.406254 797.123243 814.233006 804.542829 809.480437 810.106446 805.886508 820.077185 796.726816 836.77018 779.802093 849.985111 766.355434 860.766898 754.878463 860.766898 754.415007 860.766898 753.951551 861.346218 753.488095 861.925538 753.488095 862.620722 753.488095 862.041402 755.689511 860.651034 758.356528Z"
           fill="currentColor"
@@ -924,56 +998,57 @@
           fill="currentColor"
         />
       </symbol>
-</svg>
+    </svg>
 
     <!-- ================= 主视图 ================= -->
     <div id="appView">
-    <div class="topbar">
-      <div class="topbar-inner">
-        <span class="user-menu-wrap">
-          <span class="brand" id="brandBtn" title="外观菜单"
-            ><span class="logo"
-              ><svg class="i logo-svg" aria-hidden="true">
-                <use href="#ic-logo"></use></svg></span
-            >CatDock<span class="tag">下载控制台</span></span
-          >
-          <div class="user-menu" id="brandMenu">
-            <button
-              class="user-menu-item"
-              data-theme-palette
-              title="切换主题色"
+      <div class="topbar">
+        <div class="topbar-inner">
+          <span class="user-menu-wrap">
+            <span class="brand" id="brandBtn" title="外观菜单"
+              ><span class="logo"
+                ><svg class="i logo-svg" aria-hidden="true">
+                  <use href="#ic-logo"></use></svg></span
+              >CatDock<span class="tag">下载控制台</span></span
             >
-              <span class="btn-icon">🎨</span>主题色
-            </button>
-            <button
-              class="user-menu-item"
-              data-theme-mode
-              title="切换亮色/暗色"
-            >
-              <span class="btn-icon">🌙</span>亮暗切换
-            </button>
-          </div>
-        </span>
-        <span class="health">
-          <span class="dot" id="healthDot"></span
-          ><span id="healthText">检测中…</span>
-        </span>
-        <span class="brand-version">v __VERSION__</span>
-        <span class="spacer"></span>
-        <span class="user-menu-wrap">
-          <span class="user-chip" id="userChip" title="账号菜单"
-            ><svg class="i chip-avatar" aria-hidden="true">
-              <use href="#ic-avatar"></use></svg
-          ></span>
-          <div class="user-menu" id="userMenu">
-            <button class="user-menu-item" id="menuPass">修改密码</button>
-            <button class="user-menu-item" id="menuSwitch">切换用户</button>
-            <button class="user-menu-item" id="menuFilters">过滤规则</button>
-            <button class="user-menu-item danger" id="menuLogout">退出</button>
-          </div>
-        </span>
+            <div class="user-menu" id="brandMenu">
+              <button
+                class="user-menu-item"
+                data-theme-palette
+                title="切换主题色"
+              >
+                <span class="btn-icon">🎨</span>主题色
+              </button>
+              <button
+                class="user-menu-item"
+                data-theme-mode
+                title="切换亮色/暗色"
+              >
+                <span class="btn-icon">🌙</span>亮暗切换
+              </button>
+            </div>
+          </span>
+          <span class="health" id="health" title="点击进入聊天室">
+            <span class="dot" id="healthDot"></span>
+          </span>
+          <span class="brand-version">v __VERSION__</span>
+          <span class="spacer"></span>
+          <span class="user-menu-wrap">
+            <span class="user-chip" id="userChip" title="账号菜单"
+              ><svg class="i chip-avatar" aria-hidden="true">
+                <use href="#ic-avatar"></use></svg
+            ></span>
+            <div class="user-menu" id="userMenu">
+              <button class="user-menu-item" id="menuPass">修改密码</button>
+              <button class="user-menu-item" id="menuSwitch">切换用户</button>
+              <button class="user-menu-item" id="menuFilters">过滤规则</button>
+              <button class="user-menu-item danger" id="menuLogout">
+                退出
+              </button>
+            </div>
+          </span>
+        </div>
       </div>
-    </div>
 
       <div class="container">
         <!-- 提交任务 -->
@@ -1000,7 +1075,7 @@
                 id="fName"
                 placeholder="选填，如：我的视频（不含扩展名）"
               />
-              <div class="hint">留空时服务端自动命名 download_任务ID</div>
+              <div class="hint">留空自动命名</div>
             </label>
             <div class="field">
               <span>输出格式</span>
@@ -1027,7 +1102,7 @@
               </div>
             </div>
             <details class="adv">
-              <summary>高级选项（Referer / Cookie / UA，一般无需填写）</summary>
+              <summary>高级选项（选填）</summary>
               <label class="field">
                 <span>Referer</span>
                 <input type="text" id="fReferer" placeholder="选填" />
@@ -1061,9 +1136,7 @@
                 <use href="#ic-empty-task"></use></svg
             ></span>
             暂无进行中的任务<br />
-            <span style="font-size: 12px"
-              >任务完成（成功/失败）后会自动移出列表</span
-            >
+            <span style="font-size: 12px">任务完成后自动移出列表</span>
           </div>
         </div>
 
@@ -1124,14 +1197,14 @@
         style="max-width: 520px; max-height: 85vh; overflow-y: auto"
       >
         <h3>我的过滤规则</h3>
-        <div class="msg">仅对您自己的下载任务生效，保存后立即生效</div>
+        <div class="msg">仅对自己的下载任务生效</div>
         <div class="filter-editor">
           <div class="fe-section">
             <div class="fe-head">
               <label class="fe-switch"
                 ><input type="checkbox" id="kwEnabled" /> 拦截广告关键字</label
               >
-              <span class="hint">URL 或文件名包含关键字时整个任务被拦截</span>
+              <span class="hint">链接或文件名含关键字即拦截</span>
             </div>
             <div class="chips" id="kwChips"></div>
             <div class="fe-add">
@@ -1150,7 +1223,7 @@
                 ><input type="checkbox" id="ffEnabled" />
                 文件名过滤（删除关键字）</label
               >
-              <span class="hint">从保存文件名中删除这些关键字，不拦截下载</span>
+              <span class="hint">从文件名中删除这些关键字</span>
             </div>
             <div class="chips" id="ffChips"></div>
             <div class="fe-add">
@@ -1169,7 +1242,7 @@
                 ><input type="checkbox" id="ddEnabled" />
                 文件名去重（正则规则）</label
               >
-              <span class="hint">按顺序应用正则替换；默认规则已去除重复段</span>
+              <span class="hint">按顺序应用正则替换</span>
             </div>
             <div id="ddRules"></div>
             <button type="button" class="btn" id="ddAdd">+ 添加规则</button>
@@ -1188,6 +1261,35 @@
       </div>
     </div>
 
+    <!-- ================= 状态灯彩蛋：聊天室弹窗（结构与管理控制台一致） ================= -->
+    <div class="mask" id="chatMask">
+      <div class="modal" style="max-width: 520px">
+        <h3>聊天室</h3>
+        <div class="chat-box" id="chatBox"></div>
+        <div class="chat-tools">
+          <button type="button" class="btn btn-primary" id="chatClear">
+            清除聊天记录
+          </button>
+          <button type="button" class="btn btn-ghost" id="chatExport">
+            导出聊天记录
+          </button>
+        </div>
+        <div class="chat-input-row">
+          <input
+            type="text"
+            id="chatInput"
+            placeholder="输入消息，回车发送"
+            autocomplete="off"
+            maxlength="500"
+          />
+        </div>
+        <div class="btns">
+          <button class="btn btn-primary" id="chatSend">发送</button>
+          <button class="btn btn-ghost" id="chatCancel">取消</button>
+        </div>
+      </div>
+    </div>
+
     <script>
       (function () {
         "use strict";
@@ -1200,13 +1302,15 @@
           user: "catdock_user",
           role: "catdock_role",
           fmt: "catdock_fmt",
+          chatSeen: "catdock_chat_seen2", // 聊天已读水位（未读红点跨刷新保持；v2：存档改按天分文件后 id 重排，作废旧值）
         };
 
         // 登录成功后仅持有短期访问令牌（POST /login 签发），
         // 密钥/账号/密码不再持久化，也不出现在 URL 中
         var creds = { token: "", user: "" };
         var pollTimer = null,
-          healthTimer = null;
+          healthTimer = null,
+          chatTimer = null;
 
         var $ = function (id) {
           return document.getElementById(id);
@@ -1603,7 +1707,7 @@
           } else if (act === "delete") {
             showConfirm(
               "删除任务",
-              "确定要删除该任务吗？<br><b>已下载的文件和临时文件将被一并删除，此操作不可恢复。</b>",
+              "确定删除该任务？文件将被一并删除且不可恢复。",
               true,
               function () {
                 taskActionRequest("task/delete", id);
@@ -1708,24 +1812,282 @@
             $("modalMask").classList.remove("show");
         });
 
-        // ---------- 健康检查 ----------
+        // ---------- 健康检查（只看灯：状态由圆点颜色表达，悬停可见文字提示） ----------
+        var healthState = null; // null=检测中 / "ok" / "bad"
         function checkHealth() {
           return fetch(BASE + "health", { method: "GET" })
             .then(function (r) {
               return r.json();
             })
             .then(function (data) {
-              var t = data.success ? "服务正常" : "服务异常";
-              $("healthDot").className = "dot " + (data.success ? "ok" : "bad");
-              $("healthText").textContent = t;
-              $("healthDot").parentNode.setAttribute("title", t);
+              healthState = data.success ? "ok" : "bad";
+              applyDot();
             })
             .catch(function () {
-              $("healthDot").className = "dot bad";
-              $("healthText").textContent = "连接失败";
-              $("healthDot").parentNode.setAttribute("title", "连接失败");
+              healthState = "bad";
+              applyDot();
             });
         }
+
+        // ---------- 顶栏彩蛋：点击状态灯进入聊天室（与管理控制台一致） ----------
+        // 有新消息时状态灯变红；「清除聊天记录」记录服务端清理水位，
+        // 本账号之后（含刷新/重登）不再返回已清理的消息（存档不删除）。
+        var chatLastId = 0; // 服务端最新消息 id
+        // 已读消息 id（红点判断：chatLastId > chatSeenId 即有新消息）。
+        // 持久化到 localStorage：刷新/重开浏览器后，未读消息的红点仍然保留。
+        // 只有点开弹窗或自己发消息才算已读；换浏览器/清缓存后历史消息按未读处理
+        var chatSeenId =
+          parseInt(localStorage.getItem(LS.chatSeen) || "", 10) || 0;
+        var chatLastDay = ""; // 已渲染的最后日期（YYYY-MM-DD），用于日期分隔线
+        var chatRenderedId = 0; // 已渲染的最大消息 id（发送与轮询竞态时按 id 去重）
+        var chatOpened = false; // 聊天弹窗是否打开
+
+        // 更新已读水位并持久化；写入失败（如隐私模式）降级为仅内存
+        function markChatSeen(id) {
+          if (id <= chatSeenId) return;
+          chatSeenId = id;
+          try {
+            localStorage.setItem(LS.chatSeen, String(chatSeenId));
+          } catch (e) {}
+        }
+
+        // 状态灯颜色 = 服务状态 + 新消息提醒（异常优先）
+        function applyDot() {
+          var dot = $("healthDot");
+          if (!dot) return;
+          var hasNew = chatLastId > chatSeenId;
+          var cls = "dot";
+          var title;
+          if (healthState === "bad") {
+            cls += " bad";
+            title = "服务异常";
+          } else if (healthState === "ok") {
+            cls += hasNew ? " newmsg" : " ok";
+            title = hasNew ? "有新消息" : "服务正常";
+          } else {
+            title = "检测中";
+          }
+          dot.className = cls;
+          $("health").setAttribute("title", title + " · 点击进入聊天室");
+        }
+
+        // 聊天轮询：固定 10 秒节拍（setInterval 启动，见底部启动块）。
+        // 不用「上轮完成再排下轮」的链式自调度：公网/移动网络下单次请求挂起
+        // 会永久断链，表现为弹窗内收不到新消息；chatInFlight 防重入兜底。
+        var chatInFlight = false;
+        function pollChat() {
+          if (chatInFlight) return;
+          chatInFlight = true;
+          return CD.apiGet("chat?after=" + chatLastId)
+            .then(function (res) {
+              var d = res.data || {};
+              chatLastId = d.last_id || chatLastId;
+              var list = d.messages || [];
+              if (list.length && chatOpened) {
+                appendChatMessages(list);
+                markChatSeen(chatLastId);
+              }
+              applyDot();
+            })
+            .catch(function () {
+              // 轮询失败静默跳过，下一轮自动重试
+            })
+            .finally(function () {
+              chatInFlight = false;
+            });
+        }
+        function scheduleChat() {
+          if (!document.hidden) pollChat();
+        }
+
+        function chatDateText(day) {
+          var p = day.split("-");
+          return (
+            p[0] + "年" + parseInt(p[1], 10) + "月" + parseInt(p[2], 10) + "日"
+          );
+        }
+        // 单条消息：第一行「发送者（HH:MM）」，第二行正文（textContent 防注入）
+        function buildChatMsg(m) {
+          var wrap = document.createElement("div");
+          wrap.className =
+            "chat-msg" +
+            (m.user === (localStorage.getItem(LS.user) || "") ? " self" : "");
+          var head = document.createElement("div");
+          head.className = "chat-head";
+          var name = document.createElement("span");
+          name.className = "chat-sender";
+          name.textContent = m.user || "?";
+          head.appendChild(name);
+          var t = (m.time || "").slice(11, 16);
+          if (t) head.appendChild(document.createTextNode("（" + t + "）"));
+          var body = document.createElement("div");
+          body.className = "chat-text";
+          body.textContent = m.msg || "";
+          wrap.appendChild(head);
+          wrap.appendChild(body);
+          return wrap;
+        }
+        // 追加一条消息（跨天时先插入日期分隔线；分隔线仅本页显示，不入库）
+        function appendChatLine(m) {
+          var box = $("chatBox");
+          var day = (m.time || "").slice(0, 10);
+          if (day && day !== chatLastDay) {
+            chatLastDay = day;
+            var sep = document.createElement("div");
+            sep.className = "chat-date";
+            sep.textContent = chatDateText(day);
+            box.appendChild(sep);
+          }
+          box.appendChild(buildChatMsg(m));
+        }
+        function renderChatMessages(list) {
+          var box = $("chatBox");
+          box.innerHTML = "";
+          chatLastDay = "";
+          chatRenderedId = 0;
+          if (!list.length) {
+            box.innerHTML =
+              '<div class="chat-empty">还没有消息，来说第一句吧</div>';
+            return;
+          }
+          list.forEach(appendChatLine);
+          chatRenderedId = list[list.length - 1].id || 0;
+          box.scrollTop = box.scrollHeight;
+        }
+        function appendChatMessages(list) {
+          // 发送与轮询可能带回同一条消息：按已渲染最大 id 去重，防止重复上屏
+          list = list.filter(function (m) {
+            return m.id > chatRenderedId;
+          });
+          if (!list.length) return;
+          var box = $("chatBox");
+          var tip = box.querySelector(".chat-empty");
+          if (tip) tip.remove();
+          list.forEach(appendChatLine);
+          chatRenderedId = list[list.length - 1].id || chatRenderedId;
+          box.scrollTop = box.scrollHeight;
+        }
+
+        function openChat() {
+          chatOpened = true;
+          $("chatMask").classList.add("show");
+          $("chatBox").innerHTML = '<div class="chat-empty">加载中…</div>';
+          CD.apiGet("chat?after=0")
+            .then(function (res) {
+              var d = res.data || {};
+              chatLastId = d.last_id || 0;
+              markChatSeen(chatLastId);
+              renderChatMessages(d.messages || []);
+              applyDot();
+              setTimeout(function () {
+                $("chatInput").focus();
+              }, 50);
+            })
+            .catch(function (e) {
+              $("chatBox").innerHTML = "";
+              CD.toast(e.message, true);
+            });
+        }
+        function closeChat() {
+          chatOpened = false;
+          $("chatMask").classList.remove("show");
+        }
+        function sendChat() {
+          var input = $("chatInput");
+          var text = input.value.trim();
+          if (!text) return;
+          var btn = $("chatSend");
+          btn.disabled = true;
+          CD.apiPost("chat", { message: text })
+            .then(function (res) {
+              var m = res.data || {};
+              if (m.id) {
+                chatLastId = Math.max(chatLastId, m.id);
+                markChatSeen(chatLastId);
+                appendChatMessages([m]);
+                applyDot();
+              }
+              input.value = "";
+              input.focus();
+            })
+            .catch(function (e) {
+              CD.toast(e.message, true);
+            })
+            .finally(function () {
+              btn.disabled = false;
+            });
+        }
+
+        $("health").addEventListener("click", openChat);
+        $("chatSend").addEventListener("click", sendChat);
+        $("chatInput").addEventListener("keydown", function (e) {
+          if (e.key === "Enter") {
+            e.preventDefault();
+            sendChat();
+          }
+        });
+        // 清除聊天记录：请求服务端记录本账号的清理水位，
+        // 之后（含刷新/重新登录）不再返回水位之前的消息（存档不删除）
+        $("chatClear").addEventListener("click", function () {
+          CD.apiPost("chat/clear", {})
+            .then(function (res) {
+              var clearedId = (res.data || {}).cleared_id || 0;
+              chatRenderedId = Math.max(chatRenderedId, clearedId);
+              chatLastId = Math.max(chatLastId, clearedId);
+              markChatSeen(chatLastId);
+              $("chatBox").innerHTML =
+                '<div class="chat-empty">已清除聊天记录</div>';
+              chatLastDay = "";
+              applyDot();
+            })
+            .catch(function (e) {
+              CD.toast(e.message, true);
+            });
+        });
+        $("chatCancel").addEventListener("click", closeChat);
+        // 导出聊天记录：服务端固定导出最近 7 天（含今天），合并为单个 .log 文件下载
+        $("chatExport").addEventListener("click", function () {
+          var btn = $("chatExport");
+          btn.disabled = true;
+          fetch(BASE + "chat/export", {
+            headers: {
+              Authorization:
+                "Bearer " + (localStorage.getItem("catdock_token") || ""),
+            },
+          })
+            .then(function (resp) {
+              if (resp.status === 403 || resp.status === 401) {
+                backToLogin();
+                throw new Error("未登录或登录已过期");
+              }
+              if (!resp.ok) {
+                return resp.json().then(function (j) {
+                  throw new Error(j.message || "导出失败");
+                });
+              }
+              return resp.blob().then(function (blob) {
+                // 从 Content-Disposition 提取文件名，取不到则用默认名
+                var cd = resp.headers.get("Content-Disposition") || "";
+                var m = cd.match(/filename="?([^";]+)"?/);
+                var filename = m ? m[1] : "chat_export.log";
+                var a = document.createElement("a");
+                a.href = URL.createObjectURL(blob);
+                a.download = filename;
+                document.body.appendChild(a);
+                a.click();
+                document.body.removeChild(a);
+                URL.revokeObjectURL(a.href);
+                CD.toast("聊天记录已导出：" + filename);
+              });
+            })
+            .catch(function (e) {
+              CD.toast(e.message, true);
+            })
+            .finally(function () {
+              btn.disabled = false;
+            });
+        });
+        // 与其他弹层一致：点击遮罩不关闭，仅通过「取消」退出
 
         // ---------- 服务信息 ----------
         function loadConfigInfo() {
@@ -1883,6 +2245,8 @@
           loadConfigInfo();
           scheduleTasks();
           scheduleHealth();
+          scheduleChat(); // 启动立即查一次（未读红点无需等首个 10 秒节拍）
+          chatTimer = setInterval(scheduleChat, 10000);
         }
 
         // 任务轮询：refreshTasks 结束（成功/失败/403 跳登录）后再等 3 秒
@@ -1926,6 +2290,10 @@
           if (healthTimer) {
             clearTimeout(healthTimer);
             healthTimer = null;
+          }
+          if (chatTimer) {
+            clearInterval(chatTimer);
+            chatTimer = null;
           }
         }
 

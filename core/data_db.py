@@ -38,8 +38,13 @@ import secrets
 # 认证失败达到该次数后自动封禁
 # IP 级封禁（AUTH_KEY 错误 / 不存在的用户名）：10 次触发
 MAX_AUTH_FAILURES = 10
-# 账号级封禁（密码错误，用户存在但密码不匹配）：5 次触发，自动禁用账号
+# 账号级封禁（密码错误，用户存在但密码不匹配）：5 次触发，临时锁定账号
+# （30 分钟后自动解锁，仅阻止密码验证路径；管理员手动禁用仍走 disabled 永久禁用）
 MAX_ACCOUNT_FAILURES = 5
+
+# 账号临时锁定时长：连续密码错误达阈值后锁定 N 分钟，期间拒绝密码验证，
+# 超时自动解锁（无需手动干预）；锁定期内继续输错会顺延锁定截止时间
+ACCOUNT_LOCK_MINUTES = 30
 
 # 失败计数时间窗：仅累计最近 N 分钟内的失败，历史失败自动清零，
 # 避免"长期偶发失误累积 + 一次手滑 = 封禁"的误伤
@@ -92,6 +97,10 @@ def _parse_database_url(url):
         'port': parsed.port or 3306,
         'database': database,
         'charset': 'utf8mb4',
+        # autocommit：服务端大量只读路径（is_ip_banned/verify_user 等）从不 commit，
+        # 关闭时 REPEATABLE READ 事务快照永不刷新，CLI 侧的封禁/建户/禁用变更
+        # 对运行中的服务不可见；开启后每条语句独立提交
+        'autocommit': True,
     }
 
 
@@ -182,7 +191,8 @@ _SQLITE_TABLES = [
         last_ban_time TEXT
     )
     """,
-    # 账号级失败计数：密码错误累计达 MAX_ACCOUNT_FAILURES 次后自动禁用账号
+    # 账号级失败计数：密码错误累计达 MAX_ACCOUNT_FAILURES 次后临时锁定账号
+    # （ACCOUNT_LOCK_MINUTES 分钟后自动解锁，不写 users.disabled）
     """
     CREATE TABLE IF NOT EXISTS account_failures (
         username TEXT PRIMARY KEY,
@@ -582,8 +592,10 @@ def clear_auth_failure(ip):
 def record_account_failure(username):
     """记录一次账号级密码错误失败。
 
-    累计达 MAX_ACCOUNT_FAILURES 次后自动禁用该账号（disabled=1）。
-    返回 True 表示已触发自动禁用，False 表示仅累计。
+    累计达 MAX_ACCOUNT_FAILURES 次后临时锁定该账号（不写 users.disabled，
+    不影响已签发令牌的会话）：ACCOUNT_LOCK_MINUTES 分钟后自动解锁；
+    锁定期内继续输错会顺延锁定截止时间（last_attempt_time 持续刷新）。
+    返回 True 表示本次触发锁定，False 表示仅累计。
     """
     with _db_lock:
         conn = _get_conn()
@@ -606,12 +618,27 @@ def record_account_failure(username):
                          (username, count, now))
         conn.commit()
 
-        if count >= MAX_ACCOUNT_FAILURES:
-            conn.execute("UPDATE users SET disabled = 1 WHERE username = ?", (username,))
-            conn.execute("DELETE FROM account_failures WHERE username = ?", (username,))
-            conn.commit()
-            return True
-        return False
+        return count >= MAX_ACCOUNT_FAILURES
+
+
+def account_lock_remaining(username):
+    """查询账号剩余锁定时长（秒）。
+
+    锁定状态 = account_failures.count 已达阈值且最近一次失败仍在
+    ACCOUNT_LOCK_MINUTES 窗口内；未锁定返回 0。
+    """
+    with _db_lock:
+        conn = _get_conn()
+        cursor = conn.execute("SELECT count, last_attempt_time FROM account_failures WHERE username = ?", (username,))
+        row = cursor.fetchone()
+    if not row or row[0] < MAX_ACCOUNT_FAILURES:
+        return 0
+    try:
+        last = time.strptime(row[1], '%Y-%m-%d %H:%M:%S')
+    except (ValueError, TypeError, OverflowError):
+        return 0
+    remaining = ACCOUNT_LOCK_MINUTES * 60 - (time.time() - time.mktime(last))
+    return max(0, int(remaining))
 
 
 def clear_account_failure(username):
