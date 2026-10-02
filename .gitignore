@@ -69,3 +69,6 @@ ghcr_cleanup.py
 
 # 本地测试文件目录（模拟下载产物）
 .test
+
+# SSH 密钥管理脚本（本地使用，勿提交）
+key.py
