@@ -74,9 +74,9 @@
   --red-soft: #450a0a;
 }
 
-/* ===== 暖橙 ===== */
-:root[data-palette="orange"] {
-  --bg: #fbf5f0;
+/* ===== 像素风（复古游戏） ===== */
+:root[data-palette="pixel"] {
+  --bg: #fef7f0;
   --card: #ffffff;
   --border: #f0ddd0;
   --primary-soft: #fff7ed;
@@ -91,7 +91,7 @@
   --red: #dc2626;
   --red-soft: #fef2f2;
 }
-:root[data-palette="orange"][data-mode="dark"] {
+:root[data-palette="pixel"][data-mode="dark"] {
   --bg: #1a1410;
   --card: #2a1f18;
   --border: #3d2e22;
@@ -109,39 +109,229 @@
   --red-soft: #450a0a;
 }
 
-/* ===== 紫罗兰 ===== */
-:root[data-palette="violet"] {
-  --bg: #f6f3fb;
-  --card: #ffffff;
-  --border: #e0d9f0;
-  --primary-soft: #f5f3ff;
-  --code-bg: #f9f7fd;
-  --primary: #7c3aed;
-  --primary-hover: #6d28d9;
-  --focus-ring: rgba(124, 58, 237, 0.14);
-  --green: #16a34a;
-  --green-soft: #ecfdf3;
-  --amber: #d97706;
-  --amber-soft: #fffbeb;
-  --red: #dc2626;
-  --red-soft: #fef2f2;
+/* 像素风主题专属样式：方角、等宽字体、像素阴影 */
+:root[data-palette="pixel"] {
+  --radius: 0px;
+  --shadow: 4px 4px 0px rgba(234, 88, 12, 0.2);
 }
-:root[data-palette="violet"][data-mode="dark"] {
-  --bg: #15102a;
-  --card: #221a3d;
-  --border: #362959;
-  --code-bg: #100b1f;
-  --input-bg: #100b1f;
-  --primary: #a78bfa;
-  --primary-hover: #8b5cf6;
-  --primary-soft: #2e1065;
-  --focus-ring: rgba(167, 139, 250, 0.22);
-  --green: #22c55e;
-  --green-soft: #14532d;
-  --amber: #f59e0b;
-  --amber-soft: #78350f;
-  --red: #ef4444;
-  --red-soft: #450a0a;
+:root[data-palette="pixel"] body {
+  font-family: "Courier New", Consolas, Monaco, "Noto Sans SC", monospace;
+  letter-spacing: 0;
+}
+:root[data-palette="pixel"] .card {
+  border: 3px solid var(--border);
+  box-shadow: 4px 4px 0px var(--primary-soft), 8px 8px 0px rgba(234, 88, 12, 0.1);
+}
+:root[data-palette="pixel"] .btn {
+  border: 2px solid var(--border);
+  border-radius: 0px;
+  font-weight: 600;
+  font-size: 13px;
+}
+:root[data-palette="pixel"] .btn:hover {
+  border-color: var(--primary);
+  background: var(--primary-soft);
+}
+:root[data-palette="pixel"] .btn-primary {
+  border-color: var(--primary);
+  background: var(--primary);
+  color: #fff;
+}
+:root[data-palette="pixel"] .btn-primary:hover {
+  background: var(--primary-hover);
+}
+:root[data-palette="pixel"] .card-title {
+  font-family: "Courier New", monospace;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+}
+:root[data-palette="pixel"] input[type="text"],
+:root[data-palette="pixel"] input[type="password"],
+:root[data-palette="pixel"] input[type="date"],
+:root[data-palette="pixel"] textarea,
+:root[data-palette="pixel"] select {
+  border: 2px solid var(--border);
+  border-radius: 0px;
+  font-family: "Courier New", monospace;
+}
+:root[data-palette="pixel"] input:focus,
+:root[data-palette="pixel"] textarea:focus,
+:root[data-palette="pixel"] select:focus {
+  border-color: var(--primary);
+  box-shadow: 2px 2px 0px var(--primary);
+}
+:root[data-palette="pixel"] .user-chip {
+  border: 2px solid var(--primary);
+  border-radius: 0px;
+}
+:root[data-palette="pixel"] .user-menu,
+:root[data-palette="pixel"] .toast,
+:root[data-palette="pixel"] .alert,
+:root[data-palette="pixel"] .filter-editor .fe-section {
+  border-radius: 0px;
+  border: 2px solid var(--border);
+  box-shadow: 3px 3px 0px var(--primary-soft);
+}
+
+/* ===== 科技风（未来科技） ===== */
+:root[data-palette="tech"] {
+  --bg: #f0f0ff;
+  --card: #ffffff;
+  --border: #d0d0e8;
+  --primary-soft: rgba(0, 136, 204, 0.1);
+  --code-bg: #e8e8f8;
+  --primary: #0088cc;
+  --primary-hover: #006699;
+  --focus-ring: rgba(0, 136, 204, 0.14);
+  --green: #00aa66;
+  --green-soft: rgba(0, 170, 102, 0.1);
+  --amber: #cc8800;
+  --amber-soft: rgba(204, 136, 0, 0.1);
+  --red: #cc2255;
+  --red-soft: rgba(204, 34, 85, 0.1);
+}
+:root[data-palette="tech"][data-mode="dark"] {
+  --bg: #0a0a1a;
+  --card: #141428;
+  --border: #2a2a4a;
+  --code-bg: #0a0a14;
+  --input-bg: #0a0a14;
+  --primary: #00d4ff;
+  --primary-hover: #00b8e6;
+  --primary-soft: rgba(0, 212, 255, 0.1);
+  --focus-ring: rgba(0, 212, 255, 0.22);
+  --green: #00ff88;
+  --green-soft: rgba(0, 255, 136, 0.1);
+  --amber: #ffaa00;
+  --amber-soft: rgba(255, 170, 0, 0.1);
+  --red: #ff3366;
+  --red-soft: rgba(255, 51, 102, 0.1);
+}
+
+/* 科技风主题专属样式：光效、渐变、等宽字体 */
+:root[data-palette="tech"] {
+  --radius: 4px;
+  --shadow: 0 0 20px rgba(0, 136, 204, 0.1), 0 0 40px rgba(0, 136, 204, 0.05);
+}
+:root[data-palette="tech"] body {
+  font-family: "SF Mono", "Cascadia Code", Consolas, "Roboto Mono", "Noto Sans SC", monospace;
+  letter-spacing: 0.03em;
+}
+:root[data-palette="tech"][data-mode="dark"] body {
+  background: linear-gradient(180deg, var(--bg) 0%, rgba(0, 212, 255, 0.03) 100%);
+}
+:root[data-palette="tech"] .card {
+  box-shadow: 0 0 30px rgba(0, 136, 204, 0.1), inset 0 1px 0 rgba(255, 255, 255, 0.05);
+  transition: box-shadow 0.3s, border-color 0.3s;
+}
+:root[data-palette="tech"][data-mode="dark"] .card {
+  background: linear-gradient(135deg, var(--card) 0%, rgba(0, 212, 255, 0.03) 100%);
+  box-shadow: 0 0 30px rgba(0, 212, 255, 0.1), inset 0 1px 0 rgba(255, 255, 255, 0.05);
+}
+:root[data-palette="tech"][data-mode="dark"] .card:hover {
+  border-color: var(--primary);
+  box-shadow: 0 0 40px rgba(0, 212, 255, 0.2), inset 0 1px 0 rgba(255, 255, 255, 0.1);
+}
+:root[data-palette="tech"] .btn-primary {
+  box-shadow: 0 0 20px rgba(0, 136, 204, 0.3);
+  border: 1px solid var(--primary);
+}
+:root[data-palette="tech"] .btn-primary:hover {
+  box-shadow: 0 0 30px rgba(0, 136, 204, 0.5);
+}
+:root[data-palette="tech"][data-mode="dark"] .btn-primary {
+  box-shadow: 0 0 20px rgba(0, 212, 255, 0.4);
+}
+:root[data-palette="tech"][data-mode="dark"] .btn-primary:hover {
+  box-shadow: 0 0 30px rgba(0, 212, 255, 0.6);
+}
+:root[data-palette="tech"] .btn-ghost:hover {
+  box-shadow: 0 0 15px rgba(0, 136, 204, 0.2);
+}
+:root[data-palette="tech"][data-mode="dark"] .btn-ghost:hover {
+  box-shadow: 0 0 15px rgba(0, 212, 255, 0.2);
+}
+:root[data-palette="tech"] .card-title {
+  color: var(--primary);
+}
+:root[data-palette="tech"][data-mode="dark"] .card-title {
+  text-shadow: 0 0 10px rgba(0, 212, 255, 0.5);
+}
+:root[data-palette="tech"] input:focus,
+:root[data-palette="tech"] textarea:focus,
+:root[data-palette="tech"] select:focus {
+  box-shadow: 0 0 15px rgba(0, 136, 204, 0.2);
+}
+:root[data-palette="tech"][data-mode="dark"] input:focus,
+:root[data-palette="tech"][data-mode="dark"] textarea:focus,
+:root[data-palette="tech"][data-mode="dark"] select:focus {
+  box-shadow: 0 0 15px rgba(0, 212, 255, 0.3);
+}
+:root[data-palette="tech"] .topbar {
+  backdrop-filter: blur(10px);
+}
+:root[data-palette="tech"][data-mode="dark"] .topbar {
+  background: rgba(10, 10, 26, 0.85);
+  border-bottom: 1px solid rgba(0, 212, 255, 0.15);
+}
+:root[data-palette="tech"][data-mode="dark"] .user-menu {
+  background: rgba(20, 20, 40, 0.95);
+  backdrop-filter: blur(10px);
+  box-shadow: 0 0 20px rgba(0, 212, 255, 0.15);
+}
+:root[data-palette="tech"][data-mode="dark"] .toast {
+  background: rgba(20, 20, 40, 0.95);
+  box-shadow: 0 0 20px rgba(0, 212, 255, 0.15);
+}
+
+/* ===== 莫兰迪（极简文艺） ===== */
+:root[data-palette="morandi"] {
+  --bg: #f5f3f0;
+  --card: #ffffff;
+  --border: #e8e4df;
+  --primary-soft: #e8ede5;
+  --code-bg: #f9f7f5;
+  --primary: #8b9d83;
+  --primary-hover: #7a8c72;
+  --focus-ring: rgba(139, 157, 131, 0.18);
+  --green: #8b9d83;
+  --green-soft: #e8ede5;
+  --amber: #c4a57b;
+  --amber-soft: #f5ede0;
+  --red: #c48b7b;
+  --red-soft: #f5e5e0;
+}
+:root[data-palette="morandi"][data-mode="dark"] {
+  --bg: #1e1d1b;
+  --card: #2a2826;
+  --border: #3d3a36;
+  --code-bg: #1a1917;
+  --input-bg: #1a1917;
+  --primary: #a8b8a0;
+  --primary-hover: #8b9d83;
+  --primary-soft: #3d4a38;
+  --focus-ring: rgba(168, 184, 160, 0.25);
+  --green: #a8b8a0;
+  --green-soft: #3d4a38;
+  --amber: #d4b896;
+  --amber-soft: #4a3d2a;
+  --red: #d4a896;
+  --red-soft: #4a3028;
+}
+
+/* 莫兰迪主题专属样式：衬线字体、8px圆角、平滑滚动 */
+:root[data-palette="morandi"] {
+  --radius: 8px;
+}
+:root[data-palette="morandi"] body {
+  font-family:
+    "Noto Serif SC", "Source Han Serif SC", "Songti SC", "SimSun",
+    Georgia, "Times New Roman", serif;
+  letter-spacing: 0.02em;
+}
+:root[data-palette="morandi"] html {
+  scroll-behavior: smooth;
 }
 
 /* ---------- 基础 ---------- */
@@ -334,6 +524,15 @@ select {
   height: 16px;
   flex-shrink: 0;
   display: block;
+}
+
+/* 主题按钮图标尺寸 */
+[data-theme-palette] .btn-icon svg,
+[data-theme-mode] .btn-icon svg {
+  width: 18px;
+  height: 18px;
+  display: inline-block;
+  vertical-align: -3px;
 }
 
 /* ---------- 顶栏与菜单 ---------- */
