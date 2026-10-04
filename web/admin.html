@@ -17,24 +17,22 @@
         color: var(--text-2);
         cursor: pointer;
       }
+      /* 光晕已内置进图标（半透明外圈），这里只控制尺寸与状态色 */
       .dot {
-        width: 9px;
-        height: 9px;
-        border-radius: 50%;
-        background: var(--text-3);
+        width: 15px;
+        height: 15px;
+        color: var(--text-3);
+        flex-shrink: 0;
       }
       .dot.ok {
-        background: var(--green);
-        box-shadow: 0 0 0 3px var(--green-soft);
+        color: var(--green);
       }
       .dot.bad {
-        background: var(--red);
-        box-shadow: 0 0 0 3px var(--red-soft);
+        color: var(--red);
       }
-      /* 有新聊天消息：状态灯变红提醒（与服务异常同色，点开聊天后恢复） */
+      /* 有新聊天消息：状态灯变蓝提醒（与服务异常红色区分，点开聊天后恢复） */
       .dot.newmsg {
-        background: var(--red);
-        box-shadow: 0 0 0 3px var(--red-soft);
+        color: var(--blue);
       }
       .brand .tag {
         font-size: 11px;
@@ -874,6 +872,7 @@
           fill="#4B5C83"
         ></path>
       </symbol>
+      <symbol id="ic-health" viewBox="0 0 1024 1024"><path d="M512 512m-512 0a512 512 0 1 0 1024 0 512 512 0 1 0-1024 0Z" fill="currentColor" opacity=".279"/><path d="M512 512m-275.692308 0a275.692308 275.692308 0 1 0 551.384616 0 275.692308 275.692308 0 1 0-551.384616 0Z" fill="currentColor"/></symbol>
     </svg>
 
     <div class="topbar">
@@ -898,12 +897,12 @@
               data-theme-mode
               title="切换亮色/暗色"
             >
-              <span class="btn-icon">🌙</span>亮暗切换
+              <span class="btn-icon"></span>亮暗切换
             </button>
           </div>
         </span>
         <span class="health" id="health" title="点击进入聊天室">
-          <span class="dot" id="healthDot"></span>
+          <svg class="dot" id="healthDot" aria-hidden="true"><use href="#ic-health"></use></svg>
         </span>
         <span class="brand-version">v __VERSION__</span>
         <span class="spacer"></span>
@@ -2093,7 +2092,7 @@
         } else {
           title = "检测中";
         }
-        dot.className = cls;
+        dot.setAttribute("class", cls);
         document
           .getElementById("health")
           .setAttribute("title", title + " · 点击进入聊天室");

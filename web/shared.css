@@ -16,6 +16,8 @@
   --ghost-bg: #fff;
   --ghost-hover: #f8fafc;
   --mask: rgba(17, 24, 39, 0.45);
+  --blue: #2563eb;
+  --blue-soft: #eff6ff;
   --radius: 12px;
   --shadow:
     0 1px 3px rgba(16, 24, 40, 0.08), 0 1px 2px rgba(16, 24, 40, 0.04);
@@ -34,6 +36,8 @@
   --ghost-bg: rgba(255, 255, 255, 0.08);
   --ghost-hover: rgba(255, 255, 255, 0.14);
   --mask: rgba(0, 0, 0, 0.6);
+  --blue: #60a5fa;
+  --blue-soft: #1e3a8a;
   --shadow: 0 1px 3px rgba(0, 0, 0, 0.3), 0 1px 2px rgba(0, 0, 0, 0.2);
 }
 
