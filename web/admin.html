@@ -183,6 +183,12 @@
         display: flex;
         gap: 6px;
         align-items: center;
+        flex-wrap: nowrap;
+      }
+      /* 按钮不压缩：窄屏下三个按钮排满操作列，依靠外层 .table-wrap 横向滚动
+         （与 IP 封禁表一致），而非换行堆叠 */
+      td.actions .action-btns .btn {
+        flex-shrink: 0;
       }
       .badge {
         display: inline-block;
@@ -515,14 +521,11 @@
         .brand-version {
           display: none;
         }
-        /* 用户表：隐藏创建时间列（命令行 userctl list 仍可查询），操作按钮
-           允许换行，保证「改密/禁用/删除」完整可见，不依赖横向滚动 */
+        /* 用户表：隐藏创建时间列（命令行 userctl list 仍可查询）；
+           操作按钮不换行，窄屏依靠外层 .table-wrap 横向滚动（与 IP 封禁表一致） */
         #userTable th:nth-child(4),
         #userTable td:nth-child(4) {
           display: none;
-        }
-        td.actions .action-btns {
-          flex-wrap: wrap;
         }
       }
     </style>
@@ -889,7 +892,17 @@
           fill="#4B5C83"
         ></path>
       </symbol>
-      <symbol id="ic-health" viewBox="0 0 1024 1024"><path d="M512 512m-512 0a512 512 0 1 0 1024 0 512 512 0 1 0-1024 0Z" fill="currentColor" opacity=".279"/><path d="M512 512m-275.692308 0a275.692308 275.692308 0 1 0 551.384616 0 275.692308 275.692308 0 1 0-551.384616 0Z" fill="currentColor"/></symbol>
+      <symbol id="ic-health" viewBox="0 0 1024 1024">
+        <path
+          d="M512 512m-512 0a512 512 0 1 0 1024 0 512 512 0 1 0-1024 0Z"
+          fill="currentColor"
+          opacity=".279"
+        />
+        <path
+          d="M512 512m-275.692308 0a275.692308 275.692308 0 1 0 551.384616 0 275.692308 275.692308 0 1 0-551.384616 0Z"
+          fill="currentColor"
+        />
+      </symbol>
     </svg>
 
     <div class="topbar">
@@ -919,7 +932,9 @@
           </div>
         </span>
         <span class="health" id="health" title="点击进入聊天室">
-          <svg class="dot" id="healthDot" aria-hidden="true"><use href="#ic-health"></use></svg>
+          <svg class="dot" id="healthDot" aria-hidden="true">
+            <use href="#ic-health"></use>
+          </svg>
         </span>
         <span class="brand-version">v __VERSION__</span>
         <span class="spacer"></span>
