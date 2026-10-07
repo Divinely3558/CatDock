@@ -174,6 +174,17 @@
         border-radius: 999px;
       }
 
+      /* 提交表单纵向布局：右卡出现滚动条导致左卡被拉伸时按钮沉底，
+         两卡底部视觉对齐（常态高度不受影响） */
+      #dlForm {
+        flex: 1;
+        display: flex;
+        flex-direction: column;
+      }
+      #dlForm > .btn {
+        margin-top: auto;
+      }
+
       details.adv {
         border: 1px solid var(--border);
         border-radius: 8px;
@@ -197,13 +208,139 @@
         margin-top: 4px;
       }
 
+      /* ---------- 新建下载任务卡 + 进行中的任务卡：跨主题尺寸锁定 ---------- */
+      /* 4 色板各自覆盖了影响排布的度量（pixel 3px 粗边框、morandi 大留白、
+         tech/morandi 任务项内边距、标题字号行高各异），切换主题时两张卡片
+         的外框高度随之互相适应、视觉跳动。此处统一这些度量——外框留白、
+         字段与任务项高度、标题行高；颜色、圆角、字体仍随主题变化。
+         :root 前缀抬高优先级压过各色板同名覆盖（page 样式在注入的
+         shared.css 之后）。服务信息卡不参与锁定（独占整行，高度变化不影响
+         上方两卡对的框架） */
+      :root .card:has(> form#dlForm) .card-title,
+      :root .card:has(> .task-list) .card-title {
+        line-height: 24px; /* 锁定标题行高：4 色板标题字号不同也保持同高 */
+      }
+      :root[data-palette="morandi"] .card:has(> form#dlForm),
+      :root[data-palette="morandi"] .card:has(> .task-list) {
+        padding: 18px 20px; /* 还原基础留白，抵消 morandi 的 28px 32px */
+      }
+      :root[data-palette="pixel"] .card:has(> form#dlForm),
+      :root[data-palette="pixel"] .card:has(> .task-list) {
+        padding: 16px 18px; /* 3px 粗边框用 -2px 留白补偿，内容基准与基础版对齐 */
+      }
+      /* 任务项垂直尺寸对齐（26px 边框盒 = 垂直内边距×2 + 边框）：
+         default 14px/1px=30、tech 10px/1px=22、morandi 16px/1px=34，
+         4 条任务的列表总高跨主题差最多 32px；pixel 10px/3px=26 恰好持平；
+         全部锁定为 default/tech/morandi 12px、pixel 10px（3px 粗边框补偿） */
+      :root[data-palette="default"] .task-item,
+      :root[data-palette="tech"] .task-item,
+      :root[data-palette="morandi"] .task-item {
+        padding-top: 12px;
+        padding-bottom: 12px;
+      }
+      /* 各主题继承的 line-height 系数不同（如 morandi ≈2.0、基础 ≈1.7），
+         文本行高随字体浮动是卡框变高的另一来源：给两卡内参与排布的文本行
+         全部锁像素行高/行高盒（px 值会覆盖继承系数并随继承下传给行内子元素） */
+      :root .card:has(> .task-list) .task-row1 {
+        height: 28px; /* 行高盒锁定：图标按钮 28px 是行内最大项，名称/徽标不再撑高 */
+      }
+      :root .card:has(> .task-list) .task-name,
+      :root .card:has(> .task-list) .task-row2 {
+        line-height: 20px;
+      }
+      #dlForm .field {
+        line-height: 22px; /* 字段容器行高盒：div.field 的行内标签 strut 随主题系数浮动 */
+      }
+      #dlForm input[type="text"],
+      #dlForm textarea {
+        display: block; /* 消除 inline-block 基线间隙（间隙大小随主题字体下降部变化） */
+      }
+      #dlForm .hint,
+      #dlForm details.adv summary {
+        line-height: 20px; /* 提示行 / 折叠摘要行 */
+      }
+
+      /* ---------- 顶栏：跨主题高度锁定 ---------- */
+      /* pixel 用户胶囊 3px 粗边框、morandi 2.0 行高系数都会使顶栏变高，
+         顶栏一变整页内容随之推移；锁定行高并按边框宽度补偿内边距 */
+      :root .brand {
+        line-height: 28px;
+      }
+      :root .brand .tag,
+      :root .user-chip,
+      :root .health {
+        line-height: 20px;
+      }
+      :root .card-title .count {
+        line-height: 20px; /* 计数徽标不撑高卡片标题 */
+      }
+      :root .user-chip {
+        /* 盒高锁定：内联头像 svg 的行盒扩张随主题字体度量浮动
+           （Inter/思源撑到 21px、Courier 20px），钉死盒高后四主题胶囊恒 28px */
+        height: 28px;
+        box-sizing: border-box;
+      }
+      :root[data-palette="pixel"] .user-chip {
+        padding-top: 1px; /* 3px 粗边框补偿，胶囊总高与其他主题一致 */
+        padding-bottom: 1px;
+      }
+      :root[data-palette="morandi"] .user-chip {
+        padding-top: 3px; /* 1px 边框补偿 */
+        padding-bottom: 3px;
+      }
+
+      /* ---------- 服务信息卡：跨主题高度锁定 ---------- */
+      /* 独占整行，高度变化会直接改变页面总高（滚动条出现/消失引发整页
+         宽度跳动）；框架与文本行同样锁定，px 行高随继承下传卡内所有文本 */
+      :root[data-palette="morandi"] #infoCard {
+        padding: 18px 20px;
+      }
+      :root[data-palette="pixel"] #infoCard {
+        padding: 16px 18px;
+      }
+      #infoCard {
+        line-height: 20px;
+      }
+      #infoCard .card-title {
+        line-height: 24px;
+      }
+      #infoCard .info-code {
+        line-height: 20px; /* 覆盖其自带 1.7 系数（随主题字体浮动） */
+      }
+      #dlForm input[type="text"],
+      #dlForm .dropdown-trigger {
+        height: 44px;
+        padding-top: 0;
+        padding-bottom: 0;
+        box-sizing: border-box; /* 下拉按钮无全局 border-box，需单独声明 */
+      }
+      :root[data-palette="pixel"] #dlForm .dropdown-trigger {
+        border: 3px solid var(--border); /* 与 pixel 输入框同等粗边框、直角，外观成套 */
+        border-radius: 0;
+      }
+      #fUrl {
+        height: 88px; /* 锁定高度：行高/字号随主题变化不再改变表单排布 */
+        scrollbar-gutter: stable; /* 滚动条出现/消失不再挤压文本重新换行 */
+      }
+      #dlBtn {
+        height: 44px;
+        box-sizing: border-box;
+      }
+
       /* ---------- 任务列表 ---------- */
+      /* 列表可视高度固定为 4 条任务（第 5 条起内部滚动），上限值由 JS 按实际
+         任务高度计算写入 --task-list-cap，随各主题色板的字体/间距自适应；
+         两张卡片（新建下载任务 / 进行中的任务）外框高度由 grid stretch 取
+         较大者保持一致，任务卡较高时表单卡拉伸、按钮沉底补齐 */
       .task-list {
         display: flex;
         flex-direction: column;
         gap: 10px;
         flex: 1;
+        min-height: 0;
         overflow-y: auto;
+        max-height: var(--task-list-cap, none);
+        padding-right: 10px;
       }
       .task-item {
         border: 1px solid var(--border);
@@ -236,6 +373,11 @@
         font-size: 11px;
         color: var(--text-3);
         font-family: ui-monospace, Menlo, Consolas, monospace;
+        /* 可收缩 + 省略号：防止像素风宽字体把 ID 撑爆、挤出 pct/按钮 */
+        min-width: 0;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
       }
       .badge {
         font-size: 12px;
@@ -320,6 +462,13 @@
         min-width: 38px;
         text-align: right;
         font-variant-numeric: tabular-nums;
+      }
+      /* row2 用户名：同样可收缩省略（像素风宽字体防挤爆）；手机版隐藏 */
+      .task-user {
+        min-width: 0;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
       }
 
       .empty {
@@ -555,6 +704,26 @@
         white-space: pre;
         color: var(--text);
       }
+      /* 信息卡可折叠块（猫抓插件「请求体」JSON 示例）：
+         手机默认收起省一屏，桌面渲染时注入 open 保持展开 */
+      .info-fold summary {
+        cursor: pointer;
+        font-size: 12px;
+        color: var(--text-2);
+        margin: 10px 0 6px;
+        user-select: none;
+        list-style: none;
+      }
+      .info-fold summary::-webkit-details-marker {
+        display: none;
+      }
+      .info-fold summary::before {
+        content: "▸ ";
+        color: var(--text-3);
+      }
+      .info-fold[open] summary::before {
+        content: "▾ ";
+      }
       .info-endpoints {
         display: flex;
         flex-direction: column;
@@ -585,6 +754,10 @@
         .container {
           grid-template-columns: minmax(0, 1fr);
         }
+        /* 单列布局：任务列表取消「4 条」滚动上限，完整展示 */
+        .task-list {
+          max-height: none !important;
+        }
         /* 触控目标加大 */
         .btn {
           padding: 11px 16px;
@@ -613,11 +786,11 @@
           text-overflow: ellipsis;
           white-space: nowrap;
         }
-        /* 任务操作按钮加大触控区 */
+        /* 任务操作按钮适度加大触控区（30px：可点但不挤占任务行） */
         .icon-btn {
-          width: 34px;
-          height: 34px;
-          font-size: 15px;
+          width: 30px;
+          height: 30px;
+          font-size: 14px;
         }
       }
       @media (max-width: 480px) {
@@ -647,11 +820,23 @@
         .task-row2 {
           flex-wrap: wrap;
         }
+        /* 个人页任务卡只显示自己的任务，用户名无意义，隐藏以保持 row2 单行 */
+        .task-user {
+          display: none;
+        }
         details.adv summary {
           padding: 4px 0;
         }
         .brand-version {
           display: none;
+        }
+        /* 过滤规则编辑器：输入框独占一行、按钮落到下一行，
+           避免窄屏下输入框过窄导致占位文案被裁切 */
+        .filter-editor .fe-add {
+          flex-wrap: wrap;
+        }
+        .filter-editor .fe-add input {
+          flex-basis: 100%;
         }
       }
     </style>
@@ -1062,7 +1247,7 @@
               <span>视频 URL<i class="req">*</i></span>
               <textarea
                 id="fUrl"
-                rows="2"
+                rows="3"
                 placeholder="粘贴 m3u8 / 直链视频地址"
                 required
               ></textarea>
@@ -1210,7 +1395,7 @@
               <input
                 type="text"
                 id="kwInput"
-                placeholder="输入关键字，回车或逗号添加，可批量"
+                placeholder="输入关键字，回车或逗号添加"
               />
               <button type="button" class="btn" id="kwAdd">添加</button>
             </div>
@@ -1229,7 +1414,7 @@
               <input
                 type="text"
                 id="ffInput"
-                placeholder="输入关键字，回车或逗号添加，可批量"
+                placeholder="输入关键字，回车或逗号添加"
               />
               <button type="button" class="btn" id="ffAdd">添加</button>
             </div>
@@ -1664,7 +1849,9 @@
                     '<span class="task-id">ID: ' +
                     CD.esc(t.id) +
                     "</span>" +
-                    (t.user ? "<span>👤 " + CD.esc(t.user) + "</span>" : "") +
+                    (t.user
+                      ? '<span class="task-user">👤 ' + CD.esc(t.user) + "</span>"
+                      : "") +
                     '<span style="flex:1"></span>' +
                     '<span class="pct">' +
                     seg +
@@ -1676,6 +1863,17 @@
                   );
                 })
                 .join("");
+              if (list.children.length) {
+                // 列表可视高度固定为 4 条任务（含间距），第 5 条起出现滚动条；
+                // 按实际渲染的任务卡高度计算（getBoundingClientRect 保留亚像素，
+                // 另加 1px 容差抵消取整误差），随各主题色板的字体/间距自适应
+                var gap = parseFloat(getComputedStyle(list).gap) || 0;
+                var unit = list.children[0].getBoundingClientRect().height + gap;
+                list.style.setProperty(
+                  "--task-list-cap",
+                  (unit * 4 - gap + 1).toFixed(2) + "px",
+                );
+              }
             })
             .catch(function () {
               /* 403 已在 handleResp 处理；网络错误静默，等健康检查 */
@@ -2177,9 +2375,17 @@
               html +=
                 '<div style="margin-bottom:8px;font-size:12px;color:var(--text-2);">发送地址：</div>';
               html += '<div class="info-code">' + CD.esc(sendUrl) + "</div>";
+              // 「请求体」JSON 示例包进 details：手机（≤480px）默认收起，
+              // 桌面渲染时注入 open 保持展开；用户仍可手动开合
+              var foldOpen =
+                window.matchMedia &&
+                window.matchMedia("(max-width: 480px)").matches
+                  ? ""
+                  : " open";
               html +=
-                '<div style="margin:10px 0 6px;font-size:12px;color:var(--text-2);">请求体：</div>';
-              html +=
+                '<details class="info-fold"' +
+                foldOpen +
+                "><summary>请求体</summary>" +
                 '<div class="info-code">' +
                 CD.esc(
                   [
@@ -2196,7 +2402,7 @@
                     "}",
                   ].join("\n"),
                 ) +
-                "</div>";
+                "</div></details>";
               html += "</div>";
 
               // API 接口

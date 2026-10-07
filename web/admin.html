@@ -463,7 +463,9 @@
           padding: 11px 16px;
         }
         input[type="text"],
-        input[type="password"] {
+        input[type="password"],
+        textarea,
+        select {
           font-size: 16px;
         }
         /* 中屏（平板/窄窗口）：4 个命令组改为 2×2，手机端（≤480px）单列 */
@@ -486,6 +488,12 @@
           text-overflow: ellipsis;
           white-space: nowrap;
         }
+        /* 手机端表格紧凑：缩小内边距与字号，降低横向溢出幅度 */
+        th,
+        td {
+          padding: 7px 6px;
+          font-size: 12px;
+        }
       }
       @media (max-width: 480px) {
         .container {
@@ -506,6 +514,15 @@
         }
         .brand-version {
           display: none;
+        }
+        /* 用户表：隐藏创建时间列（命令行 userctl list 仍可查询），操作按钮
+           允许换行，保证「改密/禁用/删除」完整可见，不依赖横向滚动 */
+        #userTable th:nth-child(4),
+        #userTable td:nth-child(4) {
+          display: none;
+        }
+        td.actions .action-btns {
+          flex-wrap: wrap;
         }
       }
     </style>
@@ -952,7 +969,7 @@
           </button>
         </div>
         <div class="table-wrap">
-          <table>
+          <table id="userTable">
             <thead>
               <tr>
                 <th>用户名</th>
