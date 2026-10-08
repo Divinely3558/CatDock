@@ -1397,7 +1397,7 @@
                 id="kwInput"
                 placeholder="输入关键字，回车或逗号添加"
               />
-              <button type="button" class="btn" id="kwAdd">添加</button>
+              <button type="button" class="btn btn-ghost" id="kwAdd">添加</button>
             </div>
           </div>
 
@@ -1405,7 +1405,7 @@
             <div class="fe-head">
               <label class="fe-switch"
                 ><input type="checkbox" id="ffEnabled" />
-                文件名过滤（删除关键字）</label
+                文件名过滤</label
               >
               <span class="hint">从文件名中删除这些关键字</span>
             </div>
@@ -1416,7 +1416,7 @@
                 id="ffInput"
                 placeholder="输入关键字，回车或逗号添加"
               />
-              <button type="button" class="btn" id="ffAdd">添加</button>
+              <button type="button" class="btn btn-ghost" id="ffAdd">添加</button>
             </div>
           </div>
 
@@ -1424,12 +1424,17 @@
             <div class="fe-head">
               <label class="fe-switch"
                 ><input type="checkbox" id="ddEnabled" />
-                文件名去重（正则规则）</label
+                文件名去重</label
               >
               <span class="hint">按顺序应用正则替换</span>
             </div>
             <div id="ddRules"></div>
-            <button type="button" class="btn" id="ddAdd">+ 添加规则</button>
+            <div class="dd-add-row">
+              <button type="button" class="btn btn-ghost" id="ddAdd">
+                + 添加规则
+              </button>
+              <span id="ddMoreHost"></span>
+            </div>
           </div>
 
           <div class="filter-actions">
@@ -1441,6 +1446,28 @@
             </button>
           </div>
           <div class="alert" id="filterAlert"></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ================= 过滤规则「更多...」弹窗（阈值外条目，结构与 admin 一致） ================= -->
+    <div class="mask" id="filterMoreMask">
+      <div
+        class="modal"
+        style="max-width: 480px; max-height: 80vh; overflow-y: auto"
+      >
+        <h3 id="filterMoreTitle">更多关键字</h3>
+        <div class="msg" id="filterMoreSub"></div>
+        <div class="filter-editor">
+          <div class="fe-section">
+            <div class="chips" id="filterMoreChips"></div>
+            <div id="filterMoreRules"></div>
+          </div>
+          <div class="filter-actions">
+            <button type="button" class="btn btn-ghost" id="filterMoreClose">
+              关闭
+            </button>
+          </div>
         </div>
       </div>
     </div>
@@ -2335,8 +2362,13 @@
                     c.ad_keyword_count +
                     ") 文件名过滤" +
                     chk(c.filename_filter_enabled) +
-                    " 去重" +
-                    chk(c.filename_dedup_enabled),
+                    "(" +
+                    c.filename_filter_count +
+                    ") 去重" +
+                    chk(c.filename_dedup_enabled) +
+                    "(" +
+                    c.filename_dedup_count +
+                    ")",
                 ],
                 [
                   svg("users"),

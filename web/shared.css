@@ -1217,6 +1217,7 @@ select {
 .filter-editor .chips {
   display: flex;
   flex-wrap: wrap;
+  align-items: center;
   gap: 6px;
   margin-bottom: 8px;
 }
@@ -1247,6 +1248,48 @@ select {
 .filter-editor .chips .empty-tip {
   font-size: 12px;
   color: var(--text-3);
+}
+/* 「+N」收纳按钮：视觉与 chip 芯片完全同款（primary-soft 底 + primary 字色、
+   胶囊圆角、无边框），颜色全部走主题变量，四套色板与亮暗模式自动适配；
+   像素风由全局 * 规则统一切直角，与芯片保持一致 */
+.filter-editor .btn.btn-more {
+  background: var(--primary-soft);
+  color: var(--primary);
+  border: none;
+  border-radius: 999px;
+  padding: 3px 12px;
+  font-size: 12px;
+  font-weight: 500;
+  line-height: inherit;
+  box-shadow: none;
+  align-self: center;
+}
+.filter-editor .btn.btn-more:hover {
+  background: var(--primary);
+  color: #fff;
+  opacity: 1;
+  transform: none;
+  box-shadow: none;
+}
+.filter-editor .btn.btn-more:active {
+  transform: none;
+  box-shadow: none;
+}
+/* 去重区：「+ 添加规则」居左、「更多」按钮同行居右（画圈位置） */
+.filter-editor .dd-add-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 4px;
+}
+.filter-editor .dd-add-row #ddMoreHost {
+  margin-left: auto;
+  display: inline-flex;
+  align-items: center;
+}
+/* 「更多...」弹窗需叠在过滤规则弹窗之上 */
+#filterMoreMask {
+  z-index: 110;
 }
 .filter-editor .fe-add {
   display: flex;

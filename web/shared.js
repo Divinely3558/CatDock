@@ -355,34 +355,134 @@
       filename_dedup: { enabled: false, rules: [] },
     };
 
+    // 去重主视图固定只显示 1 条，其余进「更多」；
+    // 广告关键字 / 文件名过滤不设固定条数，按「只占一行」动态测量（见 visibleCount）
+    var DD_VISIBLE = 1;
+    // 两个 chips 区主视图单行实测可容纳的芯片数，超出部分全部收纳进「更多」弹窗
+    var visibleCount = { keywords: 0, filename_filter: 0 };
+    var moreCtx = null; // 当前展开的「更多」区块：'keywords' | 'filename_filter' | 'filename_dedup'
+
+    // 追加去重区「更多」按钮：超过 DD_VISIBLE 条时出现，点击展开弹窗
+    function appendMoreButton(host, key) {
+      var list = filterState.filename_dedup.rules;
+      var hidden = list.slice(DD_VISIBLE);
+      if (!hidden.length) return;
+      var btn = document.createElement("button");
+      btn.type = "button";
+      // 与「添加 / 添加规则」使用相同的 button.btn 元素，仅加 btn-more 紧凑修饰
+      btn.className = "btn btn-ghost btn-more";
+      btn.textContent = "+" + hidden.length;
+      btn.title = "查看剩余 " + hidden.length + " 项";
+      btn.onclick = function () {
+        openMore(key);
+      };
+      host.appendChild(btn);
+    }
+
+    // 构建一个芯片元素；realIdx 为其在 filterState 列表中的真实下标
+    function buildChip(key, item, realIdx, listId, inputId) {
+      var chip = document.createElement("span");
+      chip.className = "chip";
+      var text = document.createElement("span");
+      text.textContent = item;
+      var del = document.createElement("button");
+      del.type = "button";
+      del.textContent = "✕";
+      del.title = "删除";
+      del.onclick = function () {
+        filterState[key].list.splice(realIdx, 1);
+        renderChips(key, listId, inputId);
+      };
+      chip.appendChild(text);
+      chip.appendChild(del);
+      return chip;
+    }
+
+    function fitChipsOnOneLine(wrap, els, gap, key) {
+      var budget = wrap.clientWidth;
+      // 先用「最大数字」文案造一个探测按钮，保证任意 +N 文案都放得下
+      var probe = document.createElement("button");
+      probe.type = "button";
+      probe.className = "btn btn-ghost btn-more";
+      probe.textContent = "+" + els.length;
+      probe.style.visibility = "hidden";
+      wrap.appendChild(probe);
+      var btnW = probe.offsetWidth;
+      // 第一遍：不预留按钮，只看第一行能放多少芯片
+      var m = 0;
+      var used = 0;
+      for (var i = 0; i < els.length; i++) {
+        var add = els[i].offsetWidth + (m ? gap : 0);
+        if (used + add > budget) break;
+        used += add;
+        m++;
+      }
+      var keep;
+      if (m >= els.length) {
+        // 全部芯片一行放得下：不需要「更多」
+        wrap.removeChild(probe);
+        keep = els.length;
+      } else {
+        // 第二遍：为按钮预留位置（按钮 + 间距），贪心计算同行可保留的芯片数
+        var reserve = btnW + gap;
+        keep = 0;
+        used = 0;
+        for (var j = 0; j < els.length; j++) {
+          var add2 = els[j].offsetWidth + (keep ? gap : 0);
+          if (used + add2 + reserve > budget) break;
+          used += add2;
+          keep++;
+        }
+        probe.textContent = "+" + (els.length - keep);
+        probe.style.visibility = "";
+        probe.title = "查看剩余 " + (els.length - keep) + " 项";
+        probe.onclick = (function (k) {
+          return function () {
+            openMore(k);
+          };
+        })(key);
+      }
+      // 超量芯片一次性移除；弹窗按 filterState 全量数据独立渲染，不会丢失
+      for (var k = els.length - 1; k >= keep; k--) wrap.removeChild(els[k]);
+      return keep;
+    }
+
     function renderChips(key, listId, inputId) {
       var wrap = $(listId);
       wrap.innerHTML = "";
       var list = filterState[key].list;
       if (!list.length) {
+        visibleCount[key] = 0;
         var tip = document.createElement("span");
         tip.className = "empty-tip";
         tip.textContent = "暂无关键字";
         wrap.appendChild(tip);
         return;
       }
-      list.forEach(function (item, idx) {
-        var chip = document.createElement("span");
-        chip.className = "chip";
-        var text = document.createElement("span");
-        text.textContent = item;
-        var del = document.createElement("button");
-        del.type = "button";
-        del.textContent = "✕";
-        del.title = "删除";
-        del.onclick = function () {
-          filterState[key].list.splice(idx, 1);
-          renderChips(key, listId, inputId);
-        };
-        chip.appendChild(text);
-        chip.appendChild(del);
-        wrap.appendChild(chip);
+      // 弹窗尚未完成布局（display:none 等）时宽度为 0，延后到下一帧再测，
+      // 避免把所有芯片误判为超宽而全部收进「更多」
+      if (wrap.clientWidth === 0) {
+        visibleCount[key] = 0;
+        // 最多等待 30 帧（约 0.5s）布局就绪；正常打开流程下次帧即有宽度
+        var tries = wrap._fitRetries || 0;
+        if (tries < 30) {
+          wrap._fitRetries = tries + 1;
+          requestAnimationFrame(function () {
+            renderChips(key, listId, inputId);
+          });
+        }
+        return;
+      }
+      wrap._fitRetries = 0;
+      var els = list.map(function (item, idx) {
+        return buildChip(key, item, idx, listId, inputId);
       });
+      els.forEach(function (el) {
+        wrap.appendChild(el);
+      });
+      var gap = parseFloat(getComputedStyle(wrap).columnGap);
+      if (!isFinite(gap) || gap <= 0) gap = 6;
+      visibleCount[key] = fitChipsOnOneLine(wrap, els, gap, key);
     }
 
     function addKeywords(key, listId, inputId) {
@@ -408,7 +508,7 @@
       var wrap = $("ddRules");
       wrap.innerHTML = "";
       var rules = filterState.filename_dedup.rules;
-      rules.forEach(function (rule, idx) {
+      rules.slice(0, DD_VISIBLE).forEach(function (rule, idx) {
         var row = document.createElement("div");
         row.className = "dd-rule";
         var p = document.createElement("input");
@@ -430,7 +530,7 @@
         };
         var del = document.createElement("button");
         del.type = "button";
-        del.className = "btn";
+        del.className = "btn btn-ghost";
         del.textContent = "✕";
         del.title = "删除规则";
         del.onclick = function () {
@@ -443,6 +543,135 @@
         row.appendChild(del);
         wrap.appendChild(row);
       });
+      // 去重的「更多」按钮与「+ 添加规则」同一行，靠右显示（宿主位于 dd-add-row）
+      var moreHost = $("ddMoreHost");
+      if (moreHost) {
+        moreHost.innerHTML = "";
+        appendMoreButton(moreHost, "filename_dedup");
+      }
+    }
+
+    // ---------- 「更多」弹窗：展示主视图阈值之外的条目，并可增删改 ----------
+    function openMore(key) {
+      moreCtx = key;
+      var titles = {
+        keywords: ["更多广告关键字", "以下关键字同样生效，仅因主视图过长被收起"],
+        filename_filter: ["更多文件名过滤关键字", "以下关键字同样生效，仅因主视图过长被收起"],
+        filename_dedup: ["更多去重规则", "以下规则按顺序生效，仅因主视图过长被收起"],
+      };
+      $("filterMoreTitle").textContent = titles[key][0];
+      $("filterMoreSub").textContent = titles[key][1];
+      renderMoreBody();
+      $("filterMoreMask").classList.add("show");
+    }
+
+    function renderMoreBody() {
+      var chipsBox = $("filterMoreChips");
+      var rulesBox = $("filterMoreRules");
+      chipsBox.innerHTML = "";
+      rulesBox.innerHTML = "";
+      if (!moreCtx) return;
+      var key = moreCtx;
+      if (key === "filename_dedup") {
+        chipsBox.style.display = "none";
+        rulesBox.style.display = "";
+        renderMoreDdRules(rulesBox);
+      } else {
+        chipsBox.style.display = "";
+        rulesBox.style.display = "none";
+        renderMoreChips(chipsBox, key);
+      }
+    }
+
+    function renderMoreChips(host, key) {
+      var list = filterState[key].list;
+      var start = visibleCount[key] || 0;
+      var hidden = list.slice(start);
+      if (!hidden.length) {
+        var tip = document.createElement("span");
+        tip.className = "empty-tip";
+        tip.textContent = "暂无更多关键字";
+        host.appendChild(tip);
+        return;
+      }
+      var mainListId = key === "keywords" ? "kwChips" : "ffChips";
+      var mainInputId = key === "keywords" ? "kwInput" : "ffInput";
+      hidden.forEach(function (item, i) {
+        var realIdx = start + i;
+        var chip = document.createElement("span");
+        chip.className = "chip";
+        var text = document.createElement("span");
+        text.textContent = item;
+        var del = document.createElement("button");
+        del.type = "button";
+        del.textContent = "✕";
+        del.title = "删除";
+        del.onclick = function () {
+          filterState[key].list.splice(realIdx, 1);
+          renderChips(key, mainListId, mainInputId);
+          renderMoreBody();
+          if (!filterState[key].list.slice(visibleCount[key]).length)
+            closeMore();
+        };
+        chip.appendChild(text);
+        chip.appendChild(del);
+        host.appendChild(chip);
+      });
+    }
+
+    function renderMoreDdRules(host) {
+      var rules = filterState.filename_dedup.rules;
+      var hidden = rules.slice(DD_VISIBLE);
+      if (!hidden.length) {
+        var tip = document.createElement("span");
+        tip.className = "empty-tip";
+        tip.textContent = "暂无更多规则";
+        host.appendChild(tip);
+        return;
+      }
+      hidden.forEach(function (rule, i) {
+        var realIdx = DD_VISIBLE + i;
+        var row = document.createElement("div");
+        row.className = "dd-rule";
+        var p = document.createElement("input");
+        p.type = "text";
+        p.placeholder = "正则 pattern";
+        p.value = rule.pattern || "";
+        p.oninput = function () {
+          rules[realIdx].pattern = p.value;
+        };
+        var arrow = document.createElement("span");
+        arrow.className = "dd-arrow";
+        arrow.textContent = "→";
+        var r = document.createElement("input");
+        r.type = "text";
+        r.placeholder = "替换为";
+        r.value = rule.replacement || "";
+        r.oninput = function () {
+          rules[realIdx].replacement = r.value;
+        };
+        var del = document.createElement("button");
+        del.type = "button";
+        del.className = "btn btn-ghost";
+        del.textContent = "✕";
+        del.title = "删除规则";
+        del.onclick = function () {
+          rules.splice(realIdx, 1);
+          renderDdRules();
+          renderMoreBody();
+          if (!rules.slice(DD_VISIBLE).length) closeMore();
+        };
+        row.appendChild(p);
+        row.appendChild(arrow);
+        row.appendChild(r);
+        row.appendChild(del);
+        host.appendChild(row);
+      });
+    }
+
+    function closeMore() {
+      moreCtx = null;
+      $("filterMoreMask").classList.remove("show");
     }
 
     function loadFilters() {
@@ -482,9 +711,11 @@
     });
     // 点击弹窗外部不再关闭，仅可通过「取消」按钮关闭
     $("filterCancel").addEventListener("click", function () {
+      closeMore();
       $("filterMask").classList.remove("show");
       hideAlert($("filterAlert"));
     });
+    $("filterMoreClose").addEventListener("click", closeMore);
     $("kwAdd").addEventListener("click", function () {
       addKeywords("keywords", "kwChips", "kwInput");
     });
@@ -509,6 +740,18 @@
         replacement: "",
       });
       renderDdRules();
+      // 新规则若落入「更多」区间（主视图只留 1 条），自动展开弹窗并聚焦新行
+      if (filterState.filename_dedup.rules.length > DD_VISIBLE) {
+        openMore("filename_dedup");
+        setTimeout(function () {
+          var box = $("filterMoreRules");
+          var last = box.lastElementChild;
+          if (last) {
+            var p = last.querySelector("input");
+            if (p) p.focus();
+          }
+        }, 50);
+      }
     });
     $("filterSave").addEventListener("click", function () {
       filterState.keywords.enabled = $("kwEnabled").checked;
@@ -529,6 +772,7 @@
         .then(function (data) {
           showAlert($("filterAlert"), data.message || "已保存", true);
           setTimeout(function () {
+            closeMore();
             $("filterMask").classList.remove("show");
           }, 1200);
         })
@@ -539,6 +783,36 @@
           btn.disabled = false;
         });
     });
+
+    // chips 单行容量随容器宽度 / 主题字体变化：窗口尺寸变化或切换主题时重新实测
+    function refitChips() {
+      if (!$("filterMask").classList.contains("show")) return;
+      renderChips("keywords", "kwChips", "kwInput");
+      renderChips("filename_filter", "ffChips", "ffInput");
+      if (moreCtx === "keywords" || moreCtx === "filename_filter")
+        renderMoreBody();
+    }
+    var refitTimer = null;
+    window.addEventListener("resize", function () {
+      clearTimeout(refitTimer);
+      refitTimer = setTimeout(refitChips, 120);
+    });
+    if (window.MutationObserver) {
+      new MutationObserver(function () {
+        clearTimeout(refitTimer);
+        refitTimer = setTimeout(refitChips, 60);
+      }).observe(document.documentElement, {
+        attributes: true,
+        attributeFilter: ["data-palette", "data-mode"],
+      });
+    }
+    // webfont 加载完成后芯片宽度可能变化，弹窗开着时重算一次单行容量
+    if (document.fonts && document.fonts.ready) {
+      document.fonts.ready.then(function () {
+        clearTimeout(refitTimer);
+        refitTimer = setTimeout(refitChips, 60);
+      });
+    }
   }
 
   window.CD = {
