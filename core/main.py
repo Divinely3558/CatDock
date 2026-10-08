@@ -83,7 +83,7 @@ def main():
     SSRF防护: {'启用' if cfg.ssrf_protection else '关闭'}
     最大并发: {cfg.max_concurrent_tasks}
     同视频模式: {'启用' if cfg.same_video_by_filename_enabled else '禁用'}
-    过滤规则: 拦截关键字{'✓' if cfg.keywords_enabled else '✗'}({len(cfg.ad_keywords)}) 文件名过滤{'✓' if cfg.filename_filter_enabled else '✗'}({len(cfg.filename_filters)}) 去重{'✓' if cfg.filename_dedup_enabled else '✗'}({len(cfg.filename_dedup_rules)})
+    过滤规则: 关键字{'✓' if cfg.keywords_enabled else '✗'}({len(cfg.ad_keywords)}) 文件名{'✓' if cfg.filename_filter_enabled else '✗'}({len(cfg.filename_filters)}) 去重{'✓' if cfg.filename_dedup_enabled else '✗'}({len(cfg.filename_dedup_rules)})
     {f"下载用户: {_user_count}" if _user_count > 0 else "未创建任何用户，请在容器内执行 userctl add <用户名>"}
 
  ═════════════════════════ 猫抓插件配置 ══════════════════════════
