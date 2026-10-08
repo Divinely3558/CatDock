@@ -28,6 +28,7 @@ from security import is_safe_url, sanitize_url_for_log, check_rate_limit, check_
 from filters import is_ad_content, get_user_rules, save_user_rules
 from task_store import load_tasks
 import chat
+import theme_prefs
 from downloader import run_download, resume_tasks, pause_task, resume_paused_task, delete_task, cleanup_user_data, TaskLimitExceeded
 from webui import get_login_html, get_user_html, get_admin_html
 
@@ -836,6 +837,15 @@ class DownloadHandler(http.server.BaseHTTPRequestHandler):
                     ],
                 },
             }})
+        elif path == '/theme':
+            # 当前账号的默认主题色板（未设置时 palette 为 null，前端按会话随机）
+            # 下载用户与管理员共用：两个控制台顶栏都有收藏星星
+            # 存储按角色分流：用户存 user/<名>/theme_prefs.json，管理员存 config/theme_admin.json
+            self.send_json({'success': True, 'data': {
+                'palette': theme_prefs.get_palette(
+                    self.authenticated_user,
+                    getattr(self, 'authenticated_role', 'user')),
+            }})
         elif path == '/chat/export':
             # 状态灯彩蛋聊天室：导出最近 7 天（含今天）的聊天记录
             # （固定日期范围无需传参，任何登录用户可用）
@@ -1063,6 +1073,39 @@ class DownloadHandler(http.server.BaseHTTPRequestHandler):
                          f"去重规则 {len(new_rules['filename_dedup']['rules'])}）")
                 self.send_json({'success': True,
                                 'message': '过滤规则已保存，对新增下载任务立即生效'})
+            except Exception as e:
+                self._server_error(e)
+        elif path == '/theme':
+            # 保存/取消当前账号的默认主题色板（顶栏星星）：
+            # palette 为四主题 id 之一时保存；null/空串时取消默认（恢复随机）
+            try:
+                data = self._read_json_body()
+                if data is None:
+                    return
+
+                if not self._check_auth(data):
+                    return
+
+                if not self._check_rate_limit():
+                    return
+
+                username = self.authenticated_user
+                palette = self._get_param(data, 'palette')
+                if palette is not None and str(palette) not in theme_prefs.VALID_PALETTES:
+                    self.send_json({'success': False, 'message': '未知的主题色板'}, 400)
+                    return
+                palette = theme_prefs.set_palette(
+                    username,
+                    str(palette) if palette is not None else None,
+                    getattr(self, 'authenticated_role', 'user'))
+                if palette:
+                    log_info(f"账号设置默认主题: {username}（{palette}）")
+                    self.send_json({'success': True, 'data': {'palette': palette},
+                                    'message': '已设为我的默认主题'})
+                else:
+                    log_info(f"账号取消默认主题: {username}（恢复随机）")
+                    self.send_json({'success': True, 'data': {'palette': None},
+                                    'message': '已取消默认主题，下次打开将随机'})
             except Exception as e:
                 self._server_error(e)
         elif path == '/chat/clear':

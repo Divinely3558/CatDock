@@ -989,6 +989,11 @@ select {
   flex-shrink: 0;
   display: block;
 }
+/* 「添加下载任务」图标 viewBox 为横向收纳托盘，按原始宽高比取略宽尺寸 */
+.btn svg.i.i-dl {
+  width: 20px;
+  height: 16px;
+}
 
 /* 主题按钮图标尺寸 */
 [data-theme-palette] .btn-icon svg,
