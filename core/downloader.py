@@ -448,7 +448,29 @@ def extract_segments(line):
 
 
 def match_base_name(name, base):
-    return name == base or name.startswith(base + '.') or name.startswith(base + '_')
+    if name == base or name.startswith(base + '.') or name.startswith(base + '_'):
+        return True
+    # 兜底：N_m3u8DL-RE 保存文件时会剥掉任务名结尾的半角点。
+    # 任务名若带尾点（如 'X。.'——站点标题自带全角句号'。'、插件追加的
+    # 扩展名被过滤词删除后残留），实际产物 'X。.mp4' 无法按 base+'.' 前缀
+    # 匹配，导致后处理找不到文件、任务被误判失败并反复重下，产物被
+    # N_m3u8DL-RE 逐轮改名堆积成 X.copy.mp4 / X.copy.copy.mp4。
+    # 这里补充按剥点后的任务名再匹配一次。
+    base2 = base.rstrip('.')
+    if base2 and base2 != base and (
+            name == base2 or name.startswith(base2 + '.') or name.startswith(base2 + '_')):
+        return True
+    return False
+
+
+def sanitize_base_name(name):
+    """任务名兜底净化：去首尾空白与半角点。
+
+    站点标题自带全角句号'。'且插件追加的扩展名被用户过滤词删除后，
+    任务名会残留尾点（如 'X。.'）；N_m3u8DL-RE 保存时会剥掉尾点，
+    产物与任务名错位导致误判失败。提交入口统一剥点，保证命名一致。
+    """
+    return (name or '').strip().strip('.')
 
 
 def find_existing_output_file(base_name):
@@ -495,6 +517,41 @@ def find_existing_source_file(base_name):
                     candidates.append((file_size, item_path))
             except Exception:
                 continue
+    if not candidates:
+        return None
+    candidates.sort(reverse=True, key=lambda x: x[0])
+    return candidates[0][1]
+
+
+def find_pending_merge_source(base_name):
+    """查找"已合并但未转封装成成品"的 .ts / .mux.mp4 源文件。
+
+    N_m3u8DL-RE 仅在转封装成功后才删除合并出的 .ts 源文件，因此：
+      - .ts 与成品共存 ⇒ 转封装中途被打断（成品残缺），重新合成即可；
+      - 仅剩 .ts      ⇒ 合并完成、转封装未开始，重新合成即可。
+    断电/停容器后恢复任务时命中此函数可跳过整段重新下载。
+    注意：不能复用 find_existing_source_file——它会返回体积最大的候选，
+    共存的残缺成品往往比 .ts 大，会被误选。这里只扫描 .ts/.mux.mp4。
+    返回源文件路径（≥ MIN_FILE_SIZE）或 None。
+    """
+    download_dir = get_download_dir()
+    if not os.path.exists(download_dir):
+        return None
+    candidates = []
+    for item in os.listdir(download_dir):
+        if not match_base_name(item, base_name):
+            continue
+        item_path = os.path.join(download_dir, item)
+        if not os.path.isfile(item_path):
+            continue
+        if not item.lower().endswith(('.ts', '.mux.mp4')):
+            continue
+        try:
+            size = os.path.getsize(item_path)
+        except Exception:
+            continue
+        if size >= cfg.MIN_FILE_SIZE:
+            candidates.append((size, item_path))
     if not candidates:
         return None
     candidates.sort(reverse=True, key=lambda x: x[0])
@@ -773,6 +830,12 @@ def _do_single_download_attempt(base_name, url, referer, cookie, user_agent, tas
         curl_target, output_file, needs_convert = None, os.path.join(get_download_dir(), f"{base_name}.{fmt}"), False
 
     # 尝试前先清理残留（避免上一次失败的残留影响，但是保留已存在的大文件 -> 直接成功）
+    # .ts 源文件仍在（上次合成被打断）时优先直接重新合成，避免整段重新下载
+    pending_src = find_pending_merge_source(base_name)
+    if pending_src:
+        debug_print(f"[去重] 发现未合成完的源文件，直接重新合成（无需重新下载）: {pending_src}")
+        if _finalize_download_outputs(base_name, output_file, fmt)[0]:
+            return True
     has_existing, existing_path = has_existing_video(base_name)
     if has_existing:
         debug_print(f"[去重] 同名视频文件已存在，直接视为成功: {existing_path}")
@@ -919,15 +982,20 @@ def _finalize_download_outputs(base_name, output_file, target_format):
     video_files = [f for f in all_files if is_video_file(f) and '.mux.' not in f.lower()]
 
     source_file = None
+    # 源文件优先级：.mux.mp4 > .ts > 成品视频。
+    # .ts 与成品共存是"转封装中途被打断"的现场，成品残缺，必须以 .ts 为源
+    # 重新合成覆盖，不能选残缺成品（否则直接原样返回损坏文件）。
     if mux_files:
         source_file = os.path.join(download_dir, mux_files[0])
-    elif video_files:
-        source_file = os.path.join(download_dir, video_files[0])
     elif ts_files:
         source_file = os.path.join(download_dir, ts_files[0])
+    elif video_files:
+        source_file = os.path.join(download_dir, video_files[0])
 
     # (A) 输出文件已存在（可能由下载工具直接生成）
-    if os.path.exists(output_file):
+    # 注意：.ts/.mux.mp4 源文件仍在时，说明上次转封装中途被打断，
+    # 成品是残缺文件，不能直接认定完整，须继续走 (C) 以 -y 重新合成覆盖。
+    if os.path.exists(output_file) and not ts_files and not mux_files:
         file_size = os.path.getsize(output_file)
         if file_size >= cfg.MIN_FILE_SIZE:
             debug_print(f"[后处理] 输出文件已存在且完整: {output_file}")
@@ -969,6 +1037,20 @@ def _finalize_download_outputs(base_name, output_file, target_format):
             _conversion_done = True
         except Exception:
             _conversion_done = False
+
+    # 转换失败且 .ts/.mux 源仍在：此时 output_file 只能是上次合成中断留下的
+    # 残缺成品（ts 与成品共存 ⇒ 成品残缺），绝不能误判为成功——明确删除残缺
+    # 文件、保留源文件，返回失败。后续恢复/重试会再次命中"直接重新合成"捷径，
+    # 无需重新下载。
+    if not _conversion_done and (ts_files or mux_files):
+        if os.path.exists(output_file):
+            try:
+                os.remove(output_file)
+                debug_print(f"[后处理] 转换失败，删除残缺成品文件: {output_file}")
+            except Exception:
+                pass
+        cleanup_residue(base_name, preserve_source=True)
+        return False, None
 
     # (D) 检查转换/重命名后的 output_file
     if os.path.exists(output_file):
@@ -1229,6 +1311,7 @@ def _run_same_video_group_worker(task_id, base_name, output_format=None):
             if task_id in cfg.tasks:
                 cfg.tasks[task_id]['url'] = task_url_for_log
                 cfg.tasks[task_id]['save_name'] = base_name
+        cleanup_copy_files(base_name)
         _finish_task(task_id, True)
         return
 
@@ -1335,6 +1418,7 @@ def _run_same_video_group_worker(task_id, base_name, output_format=None):
                     if task_id in cfg.tasks:
                         cfg.tasks[task_id]['save_name'] = base_name
                         cfg.tasks[task_id]['progress'] = 100
+                cleanup_copy_files(base_name)
                 _finish_task(task_id, True)
                 return
 
@@ -1357,6 +1441,7 @@ def _run_same_video_group_worker(task_id, base_name, output_format=None):
                 cfg.tasks[task_id]['save_name'] = base_name
                 if urls_snapshot:
                     cfg.tasks[task_id]['url'] = urls_snapshot[0][0]
+        cleanup_copy_files(base_name)
         _finish_task(task_id, False)
 
     except Exception as e:
@@ -1368,6 +1453,7 @@ def _run_same_video_group_worker(task_id, base_name, output_format=None):
         with cfg.tasks_lock:
             if task_id in cfg.tasks:
                 cfg.tasks[task_id]['save_name'] = base_name
+        cleanup_copy_files(base_name)
         _finish_task(task_id, False)
 
 
@@ -1513,6 +1599,12 @@ def _run_worker(task_id, cmd, base_name, output_file, target_format, initial_ret
     # 继承 per-user 上下文（后台线程 thread-local 默认为空）
     _inherit_task_context(task_id)
     try:
+        # .ts 源文件仍在（上次合成被打断）时优先直接重新合成，避免整段重新下载
+        if find_pending_merge_source(base_name):
+            debug_print(f"[下载] 发现未合成完的源文件，直接重新合成（无需重新下载）: {base_name}")
+            if _finalize_download_outputs(base_name, output_file, target_format)[0]:
+                _finish_task(task_id, True)
+                return
         dl_result = _run_download_with_retry(cmd, task_id, max_retries=5, initial_retry_count=initial_retry_count, base_name=base_name)
         if dl_result in ('paused', 'deleted'):
             # 任务已暂停/已删除：保留部分下载文件（暂停续传），不写日志、不移除任务
@@ -1608,11 +1700,23 @@ def _resume_single_task(task):
     # 应用文件名过滤（按用户规则）
     original_name = base_name
     base_name, _ = filter_filename(base_name, user=user)
+    base_name = sanitize_base_name(base_name)
     if base_name != original_name:
         # 更新任务中的 save_name 为过滤后的名称
         with cfg.tasks_lock:
             if task_id in cfg.tasks:
                 cfg.tasks[task_id]['save_name'] = base_name
+
+    # 优先处理"已合并 .ts 但未转封装成品"的残留（断电/停容器打断合成）：
+    # 直接重新合成即可，无需重新下载。必须先于 has_existing_video 检查——
+    # 转封装中途打断会留下体积达标但残缺的成品，先查成品会把损坏文件误判为完成。
+    pending_src = find_pending_merge_source(base_name)
+    if pending_src:
+        debug_print(f"[恢复] 发现未合成完的源文件，直接重新合成（无需重新下载）: {pending_src}")
+        output_file = os.path.join(get_download_dir(), f"{base_name}.{cfg.output_format}")
+        ok, _ = _finalize_download_outputs(base_name, output_file, cfg.output_format)
+        _finish_task(task_id, ok)
+        return
 
     has_existing, existing_path = has_existing_video(base_name)
     if has_existing:
@@ -1627,15 +1731,6 @@ def _resume_single_task(task):
         debug_print(f"[恢复] 发现未转 mp4 的 .f4v 源文件，尝试收尾: {f4v_source}")
         final_file = os.path.join(get_download_dir(), f"{base_name}.mp4")
         ok = _post_process_direct_download(f4v_source, final_file, 'mp4', base_name)
-        _finish_task(task_id, ok)
-        return
-
-    # 检查是否存在未转换的源文件（下载完成但尚未转换）
-    source_file = find_existing_source_file(base_name)
-    if source_file and os.path.getsize(source_file) >= cfg.MIN_FILE_SIZE:
-        debug_print(f"[恢复] 发现未转换的源文件，尝试转换: {source_file}")
-        output_file = os.path.join(get_download_dir(), f"{base_name}.{cfg.output_format}")
-        ok, _ = _finalize_download_outputs(base_name, output_file, cfg.output_format)
         _finish_task(task_id, ok)
         return
 
@@ -1833,10 +1928,14 @@ def run_download(url, save_name=None, referer=None, cookie=None, user_agent=None
         task_id_tmp = str(uuid.uuid4())[:8]
         base_name_raw = save_name or f"download_{task_id_tmp}"
         base_name, ad_count = filter_filename(base_name_raw, user=user)
+        base_name = sanitize_base_name(base_name)
 
         # 1) 检查日志：文件名是否已成功/失败记录过（按用户隔离）
         name_hit, name_status = is_filename_downloaded(base_name, user=user)
-        if name_hit:
+        if name_hit and not (name_status == 'failure'
+                             and find_pending_merge_source(base_name)):
+            # 失败记录通常拦下重试；但若上次是合成中途被打断（.ts 源仍在），
+            # 放行重建任务——调度器入口会直接重新合成，无需重新下载
             debug_print(f"[去重] 文件名命中{('成功' if name_status == 'success' else '失败')}记录，跳过: {base_name}")
             reason = "已下载过" if name_status == 'success' else "此前已失败"
             log_info(f"[{user}] 跳过下载: {base_name}（{reason}）")
@@ -1960,6 +2059,7 @@ def run_download(url, save_name=None, referer=None, cookie=None, user_agent=None
 
     # 应用文件名过滤（按用户规则）
     base_name, ad_count = filter_filename(base_name, user=user)
+    base_name = sanitize_base_name(base_name)
 
     skip, hit_path = _check_local_file_exists_skip(base_name)
     if skip:
