@@ -447,6 +447,10 @@
         background: var(--border);
         color: var(--text-2);
       }
+      .badge-queued {
+        background: var(--blue-soft);
+        color: var(--blue);
+      }
       .task-actions {
         display: flex;
         gap: 4px;
@@ -1226,6 +1230,7 @@
           fill="currentColor"
         />
       </symbol>
+      <symbol id="ic-pin" viewBox="0 0 1024 1024"><path d="M224 160h576v96H224z" fill="currentColor"/><path d="M512 320L800 608H608v288H416V608H224z" fill="currentColor"/></symbol>
       <symbol id="ic-health" viewBox="0 0 1024 1024"><path d="M512 512m-512 0a512 512 0 1 0 1024 0 512 512 0 1 0-1024 0Z" fill="currentColor" opacity=".279"/><path d="M512 512m-275.692308 0a275.692308 275.692308 0 1 0 551.384616 0 275.692308 275.692308 0 1 0-551.384616 0Z" fill="currentColor"/></symbol>
       <symbol id="ic-star" viewBox="0 0 1068 1024"><path d="M534.46144 93.090909c32.581818 0 65.163636 16.290909 81.454545 51.2l30.254546 60.509091c34.909091 69.818182 104.727273 118.690909 183.854545 130.327273l67.490909 9.309091c74.472727 11.636364 104.727273 102.4 51.2 153.6l-48.872727 48.872727c-58.181818 55.854545-83.781818 134.981818-69.818182 211.781818l11.636364 67.490909c9.309091 58.181818-37.236364 104.727273-90.763636 104.727273-13.963636 0-27.927273-2.327273-41.890909-11.636364l-60.509091-32.581818c-37.236364-16.290909-74.472727-25.6-114.036364-25.6s-76.8 9.309091-114.036364 27.927273l-60.509091 32.581818c-13.963636 6.981818-27.927273 11.636364-41.890909 11.636364-53.527273 0-100.072727-46.545455-90.763636-104.727273l11.636364-67.490909c13.963636-76.8-11.636364-155.927273-69.818182-211.781818l-48.872727-48.872728c-53.527273-51.2-23.272727-141.963636 51.2-153.6l67.490909-9.309091c79.127273-11.636364 146.618182-60.509091 183.854545-130.327272l30.254546-60.509091C469.297804 109.381818 501.879622 93.090909 534.46144 93.090909m0-93.090909c-69.818182 0-132.654545 39.563636-165.236364 102.4L338.970531 162.909091c-20.945455 44.218182-62.836364 74.472727-114.036364 81.454545l-67.490909 9.309091c-69.818182 9.309091-128 58.181818-148.945454 125.672728-20.945455 67.490909-2.327273 137.309091 46.545454 186.181818l48.872727 48.872727c34.909091 32.581818 51.2 81.454545 41.89091 128l-11.636364 67.490909c-9.309091 53.527273 4.654545 107.054545 39.563636 148.945455C210.970531 1000.727273 262.170531 1024 318.025076 1024c30.254545 0 58.181818-6.981818 86.109091-20.945455l60.509091-32.581818c20.945455-11.636364 46.545455-16.290909 69.818182-16.290909s48.872727 6.981818 69.818182 16.290909l60.509091 32.581818c27.927273 13.963636 55.854545 20.945455 86.109091 20.945455 55.854545 0 107.054545-23.272727 141.963636-65.163636 34.909091-41.890909 48.872727-95.418182 39.563636-148.945455l-11.636363-67.490909c-9.309091-46.545455 6.981818-95.418182 41.890909-128l48.872727-48.872727c51.2-48.872727 69.818182-121.018182 46.545455-186.181818-20.945455-67.490909-79.127273-116.363636-148.945455-125.672728l-67.490909-9.309091c-48.872727-6.981818-90.763636-37.236364-114.036364-81.454545L697.370531 102.4C667.115985 39.563636 604.279622 0 534.46144 0z"/></symbol>
     </svg>
@@ -1868,6 +1873,7 @@
 
         // ---------- 任务列表 ----------
         var STATUS_MAP = {
+          queued: ["排队中", "badge-queued"],
           collecting: ["收集中", "badge-collecting"],
           running: ["下载中", "badge-running"],
           paused: ["已暂停", "badge-paused"],
@@ -1875,10 +1881,26 @@
           failed: ["失败", "badge-failed"],
         };
 
+        // 状态徽标：排队中的任务额外显示队列位次（如「排队中 · 第 3 位」）
+        function statusBadge(t) {
+          var st = STATUS_MAP[t.status] || [t.status, "badge-running"];
+          var label =
+            t.status === "queued" && t.queue_pos
+              ? "排队中 · 第 " + t.queue_pos + " 位"
+              : st[0];
+          return '<span class="badge ' + st[1] + '">' + label + "</span>";
+        }
+
         function taskActionButtons(t) {
           var id = CD.esc(t.id);
           var btns = "";
-          if (t.status === "paused") {
+          if (t.status === "queued") {
+            // 排队中的任务无进程可暂停：只提供置顶 / 删除
+            btns +=
+              '<button class="icon-btn" data-act="pin" data-id="' +
+              id +
+              '" title="置顶到队首"><svg class="i" aria-hidden="true"><use href="#ic-pin"></use></svg></button>';
+          } else if (t.status === "paused") {
             btns +=
               '<button class="icon-btn" data-act="resume" data-id="' +
               id +
@@ -1905,7 +1927,6 @@
               var list = $("taskList");
               list.innerHTML = tasks
                 .map(function (t) {
-                  var st = STATUS_MAP[t.status] || [t.status, "badge-running"];
                   var pct = Math.max(0, Math.min(100, Number(t.progress) || 0));
                   var seg =
                     t.segments && t.segments.total > 0
@@ -1921,11 +1942,7 @@
                     '">' +
                     CD.esc(t.save_name || "(未命名)") +
                     "</span>" +
-                    '<span class="badge ' +
-                    st[1] +
-                    '">' +
-                    st[0] +
-                    "</span>" +
+                    statusBadge(t) +
                     "</div>" +
                     '<div class="progress"><div class="progress-bar" style="width:' +
                     pct +
@@ -1986,6 +2003,8 @@
             taskActionRequest("task/pause", id); // 暂停可逆，直接执行；仅删除弹确认框
           } else if (act === "resume") {
             taskActionRequest("task/resume", id);
+          } else if (act === "pin") {
+            taskActionRequest("task/pin", id); // 置顶到队首，可逆
           } else if (act === "delete") {
             showConfirm(
               "删除任务",
@@ -2036,7 +2055,6 @@
           CD.apiGet("tasks/" + encodeURIComponent(id))
             .then(function (data) {
               var t = data.data || {};
-              var st = STATUS_MAP[t.status] || [t.status, "badge-running"];
               var urls =
                 t.urls && t.urls.length ? t.urls : t.url ? [t.url] : [];
               var rows = [
@@ -2044,7 +2062,7 @@
                 ["文件名", CD.esc(t.save_name || "(未命名)"), false],
                 [
                   "状态",
-                  '<span class="badge ' + st[1] + '">' + st[0] + "</span>",
+                  statusBadge(t),
                   false,
                 ],
                 [

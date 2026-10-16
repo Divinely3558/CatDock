@@ -158,7 +158,7 @@ _BLOCKED_NETWORKS = [
 # /tasks 响应中需要隐藏的敏感字段
 # _proc: subprocess.Popen 对象（不可 JSON 序列化，会导致 send_json 失败）
 # _download_dir: per-user 下载目录路径（隐私敏感）
-_SENSITIVE_TASK_FIELDS = ('_referer', '_cookie', '_user_agent', '_proc', '_download_dir')
+_SENSITIVE_TASK_FIELDS = ('_referer', '_cookie', '_user_agent', '_proc', '_download_dir', '_plan', '_qseq')
 
 
 def load_filters():

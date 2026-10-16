@@ -29,7 +29,7 @@ from filters import is_ad_content, get_user_rules, save_user_rules
 from task_store import load_tasks
 import chat
 import theme_prefs
-from downloader import run_download, resume_tasks, pause_task, resume_paused_task, delete_task, cleanup_user_data, TaskLimitExceeded
+from downloader import run_download, resume_tasks, pause_task, resume_paused_task, delete_task, pin_task, queue_position, cleanup_user_data
 from webui import get_login_html, get_user_html, get_admin_html
 
 
@@ -639,8 +639,11 @@ class DownloadHandler(http.server.BaseHTTPRequestHandler):
         return True
 
     def _mask_task(self, task):
-        """返回隐藏敏感字段的任务副本"""
-        return {k: v for k, v in task.items() if k not in cfg._SENSITIVE_TASK_FIELDS}
+        """返回隐藏敏感字段的任务副本（排队中的任务附带当前队列位次）"""
+        data = {k: v for k, v in task.items() if k not in cfg._SENSITIVE_TASK_FIELDS}
+        if task.get('status') == 'queued':
+            data['queue_pos'] = queue_position(task['id'])
+        return data
 
     def do_GET(self):
         raw_path = urllib.parse.urlparse(self.path).path
@@ -1099,11 +1102,9 @@ class DownloadHandler(http.server.BaseHTTPRequestHandler):
                     str(palette) if palette is not None else None,
                     getattr(self, 'authenticated_role', 'user'))
                 if palette:
-                    log_info(f"账号设置默认主题: {username}（{palette}）")
                     self.send_json({'success': True, 'data': {'palette': palette},
                                     'message': '已设为我的默认主题'})
                 else:
-                    log_info(f"账号取消默认主题: {username}（恢复随机）")
                     self.send_json({'success': True, 'data': {'palette': None},
                                     'message': '已取消默认主题，下次打开将随机'})
             except Exception as e:
@@ -1195,14 +1196,8 @@ class DownloadHandler(http.server.BaseHTTPRequestHandler):
                 # 网页控制台与猫抓插件均可逐任务指定输出格式（mp4/mkv），不传时默认 mp4
                 output_format = self._get_param(data, 'format', 'output_format', 'outputFormat')
 
-                # 限制最大并发任务数，防止资源耗尽
-                with cfg.tasks_lock:
-                    active_count = sum(1 for t in cfg.tasks.values() if t.get('status') in ('running', 'collecting'))
-                if active_count >= cfg.max_concurrent_tasks:
-                    log_error(f"并发任务数已达上限 ({cfg.max_concurrent_tasks})，拒绝新任务")
-                    self.send_json({'success': False, 'message': f'并发任务数已达上限({cfg.max_concurrent_tasks})，请稍后再试'}, 429)
-                    return
-
+                # 并发上限由队列调度控制：超额任务进入全局 FIFO 队列排队等待，
+                # 下载完成后自动补位，此处不再拒绝请求
                 is_ad, keyword = is_ad_content(save_name, url, user=self.authenticated_user)
                 if is_ad:
                     log_info(f"已拦截广告: {save_name}")
@@ -1226,16 +1221,19 @@ class DownloadHandler(http.server.BaseHTTPRequestHandler):
                 else:
                     # 返回实际使用的输出格式（网页/插件传了 format 时为 per-task 值，否则默认 mp4）
                     _fmt = output_format if output_format in ('mp4', 'mkv') else cfg.output_format
+                    if is_duplicate:
+                        _msg = '检测到重复链接，已复用任务'
+                    else:
+                        _pos = queue_position(task_id)
+                        _msg = (f'并发已满，已加入队列，当前排在第 {_pos} 位'
+                                if _pos else '下载任务已添加')
                     self.send_json({
                         'success': True,
                         'taskId': task_id,
-                        'message': '检测到重复链接，已复用任务' if is_duplicate else '下载任务已添加',
+                        'message': _msg,
                         'duplicate': is_duplicate,
                         'output_format': _fmt
                     })
-            except TaskLimitExceeded:
-                self.send_json({'success': False,
-                                'message': f'并发任务数已达上限({cfg.max_concurrent_tasks})，请稍后再试'}, 429)
             except Exception as e:
                 self._server_error(e)
         elif path == '/reload':
@@ -1409,7 +1407,7 @@ class DownloadHandler(http.server.BaseHTTPRequestHandler):
                     self.send_json({'success': False, 'message': '路径不存在'}, 404)
             except Exception as e:
                 self._server_error(e)
-        elif path in ('/task/pause', '/task/resume', '/task/delete'):
+        elif path in ('/task/pause', '/task/resume', '/task/delete', '/task/pin'):
             try:
                 data = self._read_json_body()
                 if data is None:
@@ -1430,6 +1428,8 @@ class DownloadHandler(http.server.BaseHTTPRequestHandler):
                     ok, message = pause_task(task_id, owner=self.authenticated_user)
                 elif path == '/task/resume':
                     ok, message = resume_paused_task(task_id, owner=self.authenticated_user)
+                elif path == '/task/pin':
+                    ok, message = pin_task(task_id, owner=self.authenticated_user)
                 else:
                     ok, message = delete_task(task_id, owner=self.authenticated_user)
 

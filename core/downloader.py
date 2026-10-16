@@ -79,21 +79,153 @@ FORMAT_MAP = {
 }
 
 
-class TaskLimitExceeded(RuntimeError):
-    """并发任务数达到 MAX_CONCURRENT_TASKS 上限（创建任务时抛出）"""
-
-
 def _count_active_tasks():
     """当前活跃任务数（running/collecting），须在持有 cfg.tasks_lock 时调用"""
     return sum(1 for t in cfg.tasks.values()
                if t.get('status') in ('running', 'collecting'))
 
 
-def _ensure_task_slot():
-    """并发上限最终防线：在 tasks_lock 内创建任务前调用，超限抛 TaskLimitExceeded"""
-    if _count_active_tasks() >= cfg.max_concurrent_tasks:
-        raise TaskLimitExceeded(
-            f"并发任务数已达上限({cfg.max_concurrent_tasks})")
+# 启动恢复闸门：resume_tasks 期间为 True，阻止队列泵提前拉起步任务
+_resume_guard = False
+
+
+def _next_qseq():
+    """分配下一个排队序号（单调递增，持久化到 tasks.json 的 qseq 字段）。
+
+    序号决定全局 FIFO 次序（所有用户共用一个队列），队列泵每次只取序号最小者。
+    须在持有 cfg.tasks_lock 时调用。
+    """
+    return max((t.get('_qseq', 0) for t in cfg.tasks.values()), default=0) + 1
+
+
+def _queued_tasks():
+    """按排队序号升序返回排队中的任务（须在持有 cfg.tasks_lock 时调用）"""
+    return sorted((t for t in cfg.tasks.values() if t.get('status') == 'queued'),
+                  key=lambda t: t.get('_qseq', 0))
+
+
+def queue_position(task_id):
+    """排队中任务的 1 起位次；非排队任务返回 None"""
+    with cfg.tasks_lock:
+        if cfg.tasks.get(task_id, {}).get('status') != 'queued':
+            return None
+        for pos, task in enumerate(_queued_tasks(), 1):
+            if task['id'] == task_id:
+                return pos
+    return None
+
+
+def _pump_queue():
+    """队列泵：活跃任务不足并发上限时，按排队序号依次拉起步任务。
+
+    名额挑选在 tasks_lock 内完成（先把状态置为 running 占位），线程启动在
+    锁外进行；在任一任务结束/暂停/删除后调用，实现「有坑自动补位」。
+    """
+    if _resume_guard:
+        # 启动恢复期间禁止补位：此时多数任务尚未做完文件体检、也未生成
+        # _plan，提前拉起会绕过「成品已存在」检查造成重复下载。
+        # resume_tasks 收尾后统一放行（见该函数末尾的 _pump_queue）。
+        return
+    started = []
+    with cfg.tasks_lock:
+        while _count_active_tasks() < cfg.max_concurrent_tasks:
+            waiting = _queued_tasks()
+            if not waiting:
+                break
+            nxt = waiting[0]
+            nxt['status'] = 'running'
+            started.append(nxt['id'])
+    if not started:
+        return
+    save_tasks(force=True)
+    for task_id in started:
+        _launch_task(task_id)
+
+
+def _log_task_start(user, name, task_id):
+    """任务登记后按最终状态打日志：已获名额→开始下载；否则→排队中（第 N 位）"""
+    pos = queue_position(task_id)
+    if pos is None:
+        log_info(f"[{user}] 开始下载: {name}")
+    else:
+        log_info(f"[{user}] 排队中: {name}（第 {pos} 位）")
+
+
+def _build_plan_from_task(task):
+    """从任务记录重建启动计划（仅在 _plan 缺失时兜底，如异常数据）。
+
+    重启恢复走 _resume_single_task（那里已完成文件检查并生成计划），
+    此函数只做类型探测与输出路径计算。
+    """
+    user = task.get('user') or 'default'
+    url = task.get('url') or (task.get('urls') or [''])[0]
+    base_name = task.get('save_name') or f"download_{task['id']}"
+    is_direct_video, video_ext = classify_video_url(
+        url, task.get('_referer'), task.get('_cookie'), task.get('_user_agent'))
+    if is_direct_video:
+        curl_target, output_file, _ = plan_direct_output(base_name, video_ext)
+    else:
+        curl_target, output_file = None, \
+            os.path.join(cfg.DOWNLOAD_DIR, user, f"{base_name}.{cfg.output_format}")
+    return {
+        'kind': 'direct' if is_direct_video else 'm3u8',
+        'url': url,
+        'base_name': base_name,
+        'curl_target': curl_target,
+        'output_file': output_file,
+        'target_format': cfg.output_format,
+        'retry_count': task.get('_retry_count', 0),
+    }
+
+
+def _launch_task(task_id):
+    """按任务自带的 _plan 真正拉起下载线程（由队列泵在锁外调用）"""
+    try:
+        with cfg.tasks_lock:
+            task = cfg.tasks.get(task_id)
+            if task is None:
+                return
+            plan = dict(task.get('_plan') or {})
+        if not plan:
+            plan = _build_plan_from_task(task)
+            with cfg.tasks_lock:
+                if task_id in cfg.tasks:
+                    cfg.tasks[task_id]['_plan'] = plan
+
+        user = task.get('user') or 'default'
+        referer = task.get('_referer')
+        cookie = task.get('_cookie')
+        user_agent = task.get('_user_agent')
+        kind = plan.get('kind')
+        if kind == 'same_video':
+            base_name = plan['base_name']
+            fmt = plan.get('fmt')
+
+            def delayed_start():
+                time.sleep(1)
+                _run_same_video_group_worker(task_id, base_name, fmt)
+
+            threading.Thread(target=delayed_start, daemon=True).start()
+        elif kind == 'direct':
+            threading.Thread(
+                target=_run_direct_download_worker,
+                args=(task_id, plan['url'], plan['curl_target'], referer, cookie,
+                      user_agent, plan.get('retry_count', 0)),
+                kwargs={'final_file': plan['output_file'],
+                        'target_format': plan.get('target_format')},
+                daemon=True
+            ).start()
+        else:
+            cmd = _build_m3u8_cmd(plan['url'], plan['base_name'], referer, cookie, user_agent)
+            threading.Thread(
+                target=_run_worker,
+                args=(task_id, cmd, plan['base_name'], plan['output_file'],
+                      plan.get('target_format'), plan.get('retry_count', 0)),
+                daemon=True
+            ).start()
+    except Exception as e:
+        log_error(f"启动任务线程失败: {task_id} - {e}")
+        _finish_task(task_id, False)
 
 
 def convert_to_format(input_file, output_file, target_format):
@@ -1273,6 +1405,9 @@ def _finish_task(task_id, success, write_log=True):
             log_error(f"[{user}] 下载失败: {name}")
         debug_print(f"[入口] 任务结束: {name} (ID: {task_id})，剩余任务 {len(cfg.tasks)} 个")
 
+    # 任务结束释放并发名额，立即从队列取下一个任务补位
+    _pump_queue()
+
 
 def _run_same_video_group_worker(task_id, base_name, output_format=None):
     """多链接调度 Worker: 按顺序轮流尝试同一个视频的所有链接。
@@ -1635,10 +1770,13 @@ def _run_worker(task_id, cmd, base_name, output_file, target_format, initial_ret
 
 
 def resume_tasks():
-    # 暂停中的任务重启后自动继续（与未完成任务一并恢复）
+    global _resume_guard
+    # 暂停中的任务重启后自动继续；排队中的任务保留其队列位置。
+    # 统一按排队序号升序处理（FIFO），全部回到 queued 后由队列泵按名额拉起
     with cfg.tasks_lock:
         interrupted_tasks = [task for task in cfg.tasks.values()
-                             if task['status'] in ('running', 'paused')]
+                             if task['status'] in ('running', 'paused', 'queued')]
+        interrupted_tasks.sort(key=lambda t: t.get('_qseq', 0))
 
     if not interrupted_tasks:
         return
@@ -1655,13 +1793,19 @@ def resume_tasks():
             log_warning("网络长时间未就绪，仍尝试恢复任务（下载会自动重试）")
     debug_print(f"[恢复] 网络{'已就绪' if network_ready else '不稳定'}，开始恢复任务")
 
-    for task in interrupted_tasks:
-        _resume_single_task(task)
-        time.sleep(1)
+    # 恢复期间挂起队列泵：逐个完成任务体检与启动计划重建（成品已存在的直接
+    # 收尾），全部处理完再统一放行，保证体检结果不被绕过、排队次序稳定
+    _resume_guard = True
+    try:
+        for task in interrupted_tasks:
+            _resume_single_task(task)
+    finally:
+        _resume_guard = False
+    _pump_queue()
 
 
 def _resume_single_task(task):
-    """恢复单个任务：文件命中检查 + 启动下载线程（resume_tasks 与网页端"继续"共用）"""
+    """恢复单个任务：文件体检 + 重建启动计划并回到排队（resume_tasks 与网页端"继续"共用）"""
     task_id = task['id']
     url = task['url']
     save_name = task.get('save_name')
@@ -1775,33 +1919,33 @@ def _resume_single_task(task):
             _finish_task(task_id, True)
             return
 
-    log_info(f"[{user}] 恢复下载: {save_name or task_id}")
-    debug_print(f"[恢复] 启动恢复任务线程: {save_name or task_id} (ID: {task_id})，"
-                f"类型={'直链.' + str(video_ext) if is_direct_video else 'm3u8'}，已重试 {retry_count} 次")
-
-    # 状态置回 running（暂停恢复时由 'paused' 改回）
+    # 重建启动计划并回到排队状态：暂停恢复与容器重启恢复统一走队列，
+    # 由队列泵按并发名额拉起（前端「继续」与重启恢复共用本函数）
+    plan = {
+        'kind': 'direct' if is_direct_video else 'm3u8',
+        'url': url,
+        'base_name': base_name,
+        'curl_target': curl_target,
+        'output_file': output_file,
+        'target_format': cfg.output_format,
+        'retry_count': retry_count,
+    }
     with cfg.tasks_lock:
         if task_id in cfg.tasks:
-            cfg.tasks[task_id]['status'] = 'running'
-    save_tasks()
+            cfg.tasks[task_id]['status'] = 'queued'
+            if not cfg.tasks[task_id].get('_qseq'):
+                cfg.tasks[task_id]['_qseq'] = _next_qseq()
+            cfg.tasks[task_id]['_plan'] = plan
+    save_tasks(force=True)
 
-    if is_direct_video:
-        thread = threading.Thread(
-            target=_run_direct_download_worker,
-            args=(task_id, url, curl_target, referer, cookie, user_agent, retry_count),
-            kwargs={'final_file': output_file, 'target_format': cfg.output_format},
-            daemon=True
-        )
-        thread.start()
+    debug_print(f"[恢复] 重建启动计划: {save_name or task_id} (ID: {task_id})，"
+                f"类型={'直链.' + str(video_ext) if is_direct_video else 'm3u8'}，已重试 {retry_count} 次")
+    _pump_queue()
+    pos = None if _resume_guard else queue_position(task_id)
+    if pos is None:
+        log_info(f"[{user}] 恢复下载: {save_name or task_id}")
     else:
-        cmd = _build_m3u8_cmd(url, base_name, referer, cookie, user_agent)
-
-        thread = threading.Thread(
-            target=_run_worker,
-            args=(task_id, cmd, base_name, output_file, cfg.output_format, retry_count),
-            daemon=True
-        )
-        thread.start()
+        log_info(f"[{user}] 排队中: {save_name or task_id}（第 {pos} 位）")
 
 
 # ---- 网页端任务控制（暂停 / 继续 / 删除）----
@@ -1821,6 +1965,9 @@ def pause_task(task_id, owner=None):
         status = task['status']
         if status == 'paused':
             return False, '任务已是暂停状态'
+        if status == 'queued':
+            # 排队中的任务尚无下载进程，暂停无意义（前端只提供置顶 / 删除）
+            return False, '排队中的任务无法暂停，可直接置顶或删除'
         task['status'] = 'paused'
         proc = task.get('_proc')
 
@@ -1830,6 +1977,8 @@ def pause_task(task_id, owner=None):
     user = task.get('user') or 'default'
     log_info(f"[{user}] 已暂停: {name}")
     debug_print(f"[入口] 任务已暂停: {name} (ID: {task_id})")
+    # 暂停释放并发名额，从队列取下一个任务补位
+    _pump_queue()
     return True, '任务已暂停'
 
 
@@ -1901,7 +2050,34 @@ def delete_task(task_id, owner=None):
 
     log_info(f"[{user}] 已删除: {base_name}")
     debug_print(f"[入口] 任务已删除: {base_name} (ID: {task_id})，清理文件 {removed} 个")
+    # 删除释放并发名额，从队列取下一个任务补位
+    _pump_queue()
     return True, f'任务已删除（清理文件 {removed} 个）'
+
+
+def pin_task(task_id, owner=None):
+    """把排队中的任务置顶（插到队首，优先获取下一个并发名额）。
+
+    owner 非 None 时校验任务所有权（不匹配按任务不存在处理）。
+    非排队状态的任务不可置顶（置顶只影响队列次序）。
+    """
+    with cfg.tasks_lock:
+        task = cfg.tasks.get(task_id)
+        if not task:
+            return False, '任务不存在或已结束'
+        if owner is not None and task.get('user', '') != owner:
+            return False, '任务不存在或已结束'
+        if task.get('status') != 'queued':
+            return False, '仅排队中的任务可置顶'
+        waiting = _queued_tasks()
+        # 取当前最小序号减一，保证排在所有排队任务之前（序号可为负）
+        task['_qseq'] = (waiting[0].get('_qseq', 0) if waiting else 0) - 1
+    save_tasks(force=True)
+    name = task.get('save_name') or task_id
+    user = task.get('user') or 'default'
+    log_info(f"[{user}] 已置顶: {name}")
+    _pump_queue()
+    return True, '已置顶到队首'
 
 
 def run_download(url, save_name=None, referer=None, cookie=None, user_agent=None, user=None, output_format=None):
@@ -1992,42 +2168,32 @@ def run_download(url, save_name=None, referer=None, cookie=None, user_agent=None
             task_id = new_task_id
             debug_print(f"[调度器] 新建视频组 {base_name}, task_id={task_id}, 链接数=1")
 
-        # 创建对应的 tasks 记录（用于进度查询），然后启动调度器
-        try:
-            with cfg.tasks_lock:
-                _ensure_task_slot()
-                cfg.tasks[task_id] = {
-                    'id': task_id,
-                    'url': normalized_url,
-                    'urls': [normalized_url],
-                    'save_name': base_name,
-                    'status': 'running',
-                    'progress': 0,
-                    'user': user,
-                    '_download_dir': download_dir,
-                    '_referer': referer,
-                    '_cookie': cookie,
-                    '_user_agent': user_agent,
-                    '_retry_count': 0
-                }
-        except TaskLimitExceeded:
-            # 并发名额已满：回滚刚创建的视频组，避免无任务、无调度器的
-            # 'collecting' 空组把 base_name 永久占住
-            with cfg.video_groups_lock:
-                if cfg.video_groups.get(base_name) is new_group:
-                    cfg.video_groups.pop(base_name, None)
-            raise
+        # 创建对应的 tasks 记录（用于进度/排队），随后交给队列泵按名额启动
+        plan = {'kind': 'same_video', 'url': normalized_url,
+                'base_name': base_name, 'fmt': fmt}
+        with cfg.tasks_lock:
+            cfg.tasks[task_id] = {
+                'id': task_id,
+                'url': normalized_url,
+                'urls': [normalized_url],
+                'save_name': base_name,
+                'status': 'queued',
+                'progress': 0,
+                'user': user,
+                '_download_dir': download_dir,
+                '_referer': referer,
+                '_cookie': cookie,
+                '_user_agent': user_agent,
+                '_retry_count': 0,
+                '_qseq': _next_qseq(),
+                '_plan': plan
+            }
         save_tasks()
 
-        debug_print(f"[入口] 任务启动: {base_name} (ID: {task_id}) | 模式=同视频调度"
+        debug_print(f"[入口] 任务登记: {base_name} (ID: {task_id}) | 模式=同视频调度"
                     + (f" | 文件名过滤 {ad_count} 处" if ad_count > 0 else ""))
-        log_info(f"[{user}] 开始下载: {base_name}")
-        # 稍微延迟启动，给短时间内批量提交的同文件名链接留一个收集窗口
-        def delayed_start():
-            time.sleep(1)
-            _run_same_video_group_worker(task_id, base_name, fmt)
-
-        threading.Thread(target=delayed_start, daemon=True).start()
+        _pump_queue()
+        _log_task_start(user, base_name, task_id)
         return task_id, False
 
     # ---- 原有逻辑 (same_video_by_filename 关闭时) ----
@@ -2043,9 +2209,9 @@ def run_download(url, save_name=None, referer=None, cookie=None, user_agent=None
             task_url = task['url'].strip().rstrip('/')
             if task_url == normalized_url:
                 dup_name = task.get('save_name') or task_id
-                if task['status'] == 'running':
-                    debug_print(f"[去重] 重复链接，复用下载中任务: {dup_name} (ID: {task_id})")
-                    log_info(f"[{user}] 跳过下载: {dup_name}（任务已在下载中）")
+                if task['status'] in ('running', 'queued'):
+                    debug_print(f"[去重] 重复链接，复用进行中任务: {dup_name} (ID: {task_id})")
+                    log_info(f"[{user}] 跳过下载: {dup_name}（任务已在处理中）")
                     return task_id, True
                 else:
                     debug_print(f"[去重] URL 任务已存在（{task['status']}）: {dup_name} (ID: {task_id})")
@@ -2097,52 +2263,51 @@ def run_download(url, save_name=None, referer=None, cookie=None, user_agent=None
             log_info(f"[{user}] 跳过下载: {base_name}（文件已存在）")
             return None, False
 
+    plan = {
+        'kind': 'direct' if is_direct_video else 'm3u8',
+        'url': url,
+        'base_name': base_name,
+        'curl_target': curl_target,
+        'output_file': output_file,
+        'target_format': fmt,
+        'retry_count': 0,
+    }
+
     with cfg.tasks_lock:
-        _ensure_task_slot()
         cfg.tasks[task_id] = {
             'id': task_id,
             'url': url,
             'urls': [url],
             'save_name': base_name,
-            'status': 'running',
+            'status': 'queued',
             'progress': 0,
             'user': user,
             '_download_dir': download_dir,
             '_referer': referer,
             '_cookie': cookie,
             '_user_agent': user_agent,
-            '_retry_count': 0
+            '_retry_count': 0,
+            '_qseq': _next_qseq(),
+            '_plan': plan
         }
 
     save_tasks()
 
-    debug_print(f"[入口] 任务启动: {base_name} (ID: {task_id}) | "
+    debug_print(f"[入口] 任务登记: {base_name} (ID: {task_id}) | "
                 f"类型={'直链' + str(video_ext) if is_direct_video else 'm3u8'} | "
                 f"输出={output_file}" + (f" | 文件名过滤 {ad_count} 处" if ad_count > 0 else ""))
-    log_info(f"[{user}] 开始下载: {base_name}")
-
     if is_direct_video:
         if needs_convert:
             debug_print(f"[下载] 直链视频 {video_ext}：curl 下载后转封装为 mp4: {base_name}")
         else:
             debug_print(f"[下载] 直链视频 {video_ext}：curl 直接下载: {base_name}")
-        thread = threading.Thread(
-            target=_run_direct_download_worker,
-            args=(task_id, url, curl_target, referer, cookie, user_agent),
-            kwargs={'final_file': output_file, 'target_format': fmt},
-            daemon=True
-        )
-        thread.start()
     else:
-        cmd = _build_m3u8_cmd(url, base_name, referer, cookie, user_agent)
-
         _user_kws = get_ad_keywords(user)
         if _user_kws:
             debug_print(f"[入口] 广告关键字过滤 {len(_user_kws)} 个: {base_name}")
 
-        thread = threading.Thread(target=_run_worker, args=(task_id, cmd, base_name, output_file, fmt), daemon=True)
-        thread.start()
-
+    _pump_queue()
+    _log_task_start(user, base_name, task_id)
     return task_id, False
 
 

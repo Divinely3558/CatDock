@@ -32,6 +32,10 @@ def save_tasks(force=False):
                     'status': task['status'],
                     'progress': task.get('progress', 0),
                     'user': user,
+                    # qseq：全局排队序号，容器重启后据此恢复 FIFO 队列次序
+                    'qseq': task.get('_qseq', 0),
+                    # retry_count：已重试次数，重启后继续从当前计数重试
+                    'retry_count': task.get('_retry_count', 0),
                 }
                 grouped.setdefault(user, []).append(task_data)
 
@@ -94,7 +98,8 @@ def load_tasks():
                             '_referer': '',
                             '_cookie': '',
                             '_user_agent': '',
-                            '_retry_count': 0
+                            '_retry_count': task.get('retry_count', 0),
+                            '_qseq': task.get('qseq', 0)
                         }
                         loaded_count += 1
                     except Exception as e:
