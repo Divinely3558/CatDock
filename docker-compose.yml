@@ -30,7 +30,9 @@ services:
       - API_PORT=5000
       # SSRF防护: true=拦截内网地址(公网部署推荐), false=允许内网地址(纯内网/Docker内部下载时设为false)
       - SSRF_PROTECTION=true
-      # 最大并发下载任务数，防止资源耗尽
+      # 每用户最大并发下载任务数，超出的任务进入该用户自己的排队队列（队列不限长度）
       - MAX_CONCURRENT_TASKS=20
+      # 全局同时下载任务数安全上限（所有用户的 running 任务总和），防止系统过载
+      - MAX_TOTAL_RUNNING=50
       # 同视频按文件名聚合: true=同名视频的多个链接自动调度尝试(多CDN/分片场景，默认开启)，false=普通下载模式
       - SAME_VIDEO_BY_FILENAME=true
