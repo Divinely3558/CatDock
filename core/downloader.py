@@ -79,10 +79,15 @@ FORMAT_MAP = {
 }
 
 
-def _count_active_tasks():
-    """当前活跃任务数（running/collecting），须在持有 cfg.tasks_lock 时调用"""
+def _count_active_tasks(user=None):
+    """当前活跃任务数（running/collecting），须在持有 cfg.tasks_lock 时调用。
+
+    user 非 None 时仅统计该用户的任务（per-user 并发上限）；
+    user 为 None 时统计所有用户（全局安全上限）。
+    """
     return sum(1 for t in cfg.tasks.values()
-               if t.get('status') in ('running', 'collecting'))
+               if t.get('status') in ('running', 'collecting')
+               and (user is None or t.get('user') == user))
 
 
 # 启动恢复闸门：resume_tasks 期间为 True，阻止队列泵提前拉起步任务
@@ -92,34 +97,47 @@ _resume_guard = False
 def _next_qseq():
     """分配下一个排队序号（单调递增，持久化到 tasks.json 的 qseq 字段）。
 
-    序号决定全局 FIFO 次序（所有用户共用一个队列），队列泵每次只取序号最小者。
+    序号全局单调递增，但队列泵按用户分别挑选（per-user FIFO）。
     须在持有 cfg.tasks_lock 时调用。
     """
     return max((t.get('_qseq', 0) for t in cfg.tasks.values()), default=0) + 1
 
 
-def _queued_tasks():
-    """按排队序号升序返回排队中的任务（须在持有 cfg.tasks_lock 时调用）"""
-    return sorted((t for t in cfg.tasks.values() if t.get('status') == 'queued'),
+def _queued_tasks(user=None):
+    """按排队序号升序返回排队中的任务（须在持有 cfg.tasks_lock 时调用）。
+
+    user 非 None 时仅返回该用户的排队任务（per-user 队列）；
+    user 为 None 时返回所有用户的排队任务。
+    """
+    return sorted((t for t in cfg.tasks.values()
+                   if t.get('status') == 'queued'
+                   and (user is None or t.get('user') == user)),
                   key=lambda t: t.get('_qseq', 0))
 
 
 def queue_position(task_id):
-    """排队中任务的 1 起位次；非排队任务返回 None"""
+    """排队中任务在其所属用户队列内的 1 起位次；非排队任务返回 None"""
     with cfg.tasks_lock:
-        if cfg.tasks.get(task_id, {}).get('status') != 'queued':
+        task = cfg.tasks.get(task_id)
+        if not task or task.get('status') != 'queued':
             return None
-        for pos, task in enumerate(_queued_tasks(), 1):
-            if task['id'] == task_id:
+        user = task.get('user')
+        for pos, t in enumerate(_queued_tasks(user), 1):
+            if t['id'] == task_id:
                 return pos
     return None
 
 
 def _pump_queue():
-    """队列泵：活跃任务不足并发上限时，按排队序号依次拉起步任务。
+    """队列泵：按用户分别检查并发上限，有空名额时按排队序号拉起任务。
 
-    名额挑选在 tasks_lock 内完成（先把状态置为 running 占位），线程启动在
-    锁外进行；在任一任务结束/暂停/删除后调用，实现「有坑自动补位」。
+    两层限制：
+      - 每用户上限 cfg.max_concurrent_tasks（该用户 running/collecting 数）
+      - 全局安全上限 cfg.max_total_running（所有用户 running/collecting 总和）
+
+    每轮扫描所有有排队任务的用户，取 qseq 最小的任务启动，
+    保证跨用户公平（不偏向最后触发泵的用户）。
+    在任一任务结束/暂停/删除后调用，实现「有坑自动补位」。
     """
     if _resume_guard:
         # 启动恢复期间禁止补位：此时多数任务尚未做完文件体检、也未生成
@@ -128,13 +146,21 @@ def _pump_queue():
         return
     started = []
     with cfg.tasks_lock:
-        while _count_active_tasks() < cfg.max_concurrent_tasks:
-            waiting = _queued_tasks()
-            if not waiting:
+        while _count_active_tasks() < cfg.max_total_running:
+            # 找出所有有排队任务且未达 per-user 并发上限的用户
+            best = None
+            for u in set(t.get('user') for t in cfg.tasks.values()
+                         if t.get('status') == 'queued'):
+                if _count_active_tasks(u) >= cfg.max_concurrent_tasks:
+                    continue
+                queued = _queued_tasks(u)
+                if queued and (best is None
+                               or queued[0].get('_qseq', 0) < best.get('_qseq', 0)):
+                    best = queued[0]
+            if best is None:
                 break
-            nxt = waiting[0]
-            nxt['status'] = 'running'
-            started.append(nxt['id'])
+            best['status'] = 'running'
+            started.append(best['id'])
     if not started:
         return
     save_tasks(force=True)
@@ -2069,8 +2095,9 @@ def pin_task(task_id, owner=None):
             return False, '任务不存在或已结束'
         if task.get('status') != 'queued':
             return False, '仅排队中的任务可置顶'
-        waiting = _queued_tasks()
-        # 取当前最小序号减一，保证排在所有排队任务之前（序号可为负）
+        user = task.get('user')
+        waiting = _queued_tasks(user)
+        # 取当前用户队列中最小序号减一，保证排在该用户所有排队任务之前
         task['_qseq'] = (waiting[0].get('_qseq', 0) if waiting else 0) - 1
     save_tasks(force=True)
     name = task.get('save_name') or task_id

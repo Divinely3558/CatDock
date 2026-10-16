@@ -100,7 +100,8 @@ bound_port = None      # 实际监听端口（启动绑定后不变，/reload �
 debug_mode = False
 same_video_by_filename_enabled = False
 ssrf_protection = True
-max_concurrent_tasks = 20
+max_concurrent_tasks = 20   # 每用户并发下载上限（环境变量 MAX_CONCURRENT_TASKS）
+max_total_running = 50      # 全局同时下载任务数安全上限（环境变量 MAX_TOTAL_RUNNING）
 # 版本号：来自 web/version 文件（镜像构建时拷入），空则显示「未知」
 version = ""
 
@@ -310,11 +311,18 @@ def load_config():
     same_video_by_filename_enabled = _env_flag('SAME_VIDEO_BY_FILENAME', False)
     ssrf_protection = _env_flag('SSRF_PROTECTION', True)
 
-    # 最大并发下载任务数：未设置或非法时回退默认 20
+    # 每用户并发下载任务数上限：未设置或非法时回退默认 20
     max_concurrent_tasks = 20
     env_max = os.environ.get('MAX_CONCURRENT_TASKS', '').strip()
     if env_max.isdigit() and int(env_max) > 0:
         max_concurrent_tasks = int(env_max)
+
+    # 全局同时下载任务数安全上限（所有用户的 running 任务总和）：
+    # 未设置或非法时回退默认 50；应 >= max_concurrent_tasks 才有意义
+    max_total_running = 50
+    env_total = os.environ.get('MAX_TOTAL_RUNNING', '').strip()
+    if env_total.isdigit() and int(env_total) > 0:
+        max_total_running = int(env_total)
 
     # 安全校验：URL_PREFIX 必须设置（AUTH_KEY 为空时由 main.py 首启自动生成并写回）
     if not url_prefix:
@@ -329,6 +337,7 @@ def load_config():
         'same_video_by_filename_enabled': same_video_by_filename_enabled,
         'ssrf_protection': ssrf_protection,
         'max_concurrent_tasks': max_concurrent_tasks,
+        'max_total_running': max_total_running,
     })
 
     # 数据库路径：config 目录下（data.db 承载封禁 IP + 用户）

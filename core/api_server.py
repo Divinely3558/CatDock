@@ -740,6 +740,7 @@ class DownloadHandler(http.server.BaseHTTPRequestHandler):
                 'url_prefix': cfg.url_prefix,
                 'ssrf_protection': cfg.ssrf_protection,
                 'max_concurrent_tasks': cfg.max_concurrent_tasks,
+                'max_total_running': cfg.max_total_running,
                 'same_video_mode': cfg.same_video_by_filename_enabled,
                 'keywords_enabled': cfg.keywords_enabled,
                 'ad_keyword_count': len(cfg.ad_keywords),
