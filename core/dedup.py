@@ -128,7 +128,9 @@ def is_filename_downloaded(save_name, user=None, check_failure=True):
             for entry_save_name in cache[name_key]:
                 if entry_save_name == save_name or \
                    entry_save_name.startswith(save_name + '.') or \
-                   save_name.startswith(entry_save_name):
+                   entry_save_name.startswith(save_name + '_') or \
+                   save_name.startswith(entry_save_name + '.') or \
+                   save_name.startswith(entry_save_name + '_'):
                     debug_print(f"[去重] 文件名命中{('成功' if status == 'success' else '失败')}日志（用户={user}）: {save_name}")
                     return True, status
     # 未命中是常态，不打日志降噪

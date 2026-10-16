@@ -908,8 +908,19 @@ class DownloadHandler(http.server.BaseHTTPRequestHandler):
             if data is None:
                 return
 
-            if not self._check_auth(data):
+            # 切换用户必须持有有效 Bearer 令牌（不允许通过请求体明文凭证切换，
+            # 否则无法确定「当前用户」是谁，旧令牌也无法吊销）
+            bearer = self._bearer_token()
+            if not bearer:
+                self.send_json({'success': False, 'message': '请先登录'}, 403)
                 return
+            current_user, claims = verify_auth_token_full(bearer)
+            if not current_user:
+                self.send_json({'success': False, 'message': '登录已过期，请重新登录'}, 403)
+                return
+            self.authenticated_user = current_user
+            self.authenticated_role = (claims.get('role') if claims else None) \
+                or data_db.user_role(current_user) or 'user'
 
             if not self._check_rate_limit():
                 return
@@ -954,9 +965,7 @@ class DownloadHandler(http.server.BaseHTTPRequestHandler):
             # 密码正确：清除目标账号失败计数
             data_db.clear_account_failure(target_user)
 
-            # 吊销当前令牌（切换后旧令牌立即失效）
-            token = self._bearer_token()
-            claims = get_token_claims(token) if token else None
+            # 吊销当前令牌（切换后旧令牌立即失效；claims 来自上方 Bearer 校验）
             if claims and claims.get('jti'):
                 data_db.revoke_auth_token(claims['jti'])
 
@@ -1396,6 +1405,11 @@ class DownloadHandler(http.server.BaseHTTPRequestHandler):
                         self.send_json({'success': False, 'message': 'IP 地址不能为空'}, 400)
                         return
                     ip = ip.strip()
+                    try:
+                        ip = str(ipaddress.ip_address(ip))
+                    except ValueError:
+                        self.send_json({'success': False, 'message': f'无效的 IP 地址: {ip}'}, 400)
+                        return
                     banned = {row[0] for row in data_db.list_banned_ips()}
                     if ip not in banned:
                         self.send_json({'success': False, 'message': f'该 IP 不在封禁列表中: {ip}'}, 400)

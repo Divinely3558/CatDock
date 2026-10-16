@@ -146,12 +146,21 @@ def _pump_queue():
         return
     started = []
     with cfg.tasks_lock:
-        while _count_active_tasks() < cfg.max_total_running:
+        # 一次性统计当前活跃数（全局 + per-user），循环内增量更新，避免反复遍历
+        total_active = 0
+        user_active = {}
+        for t in cfg.tasks.values():
+            if t.get('status') in ('running', 'collecting'):
+                total_active += 1
+                u = t.get('user')
+                user_active[u] = user_active.get(u, 0) + 1
+
+        while total_active < cfg.max_total_running:
             # 找出所有有排队任务且未达 per-user 并发上限的用户
             best = None
             for u in set(t.get('user') for t in cfg.tasks.values()
                          if t.get('status') == 'queued'):
-                if _count_active_tasks(u) >= cfg.max_concurrent_tasks:
+                if user_active.get(u, 0) >= cfg.max_concurrent_tasks:
                     continue
                 queued = _queued_tasks(u)
                 if queued and (best is None
@@ -161,6 +170,9 @@ def _pump_queue():
                 break
             best['status'] = 'running'
             started.append(best['id'])
+            total_active += 1
+            bu = best.get('user')
+            user_active[bu] = user_active.get(bu, 0) + 1
     if not started:
         return
     save_tasks(force=True)
@@ -955,15 +967,15 @@ def _run_download_with_retry(cmd, task_id, max_retries=5, initial_retry_count=0,
             wait_time = min(5 * (2 ** retry_count), 60)
             debug_print(f"[下载] 保留已下载文件断点续传，{wait_time} 秒后重试: {base_name}")
 
-            # 在重试前检查网络状态
-            if not _check_network_ready(max_wait=wait_time):
+            # 快速检查网络（3 秒）；长时间不通则跳过重试
+            if not _check_network_ready(max_wait=3):
                 debug_print(f"[下载] 网络未就绪，继续等待...")
-                if not _check_network_ready(max_wait=30):
+                if not _check_network_ready(max_wait=wait_time):
                     debug_print(f"[下载] 网络长时间未就绪，跳过本次重试")
                     retry_count += 1
                     continue
 
-            time.sleep(1)
+            time.sleep(wait_time)
 
         retry_count += 1
 
@@ -1732,27 +1744,24 @@ def _run_direct_download_worker(task_id, url, output_file, referer, cookie, user
                 wait_time = min(5 * (2 ** retry_count), 60)
                 debug_print(f"[下载] 保留已下载文件断点续传，{wait_time} 秒后重试: {base_name}")
 
-                # 在重试前检查网络状态
-                if not _check_network_ready(max_wait=wait_time):
+                # 快速检查网络（3 秒）；长时间不通则跳过重试
+                if not _check_network_ready(max_wait=3):
                     debug_print(f"[下载] 网络未就绪，继续等待...")
-                    if not _check_network_ready(max_wait=30):
+                    if not _check_network_ready(max_wait=wait_time):
                         debug_print(f"[下载] 网络长时间未就绪，跳过本次重试")
                         retry_count += 1
                         continue
 
-                time.sleep(1)
+                time.sleep(wait_time)
 
             retry_count += 1
 
         debug_print(f"[下载] 直链下载已重试 {max_retries} 次仍失败: {base_name}")
-        if os.path.exists(output_file):
-            os.remove(output_file)
-            debug_print(f"[清理] 已删除不完整文件: {output_file}")
+        # 保留不完整文件：curl -C - 可在下次重试时断点续传，删除则前功尽弃
         _finish_task(task_id, False)
     except Exception as e:
         log_error(f"直接下载线程异常: {e}")
-        if os.path.exists(output_file):
-            os.remove(output_file)
+        # 保留不完整文件供后续断点续传
         _finish_task(task_id, False)
 
 
@@ -1959,7 +1968,7 @@ def _resume_single_task(task):
     with cfg.tasks_lock:
         if task_id in cfg.tasks:
             cfg.tasks[task_id]['status'] = 'queued'
-            if not cfg.tasks[task_id].get('_qseq'):
+            if cfg.tasks[task_id].get('_qseq') is None:
                 cfg.tasks[task_id]['_qseq'] = _next_qseq()
             cfg.tasks[task_id]['_plan'] = plan
     save_tasks(force=True)
@@ -2096,8 +2105,8 @@ def pin_task(task_id, owner=None):
         if task.get('status') != 'queued':
             return False, '仅排队中的任务可置顶'
         user = task.get('user')
-        waiting = _queued_tasks(user)
-        # 取当前用户队列中最小序号减一，保证排在该用户所有排队任务之前
+        waiting = [t for t in _queued_tasks(user) if t['id'] != task_id]
+        # 取当前用户队列中（排除自身）最小序号减一，保证排在该用户所有排队任务之前
         task['_qseq'] = (waiting[0].get('_qseq', 0) if waiting else 0) - 1
     save_tasks(force=True)
     name = task.get('save_name') or task_id
@@ -2153,6 +2162,11 @@ def run_download(url, save_name=None, referer=None, cookie=None, user_agent=None
             return None, False
 
         # 3) 加入 / 创建视频组
+        # 锁序约定：video_groups_lock → tasks_lock 禁止嵌套（_run_same_video_group_worker
+        # 以 tasks_lock → video_groups_lock 顺序持有），此处先在 video_groups_lock 内
+        # 记录需要同步的 task_id，释放后再持 tasks_lock 更新，避免 ABBA 死锁
+        _sync_task_id = None
+        _reuse_result = None
         with cfg.video_groups_lock:
             existing_group = cfg.video_groups.get(base_name)
             if existing_group is not None:
@@ -2164,36 +2178,45 @@ def run_download(url, save_name=None, referer=None, cookie=None, user_agent=None
                 )
                 if not url_exists:
                     existing_group['urls'].append(new_tuple)
+                    _sync_task_id = existing_group['task_id']
                     debug_print(f"[调度器] 视频组 {base_name} 追加新链接 (总计 {len(existing_group['urls'])} 个)")
-                    # 同步更新关联任务的 urls 列表，供日志记录使用
-                    with cfg.tasks_lock:
-                        gt = cfg.tasks.get(existing_group['task_id'])
-                        if gt is not None and normalized_url not in gt['urls']:
-                            gt['urls'].append(normalized_url)
                 else:
                     debug_print(f"[调度器] 视频组 {base_name} 链接已存在，忽略")
 
                 if status in ('collecting', 'running'):
-                    debug_print(f"[调度器] 复用视频组任务 {existing_group['task_id']} -> {base_name}")
-                    return existing_group['task_id'], True
+                    _reuse_result = existing_group['task_id']
                 elif status == 'done':
-                    # 已经完成过，但日志没命中（可能是刚完成没写日志？），保守跳过
-                    debug_print(f"[调度器] 视频组 {base_name} 已完成，跳过")
-                    return None, False
+                    _reuse_result = False
 
-            # 创建新视频组
-            new_task_id = str(uuid.uuid4())[:8]
-            new_group = {
-                'task_id': new_task_id,
-                'urls': [(normalized_url, referer or '', cookie or '', user_agent or '')],
-                'current_index': 0,
-                'round_count': 0,
-                'status': 'collecting',
-                'output_format': fmt
-            }
-            cfg.video_groups[base_name] = new_group
-            task_id = new_task_id
-            debug_print(f"[调度器] 新建视频组 {base_name}, task_id={task_id}, 链接数=1")
+            if _reuse_result is None:
+                # 创建新视频组（existing_group 为 None，或状态非 collecting/running/done）
+                new_task_id = str(uuid.uuid4())[:8]
+                new_group = {
+                    'task_id': new_task_id,
+                    'urls': [(normalized_url, referer or '', cookie or '', user_agent or '')],
+                    'current_index': 0,
+                    'round_count': 0,
+                    'status': 'collecting',
+                    'output_format': fmt
+                }
+                cfg.video_groups[base_name] = new_group
+                task_id = new_task_id
+                debug_print(f"[调度器] 新建视频组 {base_name}, task_id={task_id}, 链接数=1")
+
+        # 在 video_groups_lock 外同步更新关联任务的 urls 列表，避免死锁
+        if _sync_task_id:
+            with cfg.tasks_lock:
+                gt = cfg.tasks.get(_sync_task_id)
+                if gt is not None and normalized_url not in gt['urls']:
+                    gt['urls'].append(normalized_url)
+
+        # 复用已有视频组：状态已在锁内判定，锁外返回
+        if _reuse_result is not None:
+            if _reuse_result is False:
+                debug_print(f"[调度器] 视频组 {base_name} 已完成，跳过")
+                return None, False
+            debug_print(f"[调度器] 复用视频组任务 {_reuse_result} -> {base_name}")
+            return _reuse_result, True
 
         # 创建对应的 tasks 记录（用于进度/排队），随后交给队列泵按名额启动
         plan = {'kind': 'same_video', 'url': normalized_url,
