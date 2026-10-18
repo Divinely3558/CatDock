@@ -862,7 +862,22 @@
           padding: 16px;
           max-height: 88vh;
         }
+        /* 小屏 row2 单行优先：flex 换行判断按未压缩宽度计算，ID 可收缩省略
+           （min-width:0 常驻）却不被考虑，导致进度稍长按钮就被挤到下一行、
+           第一行留白。改为不换行 + pct/按钮禁止收缩，宽度缺口由 ID 省略号吸收；
+           仅像素风（Press Start 2P 超宽字体）保留换行兜底，防极端长分段文本
+           把按钮挤出可视区 */
         .task-row2 {
+          flex-wrap: nowrap;
+        }
+        .task-row2 .pct,
+        .task-row2 .task-actions {
+          flex-shrink: 0;
+        }
+        .task-row2 .pct {
+          white-space: nowrap;
+        }
+        :root[data-palette="pixel"] .task-row2 {
           flex-wrap: wrap;
         }
         /* 个人页任务卡只显示自己的任务，用户名无意义，隐藏以保持 row2 单行 */
