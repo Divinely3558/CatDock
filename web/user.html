@@ -226,27 +226,63 @@
         margin-top: auto;
       }
 
-      details.adv {
-        border: 1px solid var(--border);
-        border-radius: 8px;
-        padding: 8px 12px;
+      /* 高级选项：自绘触发条 + 悬浮面板（面板不占文档流，
+         展开/收起不再拉伸「新建任务」「进行中任务」两卡） */
+      .adv {
+        position: relative;
         margin-bottom: 14px;
       }
-      details.adv summary {
-        cursor: pointer;
-        font-size: 13px;
+      .adv-trigger {
+        width: 100%;
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 8px;
+        padding: 8px 12px;
+        border: 1px solid var(--border);
+        border-radius: 8px;
+        background: transparent;
         color: var(--text-2);
+        font-size: 13px;
+        font-family: inherit;
+        cursor: pointer;
         user-select: none;
+        transition: border-color 0.15s;
       }
-      details.adv[open] summary {
-        margin-bottom: 12px;
+      .adv-trigger:hover {
+        border-color: var(--primary);
       }
-      details.adv label.field {
+      .adv-arrow {
+        width: 0;
+        height: 0;
+        border-top: 4px solid transparent;
+        border-bottom: 4px solid transparent;
+        border-left: 5px solid var(--text-2);
+        transition: transform 0.15s;
+        flex-shrink: 0;
+      }
+      .adv.open .adv-arrow {
+        transform: rotate(90deg);
+      }
+      .adv-panel {
+        position: absolute;
+        top: calc(100% + 4px);
+        left: 0;
+        right: 0;
+        z-index: 30;
+        display: none;
+        background: var(--card); /* 不透明底色，避免与下方内容文字重叠 */
+        border: 1px solid var(--border);
+        border-radius: 10px;
+        box-shadow: var(--shadow);
+        padding: 8px 12px 12px;
+      }
+      .adv.open .adv-panel {
+        display: block;
+      }
+      .adv-panel label.field {
         margin-top: 12px;
         margin-bottom: 0;
-      }
-      details.adv label.field:first-of-type {
-        margin-top: 4px;
       }
 
       /* ---------- 新建下载任务卡 + 进行中的任务卡：跨主题尺寸锁定 ---------- */
@@ -297,8 +333,8 @@
         display: block; /* 消除 inline-block 基线间隙（间隙大小随主题字体下降部变化） */
       }
       #dlForm .hint,
-      #dlForm details.adv summary {
-        line-height: 20px; /* 提示行 / 折叠摘要行 */
+      #dlForm .adv-trigger {
+        line-height: 20px; /* 提示行 / 高级选项触发条 */
       }
 
       /* ---------- 顶栏：跨主题高度锁定 ---------- */
@@ -358,6 +394,36 @@
       :root[data-palette="pixel"] #dlForm .dropdown-trigger {
         border: 3px solid var(--border); /* 与 pixel 输入框同等粗边框、直角，外观成套 */
         border-radius: 0;
+      }
+      :root[data-palette="pixel"] #dlForm .adv-trigger,
+      :root[data-palette="pixel"] #dlForm .adv-panel {
+        border: 3px solid var(--border); /* 高级选项触发条/面板与 pixel 输入框成套 */
+        border-radius: 0;
+      }
+
+      /* 提交反馈悬浮条：浮于两卡上方缝隙处，不占文档流，3 秒自动消失。
+         四主题外观由 shared.css 的 .toast 主题覆盖自动适配（pixel 直角粗描边、
+         tech/morandi 配色），此处只定位与定透明度 */
+      .dl-toast {
+        top: 64px;
+        bottom: auto;
+        transform: translateX(-50%) translateY(-20px);
+        word-break: break-all;
+      }
+      .dl-toast.show {
+        opacity: 0.95; /* 适当透明，底色仍取自主题变量 */
+        pointer-events: auto;
+        transform: translateX(-50%) translateY(0);
+      }
+      /* 成功/失败语义色须压过 morandi/tech/pixel 对 .toast 边框色的主题覆盖
+         （主题覆盖最高 (0,4,0)，此处 (0,5,0)）：只改颜色，边框宽度/圆角仍随主题 */
+      :root[data-mode] .toast.dl-toast.ok {
+        border-color: var(--green);
+        color: var(--green);
+      }
+      :root[data-mode] .toast.dl-toast.err {
+        border-color: var(--red);
+        color: var(--red);
       }
       #fUrl {
         height: 88px; /* 锁定高度：行高/字号随主题变化不再改变表单排布 */
@@ -884,9 +950,6 @@
         .task-user {
           display: none;
         }
-        details.adv summary {
-          padding: 4px 0;
-        }
         .brand-version {
           display: none;
         }
@@ -1360,27 +1423,36 @@
                 <code>format</code> 字段可逐任务指定
               </div>
             </div>
-            <details class="adv">
-              <summary>高级选项（选填）</summary>
-              <label class="field">
-                <span>Referer</span>
-                <input type="text" id="fReferer" placeholder="选填" />
-              </label>
-              <label class="field">
-                <span>Cookie</span>
-                <input type="text" id="fCookie" placeholder="选填" />
-              </label>
-              <label class="field">
-                <span>User-Agent</span>
-                <input type="text" id="fUa" placeholder="选填" />
-              </label>
-            </details>
+            <div class="adv" id="advWrap">
+              <button
+                type="button"
+                class="adv-trigger"
+                id="advTrigger"
+                aria-expanded="false"
+              >
+                <span>高级选项（选填）</span>
+                <span class="adv-arrow"></span>
+              </button>
+              <div class="adv-panel" id="advPanel">
+                <label class="field">
+                  <span>Referer</span>
+                  <input type="text" id="fReferer" placeholder="选填" />
+                </label>
+                <label class="field">
+                  <span>Cookie</span>
+                  <input type="text" id="fCookie" placeholder="选填" />
+                </label>
+                <label class="field">
+                  <span>User-Agent</span>
+                  <input type="text" id="fUa" placeholder="选填" />
+                </label>
+              </div>
+            </div>
             <button type="submit" class="btn btn-primary btn-block" id="dlBtn">
               <svg class="i i-dl" aria-hidden="true">
                 <use href="#ic-download"></use></svg
               >添加下载任务
             </button>
-            <div class="alert" id="dlAlert"></div>
           </form>
         </div>
 
@@ -1450,6 +1522,7 @@
       </div>
     </div>
     <div class="toast" id="toast"></div>
+    <div class="toast dl-toast" id="dlAlert" role="status"></div>
 
     <!-- ================= 过滤规则弹窗（结构与管理端 admin.html 过滤模板一致） ================= -->
     <div class="mask" id="filterMask">
@@ -1833,12 +1906,53 @@
           }
         });
 
+        // ---------- 高级选项悬浮面板（点外部/Esc/再点触发条关闭） ----------
+        var advWrap = $("advWrap");
+        var advTrigger = $("advTrigger");
+        function closeAdvPanel() {
+          advWrap.classList.remove("open");
+          advTrigger.setAttribute("aria-expanded", "false");
+        }
+        advTrigger.addEventListener("click", function (e) {
+          e.preventDefault();
+          var isOpen = advWrap.classList.toggle("open");
+          advTrigger.setAttribute("aria-expanded", isOpen ? "true" : "false");
+        });
+        document.addEventListener("click", function (e) {
+          if (
+            advWrap.classList.contains("open") &&
+            !advWrap.contains(e.target)
+          ) {
+            closeAdvPanel();
+          }
+        });
+        document.addEventListener("keydown", function (e) {
+          if (e.key === "Escape" && advWrap.classList.contains("open")) {
+            closeAdvPanel();
+          }
+        });
+
+        // ---------- 提交反馈悬浮条（3 秒自动消失，点击立即关闭） ----------
+        var dlAlertTimer = null;
+        function showDlAlert(msg, ok) {
+          var el = $("dlAlert");
+          el.textContent = msg;
+          el.className = "toast dl-toast show " + (ok ? "ok" : "err");
+          clearTimeout(dlAlertTimer);
+          dlAlertTimer = setTimeout(hideDlAlert, 3000);
+        }
+        function hideDlAlert() {
+          clearTimeout(dlAlertTimer);
+          $("dlAlert").className = "toast dl-toast";
+        }
+        $("dlAlert").addEventListener("click", hideDlAlert);
+
         // ---------- 提交下载 ----------
         $("dlForm").addEventListener("submit", function (e) {
           e.preventDefault();
           var body = { url: $("fUrl").value.trim() };
           if (!body.url) {
-            CD.showAlert($("dlAlert"), "URL 不能为空", false);
+            showDlAlert("URL 不能为空", false);
             return;
           }
           var name = $("fName").value.trim();
@@ -1858,15 +1972,14 @@
           var btn = $("dlBtn");
           btn.disabled = true;
           btn.textContent = "提交中…";
-          CD.hideAlert($("dlAlert"));
+          hideDlAlert();
           CD.apiPost("download", body)
             .then(function (data) {
               var msg = data.message || "下载任务已添加";
               if (data.blocked) {
-                CD.showAlert($("dlAlert"), "🚫 " + msg, false);
+                showDlAlert("🚫 " + msg, false);
               } else {
-                CD.showAlert(
-                  $("dlAlert"),
+                showDlAlert(
                   "✅ " +
                     msg +
                     (data.taskId ? "（任务 ID: " + data.taskId + "）" : ""),
@@ -1877,7 +1990,7 @@
               }
             })
             .catch(function (err) {
-              CD.showAlert($("dlAlert"), "❌ " + err.message, false);
+              showDlAlert("❌ " + err.message, false);
             })
             .finally(function () {
               btn.disabled = false;
