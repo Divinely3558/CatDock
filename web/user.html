@@ -425,8 +425,16 @@
         border-color: var(--red);
         color: var(--red);
       }
+      /* URL 框弹性加高：两卡 grid stretch 对齐后表单卡的剩余高度由 URL 框
+         吸收（代替按钮上方的空白），无任务时两卡同为 4 条任务高度且更紧凑 */
+      #fUrlField {
+        flex: 1;
+        display: flex;
+        flex-direction: column;
+      }
       #fUrl {
-        height: 88px; /* 锁定高度：行高/字号随主题变化不再改变表单排布 */
+        flex: 1;
+        min-height: 88px; /* 锁定最小高度：行高/字号随主题变化不再改变表单排布 */
         scrollbar-gutter: stable; /* 滚动条出现/消失不再挤压文本重新换行 */
       }
       #dlBtn {
@@ -435,19 +443,29 @@
       }
 
       /* ---------- 任务列表 ---------- */
-      /* 列表可视高度固定为 4 条任务（第 5 条起内部滚动），上限值由 JS 按实际
-         任务高度计算写入 --task-list-cap，随各主题色板的字体/间距自适应；
-         两张卡片（新建下载任务 / 进行中的任务）外框高度由 grid stretch 取
-         较大者保持一致，任务卡较高时表单卡拉伸、按钮沉底补齐 */
+      /* 列表可视区固定为 4 条任务（第 5 条起内部滚动），高度值由 JS 按测量基准
+         实测写入 --task-list-cap（写在任务卡上，随各主题色板的字体/间距自适应）；
+         列表是 flex:1 弹性项（flex-basis 0），height 对卡片本征高度不生效，
+         需用 min/max-height 双向钳制：卡片本征高度恒为 4 条任务，任务 0～4 条
+         时外框高度不变（不足 4 条留白补齐），添加任务不再拉高两张卡
+         （新建下载任务 / 进行中的任务）；表单卡余量由 URL 框弹性吸收 */
       .task-list {
         display: flex;
         flex-direction: column;
         gap: 10px;
         flex: 1;
-        min-height: 0;
         overflow-y: auto;
+        min-height: var(--task-list-cap, 0);
         max-height: var(--task-list-cap, none);
         padding-right: 10px;
+      }
+      /* 任务高度测量基准：与真实任务卡同构、height:0 不占布局（内容不可见），
+         供 JS 实测单条任务高度——无任务/切换主题时同样可用 */
+      .task-measure {
+        height: 0;
+        overflow: visible;
+        visibility: hidden;
+        pointer-events: none;
       }
       .task-item {
         border: 1px solid var(--border);
@@ -603,6 +621,13 @@
         width: 32px;
         height: 32px;
         display: inline-block;
+      }
+
+      /* 空状态与任务列表同高（4 条任务）：无任务时卡片高度不变
+         （flex:1 弹性项需 min-height 钳制本征高度，仅 height 不生效） */
+      #emptyState {
+        min-height: var(--task-list-cap, auto);
+        box-sizing: border-box;
       }
 
       /* ---------- 弹窗 ---------- */
@@ -865,8 +890,10 @@
         .container {
           grid-template-columns: minmax(0, 1fr);
         }
-        /* 单列布局：任务列表取消「4 条」滚动上限，完整展示 */
-        .task-list {
+        /* 单列布局：任务列表与空状态取消「4 条」固定高度，完整展示 */
+        .task-list,
+        #emptyState {
+          min-height: 0 !important;
           max-height: none !important;
         }
         /* 触控目标加大 */
@@ -1274,6 +1301,12 @@
           fill="currentColor"
         />
       </symbol>
+      <symbol id="ic-play" viewBox="0 0 1024 1024">
+        <path
+          d="M512 64C264.6 64 64 264.6 64 512s200.6 448 448 448 448-200.6 448-448S759.4 64 512 64zm-96 692V268l320 194-320 194z"
+          fill="currentColor"
+        />
+      </symbol>
       <symbol id="ic-delete" viewBox="0 0 1024 1024">
         <path
           d="M353.161903 66.888318C310.056806 69.235561 295.376613 73.464538 279.286761 87.91086 264.018674 101.771434 255.090834 122.676011 252.037646 151.802526 250.627987 164.955073 251.215881 205.358839 253.095427 231.080287L253.917191 241.649511 287.97644 241.179625C306.769747 240.943609 322.271705 240.475868 322.623583 240.239852 322.977607 239.887974 323.211477 221.330682 323.329485 198.782576 323.329485 162.959644 323.681364 157.323154 325.442901 152.624291 327.322446 147.573549 332.137172 142.758845 337.305921 140.763416 339.185467 139.939506 542.957355 138.531992 653.826925 138.413984 684.011221 138.413984 692.703045 140.645408 699.279308 150.510875 702.568512 155.325579 702.686434 163.663444 700.570959 209.3518 699.867116 225.795675 699.633332 240.827746 700.103175 242.707291L700.924983 246.112358 711.730266 245.290593C717.718591 244.938715 730.52147 244.350821 740.152981 243.998942 767.048073 242.941162 769.983253 242.589283 770.689155 239.536095 770.925171 238.126436 772.098814 224.737895 773.156595 209.939694 775.388018 178.111869 774.915986 146.9878 771.862798 135.946545 765.404543 112.692536 747.433001 91.903842 723.121168 79.573103 703.274415 69.471534 694.58259 68.531826 609.43228 67.240196 546.244414 66.182373 369.251754 65.948502 353.161903 66.888318ZM309.353049 96.718547C311.348457 97.424449 313.57988 98.598092 314.285783 99.422002 315.343563 100.595645 314.167775 100.713653 308.765155 99.889743 305.124072 99.419857 299.721452 99.303994 296.90428 99.653727L291.735531 100.477637 297.841907 106.232092C301.131111 109.52134 303.832421 112.340658 303.832421 112.574528 303.832421 112.810544 302.422762 112.45652 300.661225 111.752763 295.610483 109.873218 284.219495 110.225096 280.814428 112.45652 277.759095 114.454073 277.99511 116.56751 281.400177 116.56751 282.457958 116.56751 284.453365 117.389253 285.745016 118.328983 287.860578 119.856693 287.624562 119.974701 283.161714 120.090563 276.467444 120.090563 271.182832 123.967662 267.305733 131.835576 263.548788 139.117741 263.078902 137.82609 265.780212 127.726753 267.539603 120.796466 273.648126 108.699575 277.759095 104.236728 285.981032 95.074974 296.198378 92.725607 309.353049 96.718547ZM759.883915 231.198295C763.170974 231.902052 763.288982 232.135922 761.293574 232.957687 759.999778 233.429719 758.23824 233.899605 757.416476 233.899605 754.949036 234.015467 750.134311 228.496985 750.134311 225.559659 750.134311 222.976357 750.370369 223.09222 753.071637 226.61744 754.831028 228.730855 757.652492 230.728409 759.883915 231.198295Z"
@@ -1381,7 +1414,7 @@
             >新建下载任务
           </div>
           <form id="dlForm" autocomplete="off">
-            <label class="field">
+            <label class="field" id="fUrlField">
               <span>视频 URL<i class="req">*</i></span>
               <textarea
                 id="fUrl"
@@ -1463,6 +1496,33 @@
             >进行中的任务 <span class="count" id="taskCount">0</span>
           </div>
           <div class="task-list" id="taskList"></div>
+          <!-- 任务高度测量基准：与真实任务卡同构、不可见不占布局，
+               供 JS 实测单条任务高度（无任务时也能计算 4 条列表高度） -->
+          <div class="task-measure" aria-hidden="true">
+            <div class="task-item">
+              <div class="task-row1">
+                <span class="task-name">测量基准</span>
+                <span class="badge badge-running">下载中</span>
+              </div>
+              <div class="progress">
+                <div class="progress-bar" style="width: 0%"></div>
+              </div>
+              <div class="task-row2">
+                <span class="task-id">ID: 000000000000</span>
+                <span class="task-user">👤 user</span>
+                <span style="flex: 1"></span>
+                <span class="pct">0%</span>
+                <span class="task-actions">
+                  <button class="icon-btn" type="button" tabindex="-1">
+                    <svg class="i" aria-hidden="true"></svg>
+                  </button>
+                  <button class="icon-btn danger" type="button" tabindex="-1">
+                    <svg class="i" aria-hidden="true"></svg>
+                  </button>
+                </span>
+              </div>
+            </div>
+          </div>
           <div class="empty" id="emptyState">
             <span class="icon"
               ><svg class="i empty-icon" aria-hidden="true">
@@ -1494,6 +1554,23 @@
       >
         <h3>任务详情</h3>
         <dl class="detail-grid" id="modalBody"></dl>
+      </div>
+    </div>
+
+    <!-- ================= m3u8 边下边看预览弹窗（外框复用 modal 体系） ================= -->
+    <div class="mask" id="playerMask">
+      <div class="modal" style="max-width: 720px; width: 92vw">
+        <h3 id="playerTitle">边下边看预览</h3>
+        <video
+          id="previewVideo"
+          controls
+          autoplay
+          playsinline
+          style="width: 100%; border-radius: 10px; background: #000"
+        ></video>
+        <div class="btns">
+          <button class="btn btn-ghost" id="playerClose">关闭</button>
+        </div>
       </div>
     </div>
 
@@ -1651,6 +1728,10 @@
       </div>
     </div>
 
+    <!-- hls.js 本地打包（服务端 webui 内联，m3u8 边下边看用） -->
+    <script>
+      /*__HLS_JS__*/
+    </script>
     <script>
       (function () {
         "use strict";
@@ -2052,6 +2133,7 @@
               var tasks = data.data || [];
               $("taskCount").textContent = tasks.length;
               $("emptyState").style.display = tasks.length ? "none" : "";
+              $("taskList").style.display = tasks.length ? "" : "none";
               var list = $("taskList");
               list.innerHTML = tasks
                 .map(function (t) {
@@ -2093,17 +2175,21 @@
                   );
                 })
                 .join("");
-              if (list.children.length) {
-                // 列表可视高度固定为 4 条任务（含间距），第 5 条起出现滚动条；
-                // 按实际渲染的任务卡高度计算（getBoundingClientRect 保留亚像素，
-                // 另加 1px 容差抵消取整误差），随各主题色板的字体/间距自适应
-                var gap = parseFloat(getComputedStyle(list).gap) || 0;
-                var unit = list.children[0].getBoundingClientRect().height + gap;
-                list.style.setProperty(
-                  "--task-list-cap",
-                  (unit * 4 - gap + 1).toFixed(2) + "px",
-                );
-              }
+              // 列表高度固定为 4 条任务（含间距，不足 4 条/无任务时由空状态或
+              // 留白补齐），第 5 条起出现滚动条；高度按测量基准元素实测（与真实
+              // 任务卡同构，无任务/切换主题后同样可用），getBoundingClientRect
+              // 保留亚像素，另加 1px 容差抵消取整误差，随各主题色板自适应
+              var gap = parseFloat(getComputedStyle(list).gap) || 0;
+              var card = list.parentElement;
+              var unit =
+                card
+                  .querySelector(".task-measure .task-item")
+                  .getBoundingClientRect().height + gap;
+              card.style.setProperty(
+                "--task-list-cap",
+                (unit * 4 - gap + 1).toFixed(2) + "px",
+              );
+              checkPreviewTask(tasks); // 预览中的任务完成/状态变化时停止播放
             })
             .catch(function () {
               /* 403 已在 handleResp 处理；网络错误静默，等健康检查 */
@@ -2185,12 +2271,24 @@
               var t = data.data || {};
               var urls =
                 t.urls && t.urls.length ? t.urls : t.url ? [t.url] : [];
+              // 边下边看：下载中或暂停中且任一为 m3u8 链接时显示预览按钮（忽略查询串判断后缀）
+              var canPreview =
+                (t.status === "running" || t.status === "paused") &&
+                urls.some(function (u) {
+                  return String(u)
+                    .split(/[?#]/)[0]
+                    .toLowerCase()
+                    .endsWith(".m3u8");
+                });
               var rows = [
                 ["任务 ID", CD.esc(t.id), true],
                 ["文件名", CD.esc(t.save_name || "(未命名)"), false],
                 [
                   "状态",
-                  statusBadge(t),
+                  statusBadge(t) +
+                    (canPreview
+                      ? '<button class="icon-btn" id="previewBtn" title="边下边看预览" style="vertical-align:middle;margin-left:6px;width:22px;height:22px;border-radius:6px"><svg class="i" aria-hidden="true"><use href="#ic-play"></use></svg></button>'
+                      : ""),
                   false,
                 ],
                 [
@@ -2228,6 +2326,12 @@
                   .join("") +
                 "</div></dd>";
               $("modalBody").innerHTML = html;
+              var pbtn = $("previewBtn");
+              if (pbtn)
+                pbtn.addEventListener("click", function () {
+                  $("modalMask").classList.remove("show");
+                  openPreview(t.id, t.save_name || "");
+                });
               $("modalMask").classList.add("show");
             })
             .catch(function (err) {
@@ -2239,6 +2343,99 @@
           if (e.target === $("modalMask"))
             $("modalMask").classList.remove("show");
         });
+
+        // ---------- m3u8 边下边看预览 ----------
+        // 播放列表为 EVENT 型（无 EXT-X-ENDLIST），hls.js 原生周期轮询增量加载新分片；
+        // startPosition:0 强制从头播放，backBufferLength 保留已下载分片供 seek；
+        // 所有请求经 xhrSetup 携带 Bearer 令牌
+        var previewTaskId = null,
+          previewHls = null,
+          previewManifestReady = false;
+
+        function openPreview(taskId, name) {
+          if (typeof Hls === "undefined" || !Hls.isSupported()) {
+            CD.toast("当前浏览器不支持预览播放", true);
+            return;
+          }
+          closePreview(); // 清理上一次预览（若仍在播放），防止 Hls 实例泄漏
+          previewTaskId = taskId;
+          $("playerTitle").textContent = name || taskId;
+          $("playerMask").classList.add("show");
+          var video = $("previewVideo");
+          previewHls = new Hls({
+            startPosition: 0, // 强制从头播放，不追下载边缘
+            backBufferLength: 3600, // 保留 1 小时历史分片，seek 已下载范围不跳
+            xhrSetup: function (xhr) {
+              xhr.setRequestHeader(
+                "Authorization",
+                "Bearer " + creds.token,
+              );
+            },
+          });
+          previewHls.loadSource(
+            BASE + "tasks/" + encodeURIComponent(taskId) + "/preview.m3u8",
+          );
+          previewHls.attachMedia(video);
+          previewManifestReady = false;
+          previewHls.on(Hls.Events.MANIFEST_PARSED, function () {
+            previewManifestReady = true;
+            video.play().catch(function () {});
+          });
+          previewHls.on(Hls.Events.ERROR, function (event, data) {
+            if (!data.fatal) return;
+            if (data.type === Hls.ErrorTypes.NETWORK_ERROR) {
+              var code = data.response && data.response.code;
+              if (code === 415) {
+                closePreview();
+                CD.toast("fMP4 格式暂不支持预览", true);
+              } else if (code === 404 && !previewManifestReady) {
+                closePreview();
+                CD.toast("任务当前不可预览", true);
+              } else {
+                previewHls.startLoad(); // 网络错误（含分片 transient 404）由 hls.js 自愈重试
+              }
+            } else if (data.type === Hls.ErrorTypes.MEDIA_ERROR) {
+              previewHls.recoverMediaError();
+            } else {
+              closePreview();
+              CD.toast("预览播放出错", true);
+            }
+          });
+        }
+
+        function closePreview() {
+          previewTaskId = null;
+          previewManifestReady = false;
+          if (previewHls) {
+            previewHls.destroy();
+            previewHls = null;
+          }
+          var video = $("previewVideo");
+          video.pause();
+          video.removeAttribute("src");
+          $("playerMask").classList.remove("show");
+        }
+
+        $("playerClose").addEventListener("click", closePreview);
+        $("playerMask").addEventListener("click", function (e) {
+          if (e.target === $("playerMask")) closePreview();
+        });
+
+        // 任务结束（完成/失败/删除）时停止播放；暂停中保持播放（已缓存分片仍可观看）
+        function checkPreviewTask(tasks) {
+          if (!previewTaskId) return;
+          var cur = tasks.find(function (t) { return t.id === previewTaskId; });
+          if (!cur || cur.status === "done" || cur.status === "failed") {
+            closePreview();
+            CD.toast(
+              !cur
+                ? "任务已删除，预览结束"
+                : cur.status === "done"
+                  ? "任务已下载完成，预览结束"
+                  : "任务下载失败，预览结束",
+            );
+          }
+        }
 
         // ---------- 健康检查（只看灯：状态由圆点颜色表达，悬停可见文字提示） ----------
         var healthState = null; // null=检测中 / "ok" / "bad"

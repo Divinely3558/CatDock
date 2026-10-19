@@ -44,6 +44,12 @@ def _read_html(filename):
         shared_js = f.read()
     html = html.replace('/*__SHARED_CSS__*/', shared_css)
     html = html.replace('/*__SHARED_JS__*/', shared_js)
+    # hls.js 本地打包内联（m3u8 边下边看）：仅 user.html 含此占位符，
+    # 避免 login/admin 页白白读取 ~400KB 库文件
+    if '/*__HLS_JS__*/' in html:
+        with open(_find_web_file(os.path.join('vendor', 'hls.min.js')),
+                  'r', encoding='utf-8') as f:
+            html = html.replace('/*__HLS_JS__*/', f.read())
     return html.replace('__VERSION__', _version_display())
 
 

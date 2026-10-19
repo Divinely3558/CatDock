@@ -18,13 +18,15 @@ import uuid
 import signal
 import subprocess
 import threading
+import urllib.parse
+import urllib.request
 
 import app_config as cfg
 from app_logger import log_info, log_warning, log_error, debug_print
 from task_store import save_tasks, append_log
 from dedup import is_url_downloaded, is_filename_downloaded
 from filters import filter_filename, get_ad_keywords, reload_user_rules
-from security import sanitize_url_for_log, is_safe_url
+from security import sanitize_url_for_log, is_safe_url, check_redirect_chain
 
 
 # ---- per-user 上下文（线程级）----
@@ -787,13 +789,81 @@ def _check_network_ready(max_wait=30):
     return False
 
 
+# ---- master 型 m3u8 预解析选流 ----
+# N_m3u8DL-RE 的 --ad-keyword 只在子播放列表解析路径生效：直接喂 master
+# （含 #EXT-X-STREAM-INF 多码率变体）+ --auto-select 时广告剔除不生效。
+# 因此构建命令前本地预解析：master 型按最高 BANDWIDTH 选流，把子播放
+# 列表 URL 传给 N_m3u8DL-RE；子列表型或预解析失败则原样直传（尽力而为，
+# 不阻塞下载）。
+
+_MASTER_VARIANT_RE = re.compile(r'^#EXT-X-STREAM-INF:(.*)$')
+_MASTER_BANDWIDTH_RE = re.compile(r'BANDWIDTH=(\d+)')
+
+
+def _resolve_m3u8_media_url(url, referer=None, cookie=None, user_agent=None):
+    """master 型 m3u8 预解析选流，返回选中变体的子播放列表 URL。
+
+    子列表型 URL / 拉取失败 / 无有效变体 / 变体地址不安全 → 原样返回 url。
+    """
+    # 拉取前按提交时同规则做重定向链 SSRF 预检（urlopen 会自动跟随重定向）
+    safe, _ = check_redirect_chain(url)
+    if not safe:
+        return url
+    headers = {'User-Agent': user_agent or 'Mozilla/5.0'}
+    if referer:
+        headers['Referer'] = referer
+    if cookie:
+        headers['Cookie'] = cookie
+    try:
+        req = urllib.request.Request(url, headers=headers)
+        with urllib.request.urlopen(req, timeout=10) as resp:
+            # master 播放列表体积小，1MB 截断足够覆盖（超大子列表被截断
+            # 也只会判定为非 master 而原样直传，行为不变）
+            content = resp.read(1024 * 1024).decode('utf-8', errors='replace')
+    except Exception as e:
+        debug_print(f"[m3u8] master 预解析拉取失败，按原 URL 直传: {e}")
+        return url
+    if '#EXT-X-STREAM-INF' not in content:
+        return url
+    # 解析变体：#EXT-X-STREAM-INF 属性行的下一非空非注释行为变体 URI，
+    # 按 --auto-select 同等语义选最高 BANDWIDTH
+    best_bandwidth, best_uri = -1, None
+    lines = [ln.strip() for ln in content.splitlines()]
+    for i, line in enumerate(lines):
+        m = _MASTER_VARIANT_RE.match(line)
+        if not m:
+            continue
+        bw_m = _MASTER_BANDWIDTH_RE.search(m.group(1))
+        bandwidth = int(bw_m.group(1)) if bw_m else 0
+        uri = None
+        for nxt in lines[i + 1:]:
+            if not nxt:
+                continue
+            if not nxt.startswith('#'):
+                uri = nxt
+            break
+        if uri and bandwidth > best_bandwidth:
+            best_bandwidth, best_uri = bandwidth, uri
+    if not best_uri:
+        return url
+    variant_url = urllib.parse.urljoin(url, best_uri)
+    # 变体地址来自远端内容（不可信），需过 SSRF 校验才能交给下载器
+    if not is_safe_url(variant_url):
+        log_error(f"SSRF 防护：master 变体指向不安全地址，按原 URL 直传: "
+                  f"{sanitize_url_for_log(variant_url)}")
+        return url
+    debug_print(f"[m3u8] master 预解析选流: BANDWIDTH={best_bandwidth} -> "
+                f"{sanitize_url_for_log(variant_url)[:120]}")
+    return variant_url
+
+
 def _build_m3u8_cmd(url, base_name, referer=None, cookie=None, user_agent=None):
     """构建 N_m3u8DL-RE 下载命令（resume_tasks 和 run_download 共用）。
 
     缓存目录与广告关键字取当前线程 per-user 上下文（缓存按用户隔离、
     广告关键字按用户各自的 filter_rules.json）。
     """
-    cmd = [cfg.N_M3U8DL, url,
+    cmd = [cfg.N_M3U8DL, _resolve_m3u8_media_url(url, referer, cookie, user_agent),
            '--tmp-dir', get_temp_dir(),
            '--save-dir', get_download_dir(),
            '--ffmpeg-binary-path', cfg.FFMPEG_PATH,
@@ -824,6 +894,102 @@ def _build_curl_cmd(url, output_file, referer=None, cookie=None, user_agent=None
         cmd.extend(['-A', user_agent])
     cmd.append(url)
     return cmd
+
+
+# ---- m3u8 边下边看（预览播放）----
+# 预览只读 N_m3u8DL-RE 的临时缓存目录（<temp>/<user>/<save_name>/0__*/<NNN>.ts）：
+# 分片下载中为 .ts.tmp，完成后原子改名为 .ts，读到的无后缀文件均为稳定态；
+# AES-128 源落盘前已解密，播放列表无需携带 EXT-X-KEY。
+
+_PREVIEW_SEG_NAME_RE = re.compile(r'^(\d+)\.ts$')
+_PREVIEW_QUALITY_DIR_RE = re.compile(r'^\d+__')
+
+
+def _find_preview_seg_dir(task):
+    """定位任务的临时分片目录（质量目录下文件数最多的一个）。
+
+    返回 (分片目录路径, 目录内文件名列表)；缓存目录不存在时返回 (None, [])。
+    """
+    user = task.get('user') or ''
+    save_name = task.get('save_name') or f"download_{task.get('id', '')}"
+    base_dir = os.path.join(cfg.user_temp_dir(user), save_name)
+    try:
+        entries = os.listdir(base_dir)
+    except OSError:
+        return None, []
+    best_dir, best_files = None, []
+    for entry in entries:
+        # 质量目录形如 0__mp4a.40.2,avc1.640028_6221600_（--auto-select 通常只选一个，仍按最多文件兜底）
+        if not _PREVIEW_QUALITY_DIR_RE.match(entry):
+            continue
+        sub = os.path.join(base_dir, entry)
+        if not os.path.isdir(sub):
+            continue
+        try:
+            files = os.listdir(sub)
+        except OSError:
+            continue
+        if len(files) > len(best_files):
+            best_dir, best_files = sub, files
+    return best_dir, best_files
+
+
+def build_preview_playlist(task):
+    """生成任务的 EVENT 型预览播放列表（边下边看）。
+
+    只含已落盘完成（无 .tmp 后缀）的 .ts 分片，按数值排序；广告分片下载期
+    已被 --ad-keyword 剔除不落盘，天然缺席；序号空洞不插 DISCONTINUITY
+    （EVENT 前缀不可变，临时空洞补上后先前插入的标记会破坏语义），
+    PTS 跳跃交给 hls.js 内建 gap 自愈。不写 EXT-X-ENDLIST，hls.js 周期轮询增量。
+
+    返回 (playlist_text, None)；不可预览时返回 (None, (http_status, message))。
+    """
+    if task.get('status') not in ('running', 'paused'):
+        return None, (404, '任务当前不可预览')
+    seg_dir, files = _find_preview_seg_dir(task)
+    if seg_dir is None:
+        return None, (404, '下载缓存尚未就绪，请稍后再试')
+    # 单次遍历：同时检测 fMP4 源和收集已完成 .ts 分片
+    segs = []
+    for f in files:
+        base = f[:-4] if f.endswith('.tmp') else f
+        if base.endswith(('.m4s', '.mp4')):
+            return None, (415, 'fMP4 格式暂不支持预览')
+        m = _PREVIEW_SEG_NAME_RE.match(f)
+        if m:
+            segs.append((int(m.group(1)), f))
+    if not segs:
+        return None, (404, '暂无已完成分片，请稍后再试')
+    segs.sort()
+    lines = [
+        '#EXTM3U',
+        '#EXT-X-VERSION:3',
+        '#EXT-X-PLAYLIST-TYPE:EVENT',
+        '#EXT-X-TARGETDURATION:10',
+        '#EXT-X-MEDIA-SEQUENCE:0',
+    ]
+    # EXTINF 统一估算：TS 分片自带时间戳，hls.js 按流内 PTS 排播，时长不精确不影响播放
+    for _, fname in segs:
+        lines.append('#EXTINF:10.0,')
+        lines.append(f'seg/{fname}')
+    return '\n'.join(lines) + '\n', None
+
+
+def resolve_preview_segment(task, filename):
+    """校验并返回预览分片的磁盘路径（seg 端点用）。
+
+    白名单 ^\\d+\\.ts$（天然排除路径分隔符与 .tmp）；
+    非法/不存在返回 None。
+    """
+    if not _PREVIEW_SEG_NAME_RE.match(filename):
+        return None
+    seg_dir, _ = _find_preview_seg_dir(task)
+    if seg_dir is None:
+        return None
+    path = os.path.join(seg_dir, filename)
+    if not os.path.isfile(path):
+        return None
+    return path
 
 
 # CDN 调度 JSON 响应中可能携带真实下载地址的字段名（爱奇艺 pcw-data 接口使用 'l'）

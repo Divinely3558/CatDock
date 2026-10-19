@@ -16,6 +16,7 @@ import base64
 import hashlib
 import secrets
 import socket
+import shutil
 import signal
 import ipaddress
 import urllib.parse
@@ -29,12 +30,15 @@ from filters import is_ad_content, get_user_rules, save_user_rules
 from task_store import load_tasks
 import chat
 import theme_prefs
-from downloader import run_download, resume_tasks, pause_task, resume_paused_task, delete_task, pin_task, queue_position, cleanup_user_data
+from downloader import run_download, resume_tasks, pause_task, resume_paused_task, delete_task, pin_task, queue_position, cleanup_user_data, build_preview_playlist, resolve_preview_segment
 from webui import get_login_html, get_user_html, get_admin_html
 
 
 # 已警告过的 IP（尝试登录已封禁账号时首次仅提示，再次尝试直接封 IP）
 _banned_account_warned_ips = set()
+
+# m3u8 预览播放路径（豁免限流，见 do_GET 速率限制处注释）
+_PREVIEW_PATH_RE = re.compile(r'^/tasks/[^/]+/(preview\.m3u8|seg/\d+\.ts)$')
 
 
 def _normalize_ip(addr):
@@ -329,6 +333,63 @@ class DownloadHandler(http.server.BaseHTTPRequestHandler):
             self.wfile.write(body)
         except Exception as e:
             debug_print(f"[HTTP] 聊天记录文件发送失败: {e}")
+
+    def _handle_preview_playlist(self, task):
+        """GET /tasks/<id>/preview.m3u8：动态生成 EVENT 型播放列表（边下边看）。
+
+        hls.js 周期轮询本端点增量加载新分片；播放列表不含广告分片
+        （下载期已被 --ad-keyword 剔除不落盘，列表只基于落盘文件扫描）。
+        """
+        try:
+            playlist, err = build_preview_playlist(task)
+        except Exception as e:
+            self._server_error(e)
+            return
+        if err:
+            status, message = err
+            self.send_json({'success': False, 'message': message}, status)
+            return
+        try:
+            body = playlist.encode('utf-8')
+            self.send_response(200)
+            self.send_header('Content-Type', 'application/vnd.apple.mpegurl')
+            self.send_header('Content-Length', str(len(body)))
+            self.send_header('Cache-Control', 'no-store')
+            self.send_header('Connection', 'close')
+            self.end_headers()
+            self.wfile.write(body)
+        except Exception as e:
+            debug_print(f"[HTTP] 预览播放列表发送失败: {e}")
+
+    def _handle_preview_segment(self, task, filename):
+        """GET /tasks/<id>/seg/<filename>：返回已完成的分片文件。
+
+        白名单只服务实际落盘的 .ts 文件，被篡改的播放列表也拿不到不存在的分片。
+        流式发送，避免大分片全部读入内存。
+        """
+        path = resolve_preview_segment(task, filename)
+        if path is None:
+            self.send_json({'success': False, 'message': '分片不存在'}, 404)
+            return
+        try:
+            size = os.path.getsize(path)
+        except OSError:
+            self.send_json({'success': False, 'message': '分片暂不可读'}, 404)
+            return
+        try:
+            self.send_response(200)
+            self.send_header('Content-Type', 'video/mp2t')
+            self.send_header('Content-Length', str(size))
+            self.send_header('Cache-Control', 'no-store')
+            self.send_header('Connection', 'close')
+            self.end_headers()
+            with open(path, 'rb') as f:
+                shutil.copyfileobj(f, self.wfile)
+        except OSError:
+            # 分片正被重命名/写入：按不存在处理，hls.js 会跳过
+            pass
+        except Exception as e:
+            debug_print(f"[HTTP] 预览分片发送失败: {e}")
 
     def handle(self):
         # IP 封禁检查：被封禁的 IP 直接断开连接，不返回任何响应
@@ -731,7 +792,9 @@ class DownloadHandler(http.server.BaseHTTPRequestHandler):
         if not self._check_auth(data):
             return
 
-        if not self._check_rate_limit():
+        # 预览播放（播放列表轮询 + 分片拉取）请求频率由流本身决定（短分片流可达 30+/分），
+        # 计入 60 次/分钟限流会导致播放中途 429；两端点仅读本地缓存、已过鉴权与所有权校验，豁免限流
+        if not _PREVIEW_PATH_RE.match(path) and not self._check_rate_limit():
             return
 
         if path == '/config':
@@ -807,13 +870,23 @@ class DownloadHandler(http.server.BaseHTTPRequestHandler):
                               if t.get('user', '') == current_user]
                 self.send_json({'success': True, 'data': user_tasks})
         elif path.startswith('/tasks/'):
-            task_id = path.split('/')[2]
+            parts = path.split('/')
+            task_id = parts[2]
             with cfg.tasks_lock:
                 task = cfg.tasks.get(task_id)
-                if task and task.get('user', '') == self.authenticated_user:
-                    self.send_json({'success': True, 'data': self._mask_task(task)})
-                else:
+                if not task or task.get('user', '') != self.authenticated_user:
                     self.send_json({'success': False, 'message': '任务不存在'}, 404)
+                    return
+                # 快照任务字段后释放锁：预览端点涉及磁盘 I/O，不持锁发送
+                task = dict(task)
+            if len(parts) == 3:
+                self.send_json({'success': True, 'data': self._mask_task(task)})
+            elif len(parts) == 4 and parts[3] == 'preview.m3u8':
+                self._handle_preview_playlist(task)
+            elif len(parts) == 5 and parts[3] == 'seg':
+                self._handle_preview_segment(task, parts[4])
+            else:
+                self.send_json({'success': False, 'message': '路径不存在'}, 404)
         elif path == '/filters':
             # 用户各自的过滤规则（user/<名>/filter_rules.json）
             if not self._require_download_user():
