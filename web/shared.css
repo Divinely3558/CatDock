@@ -519,7 +519,6 @@
 :root[data-palette="tech"][data-mode="dark"] .topbar {
   background: rgba(2, 2, 8, 0.92);
   border-bottom: 1px solid rgba(0, 229, 255, 0.15);
-  overflow: hidden; /* 裁切扫描线 ::after，防止 translateX(250%) 溢出视口产生横向滚动条 */
 }
 /* 顶栏扫描线动画 */
 :root[data-palette="tech"][data-mode="dark"] .topbar::after {
@@ -802,6 +801,7 @@ body {
 /* 页面滚动条槽位常驻：内容高度跨过滚动阈值时布局宽度也不再变化 */
 html {
   scrollbar-gutter: stable;
+  overflow-x: hidden; /* 禁止页面横向滚动条（科技风扫描线动画可能溢出视口） */
 }
 
 /* Firefox：不识别 webkit 伪元素，降级为 scrollbar-width/color 标准属性。
