@@ -519,6 +519,7 @@
 :root[data-palette="tech"][data-mode="dark"] .topbar {
   background: rgba(2, 2, 8, 0.92);
   border-bottom: 1px solid rgba(0, 229, 255, 0.15);
+  overflow: hidden; /* 裁切扫描线 ::after，防止 translateX(250%) 溢出视口产生横向滚动条 */
 }
 /* 顶栏扫描线动画 */
 :root[data-palette="tech"][data-mode="dark"] .topbar::after {
