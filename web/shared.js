@@ -443,10 +443,11 @@
       filename_dedup: { enabled: false, rules: [] },
     };
 
-    // 去重主视图固定只显示 1 条，其余进「更多」；
-    // 广告关键字 / 文件名过滤不设固定条数，按「只占一行」动态测量（见 visibleCount）
-    var DD_VISIBLE = 1;
-    // 两个 chips 区主视图单行实测可容纳的芯片数，超出部分全部收纳进「更多」弹窗
+    // 去重主视图固定只显示 2 条，其余进「更多」
+    var DD_VISIBLE = 2;
+    // 广告关键字 / 文件名过滤主视图最多占 3 行，超出部分收纳进「更多」弹窗
+    var CHIP_ROWS = { keywords: 3, filename_filter: 3 };
+    // 两个 chips 区主视图实测可容纳的芯片数，超出部分全部收纳进「更多」弹窗
     var visibleCount = { keywords: 0, filename_filter: 0 };
     var moreCtx = null; // 当前展开的「更多」区块：'keywords' | 'filename_filter' | 'filename_dedup'
 
@@ -486,53 +487,41 @@
       return chip;
     }
 
-    function fitChipsOnOneLine(wrap, els, gap, key) {
-      var budget = wrap.clientWidth;
-      // 先用「最大数字」文案造一个探测按钮，保证任意 +N 文案都放得下
+    function fitChipsInRows(wrap, els, gap, key, maxRows) {
+      if (!els.length) return 0;
+      // 所有芯片已加入 DOM，利用 offsetTop 判断行归属
+      var baseTop = els[0].offsetTop;
+      var chipH = els[0].offsetHeight;
+      var threshold = baseTop + maxRows * (chipH + gap);
+      // 找到第一个超出 maxRows 行的芯片
+      var cutoff = els.length;
+      for (var i = 0; i < els.length; i++) {
+        if (els[i].offsetTop >= threshold) {
+          cutoff = i;
+          break;
+        }
+      }
+      if (cutoff >= els.length) return els.length;
+      // 移除超量芯片
+      for (var k = els.length - 1; k >= cutoff; k--) wrap.removeChild(els[k]);
+      // 探测「更多」按钮是否放得下最后一行
       var probe = document.createElement("button");
       probe.type = "button";
       probe.className = "btn btn-ghost btn-more";
-      probe.textContent = "+" + els.length;
+      probe.textContent = "+" + (els.length - cutoff);
       probe.style.visibility = "hidden";
       wrap.appendChild(probe);
-      var btnW = probe.offsetWidth;
-      // 第一遍：不预留按钮，只看第一行能放多少芯片
-      var m = 0;
-      var used = 0;
-      for (var i = 0; i < els.length; i++) {
-        var add = els[i].offsetWidth + (m ? gap : 0);
-        if (used + add > budget) break;
-        used += add;
-        m++;
+      if (probe.offsetTop >= threshold && cutoff > 0) {
+        cutoff--;
+        wrap.removeChild(els[cutoff]);
+        probe.textContent = "+" + (els.length - cutoff);
       }
-      var keep;
-      if (m >= els.length) {
-        // 全部芯片一行放得下：不需要「更多」
-        wrap.removeChild(probe);
-        keep = els.length;
-      } else {
-        // 第二遍：为按钮预留位置（按钮 + 间距），贪心计算同行可保留的芯片数
-        var reserve = btnW + gap;
-        keep = 0;
-        used = 0;
-        for (var j = 0; j < els.length; j++) {
-          var add2 = els[j].offsetWidth + (keep ? gap : 0);
-          if (used + add2 + reserve > budget) break;
-          used += add2;
-          keep++;
-        }
-        probe.textContent = "+" + (els.length - keep);
-        probe.style.visibility = "";
-        probe.title = "查看剩余 " + (els.length - keep) + " 项";
-        probe.onclick = (function (k) {
-          return function () {
-            openMore(k);
-          };
-        })(key);
-      }
-      // 超量芯片一次性移除；弹窗按 filterState 全量数据独立渲染，不会丢失
-      for (var k = els.length - 1; k >= keep; k--) wrap.removeChild(els[k]);
-      return keep;
+      probe.style.visibility = "";
+      probe.title = "查看剩余 " + (els.length - cutoff) + " 项";
+      probe.onclick = (function (k) {
+        return function () { openMore(k); };
+      })(key);
+      return cutoff;
     }
 
     function renderChips(key, listId, inputId) {
@@ -570,7 +559,7 @@
       });
       var gap = parseFloat(getComputedStyle(wrap).columnGap);
       if (!isFinite(gap) || gap <= 0) gap = 6;
-      visibleCount[key] = fitChipsOnOneLine(wrap, els, gap, key);
+      visibleCount[key] = fitChipsInRows(wrap, els, gap, key, CHIP_ROWS[key] || 1);
     }
 
     function addKeywords(key, listId, inputId) {
