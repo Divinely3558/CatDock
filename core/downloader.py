@@ -616,29 +616,54 @@ def _post_process_direct_download(source_file, final_file, target_format, base_n
     return True
 
 
-def extract_percent(line):
+def extract_percent(text):
     # 兼容小数百分比（N_m3u8DL-RE 输出形如 "... 13/30 43.33% ..."，
     # 旧正则 (\d{1,3})% 会误取小数部分，导致 43.33% 被解析为 33%）
-    match = re.search(r'(\d{1,3}(?:\.\d+)?)%', line)
-    if match:
+    # 取最后一个匹配：0.6.0+ 在非 TTY 下进度更新不带换行，一次读到的文本
+    # 可能含多条进度，最新的一条才是当前真实进度
+    matches = re.findall(r'(\d{1,3}(?:\.\d+)?)%', text)
+    if matches:
         # 已检测到下载输出但进度不足 1% 时显示 1%，避免被误认为未开始下载
-        return min(100, max(1, int(float(match.group(1)))))
+        return min(100, max(1, int(float(matches[-1]))))
     return None
 
 
-def extract_segments(line):
-    """从 N_m3u8DL-RE 进度行解析已下载分片数/总分片数（仅 m3u8 下载有）。
+def extract_segments(text):
+    """从 N_m3u8DL-RE 进度输出解析已下载分片数/总分片数（仅 m3u8 下载有）。
 
-    进度行形如 "Vid Kbps ━━━ 13/30 43.33% 1.07MB/6.45MB 1.07MBps 00:00:01"。
-    正则锚定 N/M 后必须紧跟百分比，避免误匹配行内的 "1.07MB/6.45MB"
+    进度形如 "Vid Kbps ━━━ 13/30 43.33% 1.07MB/6.45MB 1.07MBps 00:00:01"。
+    正则锚定 N/M 后必须紧跟百分比，避免误匹配其中的 "1.07MB/6.45MB"
     （其后是 MBps 速率而非百分比数字）。匹配返回 (done, total)，否则 None。
+
+    同 extract_percent：取最后一个匹配，适应无换行的批量进度输出。
     """
-    match = re.search(r'(\d{1,5})\s*/\s*(\d{1,5})\s+\d{1,3}(?:\.\d+)?%', line)
-    if match:
-        done, total = int(match.group(1)), int(match.group(2))
+    matches = re.findall(r'(\d{1,5})\s*/\s*(\d{1,5})\s+\d{1,3}(?:\.\d+)?%', text)
+    for done_s, total_s in reversed(matches):
+        done, total = int(done_s), int(total_s)
         if 0 <= done <= total and total > 0:
             return done, total
     return None
+
+
+def iter_output_chunks(stream, size=256, carry=200):
+    """分块读取子进程输出，替代 readline 的按行读取。
+
+    N_m3u8DL-RE 0.6.0+ 在 stdout 为管道（非 TTY）时，进度更新之间不输出任何
+    换行/回车分隔符（100 分片的下载把 130 次进度挤在同一块里），readline 会
+    一直阻塞到进程退出，进度条与分片计数全程冻结在 0。改为固定块读取 + 保留
+    上一块尾部若干字符再拼接，既能实时解析，也能让被块边界切断的进度标记在
+    下一块里完整匹配（旧值被重复匹配不影响结果，解析函数取最后一次匹配）。
+
+    兼容 0.5.1 及 curl 的按行输出：换行只是普通字符，不影响正则匹配。
+    """
+    tail = ''
+    while True:
+        chunk = stream.read(size)
+        if not chunk:
+            break
+        text = tail + chunk
+        yield text
+        tail = text[-carry:]
 
 
 def match_base_name(name, base):
@@ -903,10 +928,13 @@ def _build_m3u8_cmd(url, base_name, referer=None, cookie=None, user_agent=None,
            '--auto-select']
     if referer:
         cmd.extend(['-H', f'Referer: {referer}'])
+    # N_m3u8DL-RE 没有 --cookie/--user-agent 选项（0.5.1 与 0.6.0 均如此），
+    # 传入会报 "Unrecognized command or argument" 并直接打印 usage 退出；
+    # 请求头统一走 -H，与下方 curl 的构造方式一致。
     if cookie:
-        cmd.extend(['--cookie', cookie])
+        cmd.extend(['-H', f'Cookie: {cookie}'])
     if user_agent:
-        cmd.extend(['--user-agent', user_agent])
+        cmd.extend(['-H', f'User-Agent: {user_agent}'])
     ad_keywords = get_ad_keywords(user)
     if ad_keywords:
         for keyword in ad_keywords:
@@ -1118,15 +1146,15 @@ def _run_download_with_retry(cmd, task_id, max_retries=5, initial_retry_count=0,
 
         _register_proc(task_id, process)
         try:
-            for line in iter(process.stdout.readline, ''):
-                line = line.strip()
+            # 分块读取而非 readline：N_m3u8DL-RE 0.6.0+ 管道输出无换行分隔
+            for chunk in iter_output_chunks(process.stdout):
                 with cfg.tasks_lock:
                     if task_id in cfg.tasks:
-                        percent = extract_percent(line)
+                        percent = extract_percent(chunk)
                         if percent:
                             cfg.tasks[task_id]['progress'] = percent
                         # m3u8 分片计数（直链 curl 无此信息，不写该字段）
-                        segs = extract_segments(line)
+                        segs = extract_segments(chunk)
                         if segs:
                             cfg.tasks[task_id]['segments'] = {
                                 'done': segs[0], 'total': segs[1]}
