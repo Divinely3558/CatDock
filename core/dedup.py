@@ -34,7 +34,8 @@ def _load_user_cache(user):
         if not os.path.exists(log_file):
             continue
         try:
-            with open(log_file, 'r', encoding='utf-8') as f:
+            # utf-8-sig：首行含 BOM 时避免首条记录 json.loads 失败被静默跳过
+            with open(log_file, 'r', encoding='utf-8-sig') as f:
                 for line in f:
                     line = line.strip()
                     if not line:

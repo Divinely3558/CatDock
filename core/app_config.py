@@ -151,6 +151,7 @@ _BLOCKED_NETWORKS = [
     ipaddress.ip_network('203.0.113.0/24'),
     ipaddress.ip_network('224.0.0.0/4'),
     ipaddress.ip_network('240.0.0.0/4'),
+    ipaddress.ip_network('::/128'),  # IPv6 未指定地址（http://[::]/ 等价 0.0.0.0）
     ipaddress.ip_network('::1/128'),
     ipaddress.ip_network('fc00::/7'),
     ipaddress.ip_network('fe80::/10'),

@@ -388,7 +388,9 @@
         if (resp.status === 403) {
           // 凭证失效：调用页面注册的回调（如清理凭证并跳转登录页）
           if (typeof CD.onUnauthorized === "function") CD.onUnauthorized();
-          throw new Error(data.message || "认证失败");
+          var err = new Error(data.message || "认证失败");
+          err.status = 403;
+          throw err;
         }
         if (!resp.ok || data.success === false) {
           throw new Error(

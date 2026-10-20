@@ -160,13 +160,15 @@ def _trim_to_limit():
     for path in files[:-1]:
         if total <= MAX_MESSAGES // 2:
             break
-        total -= counts[path]
-        removed += counts[path]
         try:
             os.unlink(path)
         except OSError as e:
             log_error(f"[聊天] 删除旧存档失败 {path}: {e}")
             return removed
+        # 删除成功后才计入 removed：虚增会抬高 _id_base，导致前端轮询
+        # 重复收已读消息、各用户清理水位失准
+        total -= counts[path]
+        removed += counts[path]
     if total > MAX_MESSAGES:
         newest = files[-1]
         cut = counts[newest] - MAX_MESSAGES // 2

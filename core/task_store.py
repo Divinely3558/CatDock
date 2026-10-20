@@ -14,13 +14,18 @@ import dedup
 
 
 def save_tasks(force=False):
-    """把内存任务按 user 分组，原子写回各用户的 tasks.json（2 秒节流）。"""
-    current_time = time.time()
-    if not force and current_time - cfg.last_save_time < 2:
-        return
+    """把内存任务按 user 分组，原子写回各用户的 tasks.json（2 秒节流）。
 
+    全程持有 tasks_lock（RLock，允许在已持锁的线程内调用）：写盘段在锁外时，
+    两个并发 save_tasks 会同时写同一固定名 .tmp 导致内容撕裂，或一方
+    os.replace 后另一方 FileNotFoundError 丢持久化；节流时间戳亦需锁保护。
+    """
     try:
         with cfg.tasks_lock:
+            current_time = time.time()
+            if not force and current_time - cfg.last_save_time < 2:
+                return
+
             # user -> [task_data, ...]（无 user 的任务归入 default）
             grouped = {}
             for task in cfg.tasks.values():
@@ -36,6 +41,8 @@ def save_tasks(force=False):
                     'qseq': task.get('_qseq', 0),
                     # retry_count：已重试次数，重启后继续从当前计数重试
                     'retry_count': task.get('_retry_count', 0),
+                    # preview_resume_time：预览播放位置（秒），刷新/重登录后续播
+                    'preview_resume_time': task.get('preview_resume_time', 0),
                 }
                 grouped.setdefault(user, []).append(task_data)
 
@@ -49,16 +56,16 @@ def save_tasks(force=False):
                     if os.path.isfile(cfg.user_tasks_file(username)):
                         users_to_write.add(username)
 
-        for user in users_to_write:
-            tasks_data = grouped.get(user, [])
-            tasks_file = cfg.user_tasks_file(user)
-            os.makedirs(os.path.dirname(tasks_file), exist_ok=True)
-            temp_file = tasks_file + '.tmp'
-            with open(temp_file, 'w', encoding='utf-8') as f:
-                json.dump(tasks_data, f, ensure_ascii=False, indent=2)
-            os.replace(temp_file, tasks_file)
+            for user in users_to_write:
+                tasks_data = grouped.get(user, [])
+                tasks_file = cfg.user_tasks_file(user)
+                os.makedirs(os.path.dirname(tasks_file), exist_ok=True)
+                temp_file = tasks_file + '.tmp'
+                with open(temp_file, 'w', encoding='utf-8') as f:
+                    json.dump(tasks_data, f, ensure_ascii=False, indent=2)
+                os.replace(temp_file, tasks_file)
 
-        cfg.last_save_time = current_time
+            cfg.last_save_time = current_time
     except Exception as e:
         log_error(f"保存任务失败: {e}")
 
@@ -99,7 +106,8 @@ def load_tasks():
                             '_cookie': '',
                             '_user_agent': '',
                             '_retry_count': task.get('retry_count', 0),
-                            '_qseq': task.get('qseq', 0)
+                            '_qseq': task.get('qseq', 0),
+                            'preview_resume_time': task.get('preview_resume_time', 0)
                         }
                         loaded_count += 1
                     except Exception as e:

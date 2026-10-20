@@ -146,7 +146,9 @@ def get_token_claims(token):
 def verify_auth_token_full(token):
     """完整校验令牌（签名/有效期/未吊销/用户存在且未禁用）。
 
-    返回 (username, claims)；无效返回 (None, None)。
+    返回 (username, claims)；签名/吊销等硬性无效返回 (None, None)；
+    签名有效但账号已被禁用时返回 (None, claims)，便于调用方区分
+    「禁用」（明确提示、不计入 IP 封禁）与「无效」（计入 IP 封禁）。
     相比先 verify_token_claims 再 verify_auth_token 的两次验签，
     本函数只验一次签名。
     """
@@ -158,9 +160,10 @@ def verify_auth_token_full(token):
     # 吊销校验：jti 必须登记在册且未被吊销（改密码/注销/删用户/禁用/换 KEY 后失效）
     if not jti or not data_db.is_token_valid(jti):
         return None, None
-    # 用户在有效期内被删除或禁用后，令牌立即失效
+    # 用户在有效期内被删除或禁用后，令牌立即失效；
+    # 保留 claims 返回，让 _check_auth 能对「禁用」单独提示且不计 IP 封禁
     if not username or not data_db.is_user_active(username):
-        return None, None
+        return None, data
     return username, data
 
 
@@ -422,6 +425,10 @@ class DownloadHandler(http.server.BaseHTTPRequestHandler):
     def _read_json_body(self):
         try:
             content_length = int(self.headers.get('Content-Length', 0))
+        except ValueError:
+            self.send_json({'success': False, 'message': 'Content-Length 不合法'}, 400)
+            return None
+        try:
             if content_length < 0:
                 self.send_json({'success': False, 'message': 'Content-Length 不合法'}, 400)
                 return None
@@ -429,7 +436,13 @@ class DownloadHandler(http.server.BaseHTTPRequestHandler):
                 self.send_json({'success': False, 'message': '请求体过大'}, 413)
                 return None
             body = self.rfile.read(content_length).decode('utf-8')
-            return json.loads(body) if content_length > 0 else {}
+            data = json.loads(body) if content_length > 0 else {}
+            # 仅接受 JSON 对象：字符串/数组/数字等会让后续 data.get 抛
+            # AttributeError，连接被直接丢弃而无响应
+            if not isinstance(data, dict):
+                self.send_json({'success': False, 'message': '请求体必须是 JSON 对象'}, 400)
+                return None
+            return data
         except UnicodeDecodeError:
             self.send_json({'success': False, 'message': '请求体必须是 UTF-8 编码'}, 400)
             return None
@@ -513,8 +526,10 @@ class DownloadHandler(http.server.BaseHTTPRequestHandler):
 
         # 第一层：AUTH_KEY（admin_config.json，管理网页可热更新），通过 key/auth_key/token 字段传入
         # 第一层失败计入 IP 封禁计数（IP 级拦截）
+        # 非字符串值（如 {"key": 123}）按校验失败处理，避免 compare_digest 抛 TypeError
         request_key = _get_field('key', 'auth_key', 'token')
-        if request_key is None or not hmac.compare_digest(request_key, cfg.auth_key):
+        if not isinstance(request_key, str) \
+                or not hmac.compare_digest(request_key, cfg.auth_key):
             log_error("认证失败：第一层 AUTH_KEY 校验未通过")
             # AUTH_KEY 错误，计入认证失败次数（阶梯封禁：首次临时、再次永久）
             _record_failure_and_log(self._client_ip)
@@ -538,6 +553,12 @@ class DownloadHandler(http.server.BaseHTTPRequestHandler):
         #   - 账号已被管理员手动禁用 → 提示警告后封 IP
         request_user = _get_field('user', 'usr')
         request_password = _get_field('password')
+
+        # 非字符串凭证按校验失败处理（避免 DB 绑定/密码哈希抛 TypeError）
+        if not isinstance(request_user, str):
+            request_user = None
+        if not isinstance(request_password, str):
+            request_password = None
 
         # 用户不存在 → IP 级封禁
         if not request_user or not data_db.user_exists(request_user):
@@ -1525,6 +1546,48 @@ class DownloadHandler(http.server.BaseHTTPRequestHandler):
                 self.send_json({'success': ok, 'message': message}, 200 if ok else 400)
             except Exception as e:
                 self._server_error(e)
+
+        elif path == '/task/resume_time':
+            try:
+                data = self._read_json_body()
+                if data is None:
+                    return
+
+                if not self._check_auth(data):
+                    return
+
+                if not self._check_rate_limit():
+                    return
+
+                task_id = self._get_param(data, 'taskId', 'task_id', 'id')
+                if not task_id:
+                    self.send_json({'success': False, 'message': 'taskId不能为空'}, 400)
+                    return
+
+                resume_time = self._get_param(data, 'resumeTime', 'resume_time')
+                if resume_time is None:
+                    self.send_json({'success': False, 'message': 'resumeTime不能为空'}, 400)
+                    return
+
+                try:
+                    resume_time = float(resume_time)
+                    if resume_time < 0:
+                        raise ValueError()
+                except (TypeError, ValueError):
+                    self.send_json({'success': False, 'message': 'resumeTime必须为非负数'}, 400)
+                    return
+
+                with cfg.tasks_lock:
+                    task = cfg.tasks.get(task_id)
+                    if not task or task.get('user') != self.authenticated_user:
+                        self.send_json({'success': False, 'message': '任务不存在'}, 404)
+                        return
+                    task['preview_resume_time'] = resume_time
+
+                self.send_json({'success': True}, 200)
+            except Exception as e:
+                self._server_error(e)
+
         else:
             self.send_json({'success': False, 'message': '路径不存在'}, 404)
 

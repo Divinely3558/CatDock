@@ -57,8 +57,9 @@ BAN_DURATION_MINUTES = 30
 # 服务端会通过 set_db_path() 覆盖为 CONFIG_DIR 下路径，CLI 直接使用此默认路径
 DB_PATH = '/home/downloader/config/data.db'
 
-# 用户名规则：仅字母+数字、不能全数字、字母字符数不少于 4
+# 用户名规则：仅字母+数字、不能全数字、字母字符数不少于 4、长度 ≤32
 _USERNAME_RE = re.compile(r'^[A-Za-z0-9]+$')
+_USERNAME_MAX_LEN = 32
 
 # pbkdf2 迭代次数
 _PBKDF2_ITERATIONS = 100000
@@ -680,14 +681,17 @@ def get_failure_count(ip):
 # ============ 用户管理 ============
 
 def validate_username(username):
-    """校验用户名：仅字母+数字、不能全数字、字母字符数不少于 4。
+    """校验用户名：仅字母+数字、不能全数字、字母字符数不少于 4、长度 ≤32。
 
     返回 (ok, reason)；ok=True 时 reason 为空。
     """
     if not username or not isinstance(username, str):
         return False, "用户名不能为空"
-    if not _USERNAME_RE.match(username):
+    # fullmatch：re.match + $ 会接受尾随换行（"abcd\n"），写入 DB 后用于目录名
+    if not _USERNAME_RE.fullmatch(username):
         return False, "用户名只允许字母和数字"
+    if len(username) > _USERNAME_MAX_LEN:
+        return False, f"用户名长度不能超过 {_USERNAME_MAX_LEN} 个字符"
     if username.isdigit():
         return False, "用户名不能为纯数字"
     letter_count = sum(1 for c in username if c.isalpha())

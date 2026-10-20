@@ -1784,14 +1784,19 @@
         function tryLogin() {
           return CD.apiGet("tasks")
             .then(enterApp)
-            .catch(function () {
-              backToLogin();
+            .catch(function (e) {
+              // 仅 403（凭证失效）回登录页，且 403 已由 CD.onUnauthorized
+              // 处理；网络抖动/连接拒绝/5xx 等临时故障保留令牌，
+              // 提示重试而非直接登出（避免一次瞬断就要求重新登录）
+              if (e && e.status === 403) return;
+              CD.toast((e && e.message) || "网络错误，请刷新重试", true);
             });
         }
 
         function backToLogin() {
           stopPolling();
           localStorage.removeItem(LS.token);
+          localStorage.removeItem(LS.user);
           localStorage.removeItem(LS.role);
           location.href = BASE + "login.html";
         }
@@ -2131,6 +2136,7 @@
           return CD.apiGet("tasks")
             .then(function (data) {
               var tasks = data.data || [];
+              cachedTasks = tasks; // 缓存任务列表
               $("taskCount").textContent = tasks.length;
               $("emptyState").style.display = tasks.length ? "none" : "";
               $("taskList").style.display = tasks.length ? "" : "none";
@@ -2350,20 +2356,50 @@
         // 所有请求经 xhrSetup 携带 Bearer 令牌
         var previewTaskId = null,
           previewHls = null,
-          previewManifestReady = false;
+          previewManifestReady = false,
+          previewResumeTimes = {}; // 按任务 ID 存储播放位置
+
+        // 保存播放位置到服务器（持久化）
+        function saveResumeTime(taskId, time) {
+          if (!taskId || !creds.token) return;
+          fetch(BASE + "task/resume_time", {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+              Authorization: "Bearer " + creds.token,
+            },
+            body: JSON.stringify({ taskId: taskId, resumeTime: time }),
+          }).catch(function () {}); // 静默失败，不影响播放
+        }
+
+        var cachedTasks = []; // 缓存任务列表，供预览断点恢复使用
 
         function openPreview(taskId, name) {
           if (typeof Hls === "undefined" || !Hls.isSupported()) {
             CD.toast("当前浏览器不支持预览播放", true);
             return;
           }
-          closePreview(); // 清理上一次预览（若仍在播放），防止 Hls 实例泄漏
+          // 如果有正在播放的预览，保存当前播放位置
+          if (previewTaskId && previewHls) {
+            var video = $("previewVideo");
+            var currentTime = video.currentTime || 0;
+            previewResumeTimes[previewTaskId] = currentTime;
+            saveResumeTime(previewTaskId, currentTime);
+          }
+          closePreview(true); // 清理上一次预览，不重复保存播放位置
           previewTaskId = taskId;
           $("playerTitle").textContent = name || taskId;
           $("playerMask").classList.add("show");
           var video = $("previewVideo");
+          // 优先从本地缓存读取，否则从任务列表读取服务器数据
+          var resumeTime = previewResumeTimes[taskId];
+          if (resumeTime === undefined) {
+            var task = cachedTasks.find(function (t) { return t.id === taskId; });
+            resumeTime = (task && task.preview_resume_time) || 0;
+            previewResumeTimes[taskId] = resumeTime;
+          }
           previewHls = new Hls({
-            startPosition: 0, // 强制从头播放，不追下载边缘
+            startPosition: resumeTime,
             backBufferLength: 3600, // 保留 1 小时历史分片，seek 已下载范围不跳
             xhrSetup: function (xhr) {
               xhr.setRequestHeader(
@@ -2379,6 +2415,9 @@
           previewManifestReady = false;
           previewHls.on(Hls.Events.MANIFEST_PARSED, function () {
             previewManifestReady = true;
+            if (resumeTime > 0) {
+              video.currentTime = resumeTime; // 手动 seek 到断点位置
+            }
             video.play().catch(function () {});
           });
           previewHls.on(Hls.Events.ERROR, function (event, data) {
@@ -2386,10 +2425,10 @@
             if (data.type === Hls.ErrorTypes.NETWORK_ERROR) {
               var code = data.response && data.response.code;
               if (code === 415) {
-                closePreview();
+                closePreview(true);
                 CD.toast("fMP4 格式暂不支持预览", true);
               } else if (code === 404 && !previewManifestReady) {
-                closePreview();
+                closePreview(true);
                 CD.toast("任务当前不可预览", true);
               } else {
                 previewHls.startLoad(); // 网络错误（含分片 transient 404）由 hls.js 自愈重试
@@ -2397,13 +2436,19 @@
             } else if (data.type === Hls.ErrorTypes.MEDIA_ERROR) {
               previewHls.recoverMediaError();
             } else {
-              closePreview();
+              closePreview(true);
               CD.toast("预览播放出错", true);
             }
           });
         }
 
-        function closePreview() {
+        function closePreview(skipSaveResume) {
+          if (!skipSaveResume && previewTaskId) {
+            var video = $("previewVideo");
+            var currentTime = video.currentTime || 0;
+            previewResumeTimes[previewTaskId] = currentTime;
+            saveResumeTime(previewTaskId, currentTime);
+          }
           previewTaskId = null;
           previewManifestReady = false;
           if (previewHls) {
@@ -2416,9 +2461,8 @@
           $("playerMask").classList.remove("show");
         }
 
-        $("playerClose").addEventListener("click", closePreview);
-        $("playerMask").addEventListener("click", function (e) {
-          if (e.target === $("playerMask")) closePreview();
+        $("playerClose").addEventListener("click", function () {
+          closePreview();
         });
 
         // 任务结束（完成/失败/删除）时停止播放；暂停中保持播放（已缓存分片仍可观看）
@@ -2426,7 +2470,9 @@
           if (!previewTaskId) return;
           var cur = tasks.find(function (t) { return t.id === previewTaskId; });
           if (!cur || cur.status === "done" || cur.status === "failed") {
-            closePreview();
+            delete previewResumeTimes[previewTaskId]; // 任务终结，清除本地断点
+            saveResumeTime(previewTaskId, 0); // 清除服务器断点
+            closePreview(true); // 不保存播放位置
             CD.toast(
               !cur
                 ? "任务已删除，预览结束"
@@ -2460,9 +2506,13 @@
         var chatLastId = 0; // 服务端最新消息 id
         // 已读消息 id（红点判断：chatLastId > chatSeenId 即有新消息）。
         // 持久化到 localStorage：刷新/重开浏览器后，未读消息的红点仍然保留。
-        // 只有点开弹窗或自己发消息才算已读；换浏览器/清缓存后历史消息按未读处理
+        // 只有点开弹窗或自己发消息才算已读；换浏览器/清缓存后历史消息按未读处理。
+        // 键按账号隔离（同浏览器换账号登录后，各自的水位互不影响）
+        function chatSeenKey() {
+          return LS.chatSeen + "_" + (localStorage.getItem(LS.user) || "");
+        }
         var chatSeenId =
-          parseInt(localStorage.getItem(LS.chatSeen) || "", 10) || 0;
+          parseInt(localStorage.getItem(chatSeenKey()) || "", 10) || 0;
         var chatLastDay = ""; // 已渲染的最后日期（YYYY-MM-DD），用于日期分隔线
         var chatRenderedId = 0; // 已渲染的最大消息 id（发送与轮询竞态时按 id 去重）
         var chatOpened = false; // 聊天弹窗是否打开
@@ -2472,7 +2522,7 @@
           if (id <= chatSeenId) return;
           chatSeenId = id;
           try {
-            localStorage.setItem(LS.chatSeen, String(chatSeenId));
+            localStorage.setItem(chatSeenKey(), String(chatSeenId));
           } catch (e) {}
         }
 

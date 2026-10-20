@@ -34,6 +34,8 @@ def _get_log_fp():
     """获取当前日期的日志文件句柄，日期变更时自动切换到新文件。
 
     返回 None 表示无法写入文件（目录创建失败等），调用方应仅输出到控制台。
+    句柄轮转（close 旧/open 新）必须全程在 _file_lock 内进行，否则并发线程
+    会重复 open 导致 fd 泄漏，或写到已被他人 close 的句柄而丢日志行。
     """
     global _log_fp, _log_date
     today = time.strftime('%Y-%m-%d')
@@ -64,15 +66,15 @@ def _write_to_file(level, *args, **kwargs):
     与控制台输出格式保持一致：[YYMMDD HH:MM:SS] LEVEL: message
     文件写入失败不影响控制台输出，仅在调试模式下打印失败原因。
     """
-    fp = _get_log_fp()
-    if fp is None:
-        return
     timestamp = time.strftime('%y%m%d %H:%M:%S')
     parts = [str(a) for a in args]
     message = ' '.join(parts)
     line = f"[{timestamp}] {level}: {message}\n"
     try:
         with _file_lock:
+            fp = _get_log_fp()
+            if fp is None:
+                return
             fp.write(line)
             fp.flush()
     except Exception:

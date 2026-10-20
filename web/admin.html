@@ -2177,9 +2177,13 @@
       var chatLastId = 0; // 服务端最新消息 id
       // 已读消息 id（红点判断：chatLastId > chatSeenId 即有新消息）。
       // 持久化到 localStorage：刷新/重开浏览器后，未读消息的红点仍然保留。
-      // 只有点开弹窗或自己发消息才算已读；换浏览器/清缓存后历史消息按未读处理
+      // 只有点开弹窗或自己发消息才算已读；换浏览器/清缓存后历史消息按未读处理。
+      // 键按账号隔离（同浏览器换账号登录后，各自的水位互不影响）
+      function chatSeenKey() {
+        return LS.chatSeen + "_" + (localStorage.getItem(LS.user) || "");
+      }
       var chatSeenId =
-        parseInt(localStorage.getItem(LS.chatSeen) || "", 10) || 0;
+        parseInt(localStorage.getItem(chatSeenKey()) || "", 10) || 0;
       var chatLastDay = ""; // 已渲染的最后日期（YYYY-MM-DD），用于日期分隔线
       var chatRenderedId = 0; // 已渲染的最大消息 id（发送与轮询竞态时按 id 去重）
       var chatOpened = false; // 聊天弹窗是否打开
@@ -2189,7 +2193,7 @@
         if (id <= chatSeenId) return;
         chatSeenId = id;
         try {
-          localStorage.setItem(LS.chatSeen, String(chatSeenId));
+          localStorage.setItem(chatSeenKey(), String(chatSeenId));
         } catch (e) {}
       }
       var chatTimer = null;

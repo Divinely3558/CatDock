@@ -200,13 +200,18 @@ def _build_plan_from_task(task):
     user = task.get('user') or 'default'
     url = task.get('url') or (task.get('urls') or [''])[0]
     base_name = task.get('save_name') or f"download_{task['id']}"
+    # 输出路径按任务自带用户目录计算：本函数在队列泵线程上运行，
+    # 线程上下文属于别的用户，不能依赖 thread-local 的 get_download_dir()。
+    task_download_dir = task.get('_download_dir') \
+        or os.path.join(cfg.DOWNLOAD_DIR, user)
     is_direct_video, video_ext = classify_video_url(
         url, task.get('_referer'), task.get('_cookie'), task.get('_user_agent'))
     if is_direct_video:
-        curl_target, output_file, _ = plan_direct_output(base_name, video_ext)
+        curl_target, output_file, _ = plan_direct_output(
+            base_name, video_ext, download_dir=task_download_dir)
     else:
         curl_target, output_file = None, \
-            os.path.join(cfg.DOWNLOAD_DIR, user, f"{base_name}.{cfg.output_format}")
+            os.path.join(task_download_dir, f"{base_name}.{cfg.output_format}")
     return {
         'kind': 'direct' if is_direct_video else 'm3u8',
         'url': url,
@@ -256,7 +261,14 @@ def _launch_task(task_id):
                 daemon=True
             ).start()
         else:
-            cmd = _build_m3u8_cmd(plan['url'], plan['base_name'], referer, cookie, user_agent)
+            # 按任务自带用户显式构建命令：本函数由队列泵在锁外以「启动线程」
+            # 身份调用，线程上下文属于别的用户，不能依赖 thread-local。
+            task_download_dir = task.get('_download_dir') \
+                or os.path.join(cfg.DOWNLOAD_DIR, user)
+            cmd = _build_m3u8_cmd(plan['url'], plan['base_name'], referer, cookie,
+                                  user_agent, user=user,
+                                  download_dir=task_download_dir,
+                                  temp_dir=cfg.user_temp_dir(user))
             threading.Thread(
                 target=_run_worker,
                 args=(task_id, cmd, plan['base_name'], plan['output_file'],
@@ -497,15 +509,17 @@ def is_video_file(file_name):
     return os.path.splitext(file_name)[1].lower() in VIDEO_EXTS
 
 
-def plan_direct_output(base_name, video_ext):
+def plan_direct_output(base_name, video_ext, download_dir=None):
     """规划直链视频的 curl 下载目标与最终成品路径。
 
     .f4v：curl 先下载为 <base_name>.f4v 源文件（可断点续传），完成后统一产出
     <base_name>.mp4（标准 f4v/碎片化 MP4 内容直接改名即可，FLV 内容无损 remux）；
     其余直链格式源文件即成品。
+    download_dir 缺省时取当前线程 per-user 上下文；队列泵等跨用户场景须显式传入。
     返回 (curl_target, final_output, needs_convert)
     """
-    download_dir = get_download_dir()
+    if download_dir is None:
+        download_dir = get_download_dir()
     if video_ext in DIRECT_CONVERT_EXTS:
         source = os.path.join(download_dir, f"{base_name}{video_ext}")
         final = os.path.join(download_dir, f"{base_name}.mp4")
@@ -582,6 +596,14 @@ def _post_process_direct_download(source_file, final_file, target_format, base_n
 
     # 兜底：转封装失败（编码不被目标容器支持等），源内容通常为 FLV，改名 .flv 保留
     log_warning(f"转封装为 mp4 失败，保留原始下载文件: {source_file}")
+    # 删除转封装中途残留的半成品 .mp4：体积可能达标而被后续判为成品，
+    # 用户会拿到损坏文件
+    try:
+        if os.path.abspath(final_file) != os.path.abspath(source_file) \
+                and os.path.exists(final_file):
+            os.remove(final_file)
+    except Exception as e:
+        debug_print(f"[后处理] 清理半成品失败: {e}")
     fallback_file = os.path.splitext(source_file)[0] + '.flv'
     try:
         if os.path.abspath(source_file) != os.path.abspath(fallback_file):
@@ -635,14 +657,16 @@ def match_base_name(name, base):
     return False
 
 
-def sanitize_base_name(name):
+def sanitize_base_name(name, fallback=''):
     """任务名兜底净化：去首尾空白与半角点。
 
     站点标题自带全角句号'。'且插件追加的扩展名被用户过滤词删除后，
     任务名会残留尾点（如 'X。.'）；N_m3u8DL-RE 保存时会剥掉尾点，
     产物与任务名错位导致误判失败。提交入口统一剥点，保证命名一致。
+    净化后为空（仅由点/空白组成或被过滤词删空）时回退到 fallback，
+    避免产出 '<dir>/.mp4' 隐藏路径及 match_base_name 空前缀误匹配。
     """
-    return (name or '').strip().strip('.')
+    return (name or '').strip().strip('.') or fallback
 
 
 def find_existing_output_file(base_name):
@@ -857,15 +881,23 @@ def _resolve_m3u8_media_url(url, referer=None, cookie=None, user_agent=None):
     return variant_url
 
 
-def _build_m3u8_cmd(url, base_name, referer=None, cookie=None, user_agent=None):
+def _build_m3u8_cmd(url, base_name, referer=None, cookie=None, user_agent=None,
+                    user=None, download_dir=None, temp_dir=None):
     """构建 N_m3u8DL-RE 下载命令（resume_tasks 和 run_download 共用）。
 
-    缓存目录与广告关键字取当前线程 per-user 上下文（缓存按用户隔离、
-    广告关键字按用户各自的 filter_rules.json）。
+    缓存目录与广告关键字必须按任务所属用户显式传入（user/download_dir/
+    temp_dir）：队列泵在锁外以「启动线程」的身份调用本函数，若缺省回退到
+    当前线程 per-user 上下文，会把用户 B 的排队任务写进用户 A 的目录。
     """
+    if download_dir is None:
+        download_dir = get_download_dir()
+    if temp_dir is None:
+        temp_dir = get_temp_dir()
+    if user is None:
+        user = get_current_user()
     cmd = [cfg.N_M3U8DL, _resolve_m3u8_media_url(url, referer, cookie, user_agent),
-           '--tmp-dir', get_temp_dir(),
-           '--save-dir', get_download_dir(),
+           '--tmp-dir', temp_dir,
+           '--save-dir', download_dir,
            '--ffmpeg-binary-path', cfg.FFMPEG_PATH,
            '--save-name', base_name,
            '--auto-select']
@@ -875,7 +907,7 @@ def _build_m3u8_cmd(url, base_name, referer=None, cookie=None, user_agent=None):
         cmd.extend(['--cookie', cookie])
     if user_agent:
         cmd.extend(['--user-agent', user_agent])
-    ad_keywords = get_ad_keywords(get_current_user())
+    ad_keywords = get_ad_keywords(user)
     if ad_keywords:
         for keyword in ad_keywords:
             cmd.extend(['--ad-keyword', keyword])
@@ -1312,7 +1344,14 @@ def _finalize_download_outputs(base_name, output_file, target_format):
     返回: (success: bool, actual_output_file_or_none: str|None)
     """
     download_dir = get_download_dir()
-    all_files = [f for f in os.listdir(download_dir) if match_base_name(f, base_name)]
+    try:
+        all_files = [f for f in os.listdir(download_dir) if match_base_name(f, base_name)]
+    except OSError as e:
+        # 目录被删/卷异常时按失败返回而非抛异常：调用方（含 _run_worker 的
+        # except 分支）若在此时二次异常逃出线程，_finish_task 不会执行，
+        # 任务将永久停在 running 占住并发名额
+        debug_print(f"[后处理] 列出下载目录失败: {download_dir} - {e}")
+        return False, None
     ts_files = [f for f in all_files if f.lower().endswith('.ts')]
     mux_files = [f for f in all_files if f.lower().endswith('.mux.mp4')]
     video_files = [f for f in all_files if is_video_file(f) and '.mux.' not in f.lower()]
@@ -1595,9 +1634,10 @@ def _finish_task(task_id, success, write_log=True):
             try:
                 append_log(log_file, task_data, 'success' if success else 'failure')
             except Exception as e:
-                log_error(f"写入日志失败，任务保留在列表中: {task_id} - {e}")
-                # 日志写入失败，保留任务以便重启后恢复
-                return
+                # 日志写不进去已无法补写；若保留任务，下载线程已退出而任务
+                # 停在 running 永久占住并发名额（僵尸任务直到重启）。
+                # 继续删除任务并泵队列，代价仅是该 URL 未来不参与去重。
+                log_error(f"写入日志失败（任务仍按完成清理）: {task_id} - {e}")
         del cfg.tasks[task_id]
         save_tasks(force=True)
 
@@ -1999,7 +2039,12 @@ def resume_tasks():
     _resume_guard = True
     try:
         for task in interrupted_tasks:
-            _resume_single_task(task)
+            try:
+                _resume_single_task(task)
+            except Exception as e:
+                # 逐任务隔离：单个任务恢复异常（目录被删/数据损坏等）不应
+                # 中断其余任务的恢复流程
+                log_error(f"[恢复] 恢复任务失败 {task.get('id')}: {e}")
     finally:
         _resume_guard = False
     _pump_queue()
@@ -2045,7 +2090,7 @@ def _resume_single_task(task):
     # 应用文件名过滤（按用户规则）
     original_name = base_name
     base_name, _ = filter_filename(base_name, user=user)
-    base_name = sanitize_base_name(base_name)
+    base_name = sanitize_base_name(base_name, fallback=f"download_{task_id}")
     if base_name != original_name:
         # 更新任务中的 save_name 为过滤后的名称
         with cfg.tasks_lock:
@@ -2306,7 +2351,7 @@ def run_download(url, save_name=None, referer=None, cookie=None, user_agent=None
         task_id_tmp = str(uuid.uuid4())[:8]
         base_name_raw = save_name or f"download_{task_id_tmp}"
         base_name, ad_count = filter_filename(base_name_raw, user=user)
-        base_name = sanitize_base_name(base_name)
+        base_name = sanitize_base_name(base_name, fallback=f"download_{task_id_tmp}")
 
         # 1) 检查日志：文件名是否已成功/失败记录过（按用户隔离）
         name_hit, name_status = is_filename_downloaded(base_name, user=user)
@@ -2422,6 +2467,10 @@ def run_download(url, save_name=None, referer=None, cookie=None, user_agent=None
 
     with cfg.tasks_lock:
         for task_id, task in cfg.tasks.items():
+            # 仅在同用户内查重：跨用户复用会让提交者拿到他人的 task_id，
+            # 而 /tasks 列表与暂停/删除均有 owner 校验，该次下载对其「消失」。
+            if task.get('user') != user:
+                continue
             task_url = task['url'].strip().rstrip('/')
             if task_url == normalized_url:
                 dup_name = task.get('save_name') or task_id
@@ -2441,7 +2490,7 @@ def run_download(url, save_name=None, referer=None, cookie=None, user_agent=None
 
     # 应用文件名过滤（按用户规则）
     base_name, ad_count = filter_filename(base_name, user=user)
-    base_name = sanitize_base_name(base_name)
+    base_name = sanitize_base_name(base_name, fallback=f"download_{task_id}")
 
     skip, hit_path = _check_local_file_exists_skip(base_name)
     if skip:
