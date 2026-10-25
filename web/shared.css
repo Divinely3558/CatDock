@@ -379,12 +379,14 @@
   --shadow: 8px 8px 16px rgba(163,177,198,.45), -8px -8px 16px rgba(255,255,255,.85);
   --neo-inset: inset 4px 4px 8px rgba(163,177,198,.45), inset -4px -4px 8px rgba(255,255,255,.85);
   --neo-inset-sm: inset 3px 3px 6px rgba(163,177,198,.4), inset -3px -3px 6px rgba(255,255,255,.7);
+  /* 轨道必须透明：新拟态弹窗大圆角，带底色/描边的方形轨道会在圆角处
+     裁出生硬直角且与圆边留缝，只留半透明圆角滑块浮在卡面上 */
   --sb-size: 8px;
-  --sb-thumb: rgba(108,92,231,.2);
-  --sb-thumb-hover: rgba(108,92,231,.35);
+  --sb-thumb: rgba(108,92,231,.25);
+  --sb-thumb-hover: rgba(108,92,231,.4);
   --sb-radius: 4px;
-  --sb-track: #e0e5ec;
-  --sb-track-border: 1px solid rgba(163,177,198,.3);
+  --sb-track: transparent;
+  --sb-track-border: none;
   --sb-glow: none;
   --sb-fw: thin;
 }
@@ -407,9 +409,9 @@
   --shadow: 8px 8px 16px rgba(0,0,0,.35), -8px -8px 16px rgba(255,255,255,.04);
   --neo-inset: inset 4px 4px 8px rgba(0,0,0,.35), inset -4px -4px 8px rgba(255,255,255,.04);
   --neo-inset-sm: inset 3px 3px 6px rgba(0,0,0,.3), inset -3px -3px 6px rgba(255,255,255,.03);
-  --sb-thumb: rgba(162,155,254,.2);
-  --sb-thumb-hover: rgba(162,155,254,.35);
-  --sb-track-border: 1px solid rgba(0,0,0,.3);
+  --sb-thumb: rgba(162,155,254,.25);
+  --sb-thumb-hover: rgba(162,155,254,.4);
+  --sb-track-border: none;
 }
 :root[data-theme="neo"] body {
   font-family: "Inter", -apple-system, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;

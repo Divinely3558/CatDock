@@ -595,6 +595,21 @@
         #userTable td:nth-child(4) {
           display: none;
         }
+        /* 手机端弹窗：限高可滚（过滤模板编辑器内容高于矮屏视口），
+           内边距与下载控制台一致 */
+        .modal {
+          max-height: 88vh;
+          overflow-y: auto;
+          padding: 16px;
+        }
+        /* 过滤规则编辑器：输入框独占一行、按钮落到下一行，
+           避免窄屏下输入框过窄导致占位文案被裁切 */
+        .filter-editor .fe-add {
+          flex-wrap: wrap;
+        }
+        .filter-editor .fe-add input {
+          flex-basis: 100%;
+        }
       }
     </style>
     <script>

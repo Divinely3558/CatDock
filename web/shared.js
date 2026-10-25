@@ -462,10 +462,10 @@
       filename_dedup: { enabled: false, rules: [] },
     };
 
-    // 去重主视图固定只显示 2 条，其余进「更多」
-    var DD_VISIBLE = 2;
-    // 广告关键字 / 文件名过滤主视图最多占 3 行，超出部分收纳进「更多」弹窗
-    var CHIP_ROWS = { keywords: 3, filename_filter: 3 };
+    // 去重主视图固定只显示 1 条，其余进「更多」
+    var DD_VISIBLE = 1;
+    // 广告关键字主视图最多占 3 行；文件名过滤固定 1 行，超出的收纳进「更多」弹窗
+    var CHIP_ROWS = { keywords: 3, filename_filter: 1 };
     // 两个 chips 区主视图实测可容纳的芯片数，超出部分全部收纳进「更多」弹窗
     var visibleCount = { keywords: 0, filename_filter: 0 };
     var moreCtx = null; // 当前展开的「更多」区块：'keywords' | 'filename_filter' | 'filename_dedup'
@@ -508,14 +508,17 @@
 
     function fitChipsInRows(wrap, els, gap, key, maxRows) {
       if (!els.length) return 0;
-      // 所有芯片已加入 DOM，利用 offsetTop 判断行归属
-      var baseTop = els[0].offsetTop;
-      var chipH = els[0].offsetHeight;
+      // 必须用 getBoundingClientRect 的小数坐标：offsetTop/offsetHeight
+      // 会各自取整（如实际 25.5px 的高度报 26、行距 31.5px 报 31），
+      // 阈值按取整值放大后临界行的芯片恰好差 1px 逃过判定，
+      // 出现「铺了 4 行却被判 3 行内、不出现 +N」的失真
+      var baseTop = els[0].getBoundingClientRect().top;
+      var chipH = els[0].getBoundingClientRect().height;
       var threshold = baseTop + maxRows * (chipH + gap);
       // 找到第一个超出 maxRows 行的芯片
       var cutoff = els.length;
       for (var i = 0; i < els.length; i++) {
-        if (els[i].offsetTop >= threshold) {
+        if (els[i].getBoundingClientRect().top >= threshold) {
           cutoff = i;
           break;
         }
@@ -530,7 +533,7 @@
       probe.textContent = "+" + (els.length - cutoff);
       probe.style.visibility = "hidden";
       wrap.appendChild(probe);
-      if (probe.offsetTop >= threshold && cutoff > 0) {
+      if (probe.getBoundingClientRect().top >= threshold && cutoff > 0) {
         cutoff--;
         wrap.removeChild(els[cutoff]);
         probe.textContent = "+" + (els.length - cutoff);
@@ -804,6 +807,9 @@
       $("userMenu").classList.remove("show");
       $("filterMask").classList.add("show");
       loadFilters();
+      // 打开后补测一次：主题字体懒加载/滚动条占位等瞬时因素会让首次
+      // 实测的行容量失真（典型症状：芯片全量显示超出 3 行却没有「+N」）
+      setTimeout(refitChips, 250);
     });
     // 点击弹窗外部不再关闭，仅可通过「取消」按钮关闭
     $("filterCancel").addEventListener("click", function () {
@@ -905,6 +911,14 @@
     // webfont 加载完成后芯片宽度可能变化，弹窗开着时重算一次单行容量
     if (document.fonts && document.fonts.ready) {
       document.fonts.ready.then(function () {
+        clearTimeout(refitTimer);
+        refitTimer = setTimeout(refitChips, 60);
+      });
+    }
+    // fonts.ready 只兑现一次；字体是分批加载的（如先正文后主题字体、
+    // 切主题再载像素字体），每批完成都要重测，否则芯片行容量过期
+    if (document.fonts && document.fonts.addEventListener) {
+      document.fonts.addEventListener("loadingdone", function () {
         clearTimeout(refitTimer);
         refitTimer = setTimeout(refitChips, 60);
       });
