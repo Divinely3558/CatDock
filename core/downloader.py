@@ -207,8 +207,8 @@ def _build_plan_from_task(task):
     is_direct_video, video_ext = classify_video_url(
         url, task.get('_referer'), task.get('_cookie'), task.get('_user_agent'))
     if is_direct_video:
-        curl_target, output_file, _ = plan_direct_output(
-            base_name, video_ext, download_dir=task_download_dir)
+        curl_target = output_file = \
+            os.path.join(task_download_dir, f"{base_name}{video_ext}")
     else:
         curl_target, output_file = None, \
             os.path.join(task_download_dir, f"{base_name}.{cfg.output_format}")
@@ -256,8 +256,6 @@ def _launch_task(task_id):
                 target=_run_direct_download_worker,
                 args=(task_id, plan['url'], plan['curl_target'], referer, cookie,
                       user_agent, plan.get('retry_count', 0)),
-                kwargs={'final_file': plan['output_file'],
-                        'target_format': plan.get('target_format')},
                 daemon=True
             ).start()
         else:
@@ -319,10 +317,7 @@ def convert_to_format(input_file, output_file, target_format):
 
 
 VIDEO_EXTS = ('.mp4', '.mkv')
-DIRECT_VIDEO_EXTS = ('.mp4', '.mkv', '.ts', '.flv', '.avi', '.webm', '.mov', '.wmv', '.f4v')
-# 直链下载后需要 ffmpeg 无损转封装（-c copy）为目标格式的扩展名：
-# .f4v 实际内容多为 FLV / 碎片化 MP4（如爱奇艺 CDN），保留 .f4v 扩展名多数播放器无法识别
-DIRECT_CONVERT_EXTS = ('.f4v',)
+DIRECT_VIDEO_EXTS = ('.mp4', '.mkv', '.ts', '.flv', '.avi', '.webm', '.mov', '.wmv')
 
 
 def is_direct_video_url(url):
@@ -338,6 +333,27 @@ def is_playlist_url(url):
     import urllib.parse
     path = urllib.parse.urlsplit(url).path.lower()
     return os.path.splitext(path)[1] in ('.m3u8', '.mpd')
+
+
+# 已知视频扩展名中明确不支持下载的格式（支持列表见 DIRECT_VIDEO_EXTS，
+# m3u8/mpd 播放列表另行走 N_m3u8DL-RE）。这些格式的魔数探测同样无法识别
+# （MPEG-PS / RealMedia / ASF / Ogg / BDAV / MXF 均不在 _sniff_media_magic
+# 内），放行只会误入 m3u8 路径产生无效重试与模糊报错，故在任务创建入口拒绝。
+# 注意 3gp/m4v/f4v/divx 等魔数为 ftyp/RIFF 的格式可被探测救回（保存为
+# .mp4/.avi），不得加入本清单。
+UNSUPPORTED_VIDEO_EXTS = ('.rmvb', '.rm', '.mpg', '.mpeg', '.vob', '.asf',
+                          '.ogv', '.m2ts', '.mts', '.mxf')
+
+
+def unsupported_video_ext(url):
+    """URL 路径扩展名为明确不支持的视频格式时返回该扩展名，否则返回 None。
+
+    仅做零成本扩展名检查，不做探测：无扩展名 URL 交给 classify_video_url
+    的探测兜底判定，避免误伤探测超时但实际可下载的链接。
+    """
+    import urllib.parse
+    ext = os.path.splitext(urllib.parse.urlsplit(url).path.lower())[1]
+    return ext if ext in UNSUPPORTED_VIDEO_EXTS else None
 
 
 # 明确的流媒体播放列表 / 直链视频 Content-Type 映射
@@ -410,19 +426,21 @@ def _parse_last_response_headers(raw_headers):
 
 def _probe_media_url(url, referer=None, cookie=None, user_agent=None):
     """探测无扩展名 URL 的真实媒体类型（如下载页链接 ?dl_id=295 经
-    Content-Disposition 返回 f4v 文件）。
+    Content-Disposition 返回视频文件）。
 
     一次轻量 GET（Range 前 64KB，--max-time 20s）同时获取最终响应头与内容头，
     按 魔数 > Content-Disposition 文件名扩展名 > Content-Type 的优先级判定。
 
     返回:
-      ('direct', ext)  直链视频，ext 为推断扩展名（如 '.f4v'/'.flv'/'.mp4'）
+      ('direct', ext)  直链视频，ext 为推断扩展名（如 '.flv'/'.mp4'）
       ('m3u8', None)   m3u8/mpd 播放列表
       (None, None)     无法判定（调用方按原逻辑处理）
     """
     body_file = os.path.join(get_temp_dir(), f".probe_{uuid.uuid4().hex[:8]}.bin")
     try:
-        cmd = ['curl', '-s', '-L', '-k', '--max-time', '20',
+        # 探测请求不跳过 TLS 校验（-k），避免中间人攻击；
+        # 实际下载时保留 -k 以兼容自签名证书的源站
+        cmd = ['curl', '-s', '-L', '--max-time', '20',
                '-r', '0-65535', '-D', '-', '-o', body_file]
         if referer:
             cmd.extend(['-H', f'Referer: {referer}'])
@@ -449,9 +467,6 @@ def _probe_media_url(url, referer=None, cookie=None, user_agent=None):
         # 1) 魔数优先：内容是什么最可信
         if magic == 'm3u8':
             return 'm3u8', None
-        # 标称 .f4v 的链接统一走 f4v 后处理（ftyp 直接改名 mp4 / FLV remux mp4）
-        if cd_ext == '.f4v':
-            return 'direct', '.f4v'
         if magic == 'flv':
             return 'direct', '.flv'
         if magic == 'mp4':
@@ -507,113 +522,6 @@ def classify_video_url(url, referer=None, cookie=None, user_agent=None):
 
 def is_video_file(file_name):
     return os.path.splitext(file_name)[1].lower() in VIDEO_EXTS
-
-
-def plan_direct_output(base_name, video_ext, download_dir=None):
-    """规划直链视频的 curl 下载目标与最终成品路径。
-
-    .f4v：curl 先下载为 <base_name>.f4v 源文件（可断点续传），完成后统一产出
-    <base_name>.mp4（标准 f4v/碎片化 MP4 内容直接改名即可，FLV 内容无损 remux）；
-    其余直链格式源文件即成品。
-    download_dir 缺省时取当前线程 per-user 上下文；队列泵等跨用户场景须显式传入。
-    返回 (curl_target, final_output, needs_convert)
-    """
-    if download_dir is None:
-        download_dir = get_download_dir()
-    if video_ext in DIRECT_CONVERT_EXTS:
-        source = os.path.join(download_dir, f"{base_name}{video_ext}")
-        final = os.path.join(download_dir, f"{base_name}.mp4")
-        return source, final, True
-    final = os.path.join(download_dir, f"{base_name}{video_ext}")
-    return final, final, False
-
-
-def _remux_video(source_file, output_file, target_format, max_tries=3):
-    """ffmpeg 无损转封装（-c copy），最多 max_tries 次；产出合格成品返回 True"""
-    for i in range(max_tries):
-        if convert_to_format(source_file, output_file, target_format):
-            if os.path.exists(output_file) and os.path.getsize(output_file) >= cfg.MIN_FILE_SIZE:
-                return True
-        if i < max_tries - 1:
-            time.sleep(2)
-    return False
-
-
-def _post_process_direct_download(source_file, final_file, target_format, base_name):
-    """直链视频下载完成后的收尾（.f4v 等），统一产出 .mp4。
-
-    .f4v 有两种实际内容，按文件头魔数分流：
-      - 标准 f4v / 碎片化 MP4（文件头 ftyp）：本身就是 MP4 容器，直接改名为 .mp4
-        即可播放，无需 ffmpeg；
-      - FLV 内容（文件头 FLV，如爱奇艺 CDN）：ffmpeg -c copy 无损 remux 为 .mp4。
-    remux 失败时兜底改名为 .flv 保留，避免任务彻底失败丢失已下载数据。
-    返回 True 表示已有合格成品（或兜底成品）。
-    """
-    # 无需后处理：curl 目标即成品
-    if os.path.abspath(source_file) == os.path.abspath(final_file):
-        return True
-
-    # 成品已存在且完整（可能是上次运行已转好）
-    if os.path.exists(final_file) and os.path.getsize(final_file) >= cfg.MIN_FILE_SIZE:
-        try:
-            if os.path.exists(source_file):
-                os.remove(source_file)
-        except Exception as e:
-            debug_print(f"[后处理] 清理源文件失败: {e}")
-        return True
-
-    if not os.path.exists(source_file) or os.path.getsize(source_file) < cfg.MIN_FILE_SIZE:
-        debug_print(f"[后处理] 源文件不存在或过小: {source_file}")
-        return False
-
-    # 嗅探源文件内容魔数
-    magic = None
-    try:
-        with open(source_file, 'rb') as f:
-            magic = _sniff_media_magic(f.read(4096))
-    except Exception as e:
-        debug_print(f"[后处理] 读取文件头失败: {e}")
-
-    # 标准 f4v / 碎片化 MP4：直接改名为 .mp4 即可（容器本就兼容）
-    if magic == 'mp4':
-        try:
-            if os.path.exists(final_file):
-                os.remove(final_file)
-            os.rename(source_file, final_file)
-            debug_print(f"[后处理] f4v 为标准 MP4 容器，直接改名为 {os.path.basename(final_file)}")
-            return True
-        except Exception as e:
-            log_error(f"直接改名失败，转用 ffmpeg 转封装: {e}")
-
-    # FLV 内容或魔数未知：ffmpeg 无损转封装为 mp4
-    if _remux_video(source_file, final_file, 'mp4'):
-        debug_print(f"[后处理] 转封装成功: {source_file} -> {final_file}")
-        try:
-            os.remove(source_file)
-        except Exception as e:
-            debug_print(f"[后处理] 清理源文件失败: {e}")
-        return True
-
-    # 兜底：转封装失败（编码不被目标容器支持等），源内容通常为 FLV，改名 .flv 保留
-    log_warning(f"转封装为 mp4 失败，保留原始下载文件: {source_file}")
-    # 删除转封装中途残留的半成品 .mp4：体积可能达标而被后续判为成品，
-    # 用户会拿到损坏文件
-    try:
-        if os.path.abspath(final_file) != os.path.abspath(source_file) \
-                and os.path.exists(final_file):
-            os.remove(final_file)
-    except Exception as e:
-        debug_print(f"[后处理] 清理半成品失败: {e}")
-    fallback_file = os.path.splitext(source_file)[0] + '.flv'
-    try:
-        if os.path.abspath(source_file) != os.path.abspath(fallback_file):
-            if os.path.exists(fallback_file):
-                os.remove(fallback_file)
-            os.rename(source_file, fallback_file)
-            debug_print(f"[后处理] 转封装失败兜底: 源文件改名为 {os.path.basename(fallback_file)} 保留")
-    except Exception as e:
-        log_error(f"兜底改名失败: {e}")
-    return True
 
 
 def extract_percent(text):
@@ -994,13 +902,50 @@ def _find_preview_seg_dir(task):
     return best_dir, best_files
 
 
+def _load_preview_meta(seg_dir):
+    """从 N_m3u8DL-RE 写出的 meta_selected.json 读取分片时长与保留序号。
+
+    meta_selected.json 位于 seg_dir 的父目录（<save_name>/meta_selected.json），
+    包含 N_m3u8DL-RE 过滤广告后实际保留的 MediaSegments，字段 Index 与 Duration
+    直接对应磁盘上的 NN.ts 分片序号。读不到或解析失败时返回 (空字典, None)，
+    由调用方按时长 10 秒兜底；保留序号为 None 表示无法识别广告洞。
+    """
+    durations = {}
+    kept_indices = None
+    meta_path = os.path.join(os.path.dirname(seg_dir), 'meta_selected.json')
+    try:
+        with open(meta_path, 'r', encoding='utf-8-sig') as f:
+            data = json.load(f)
+        if isinstance(data, list) and data:
+            kept_indices = set()
+            for part in (data[0].get('Playlist') or {}).get('MediaParts', []):
+                for seg in (part.get('MediaSegments') or []):
+                    idx = seg.get('Index')
+                    if isinstance(idx, int) and idx >= 0:
+                        kept_indices.add(idx)
+                        dur = seg.get('Duration')
+                        if isinstance(dur, (int, float)) and dur > 0:
+                            durations[idx] = float(dur)
+            if not kept_indices:
+                kept_indices = None
+    except (OSError, ValueError, TypeError, KeyError):
+        pass
+    return durations, kept_indices
+
+
 def build_preview_playlist(task):
     """生成任务的 EVENT 型预览播放列表（边下边看）。
 
     只含已落盘完成（无 .tmp 后缀）的 .ts 分片，按数值排序；广告分片下载期
-    已被 --ad-keyword 剔除不落盘，天然缺席；序号空洞不插 DISCONTINUITY
-    （EVENT 前缀不可变，临时空洞补上后先前插入的标记会破坏语义），
-    PTS 跳跃交给 hls.js 内建 gap 自愈。不写 EXT-X-ENDLIST，hls.js 周期轮询增量。
+    已被 --ad-keyword 剔除不落盘，天然缺席。序号空洞若全部不在 meta 保留
+    列表中，即为永久广告洞：PTS 在此跳变，须插 DISCONTINUITY 令 hls.js
+    重对齐时间线，否则 seek 落入洞后区域会因播放头与时间线错位而卡死
+    （顺序播放可被 hls.js 逐片自愈，seek 不行）；含未下载分片的临时空洞
+    不插标记（分片补上后相邻关系会变，EVENT 前缀的标记不可增删）。
+    不写 EXT-X-ENDLIST，hls.js 周期轮询增量。
+
+    优先从 N_m3u8DL-RE 的 meta_selected.json 读取分片真实时长，确保预览进度
+    条与总时间显示正确；找不到时回退到 10 秒兜底。
 
     返回 (playlist_text, None)；不可预览时返回 (None, (http_status, message))。
     """
@@ -1021,17 +966,29 @@ def build_preview_playlist(task):
     if not segs:
         return None, (404, '暂无已完成分片，请稍后再试')
     segs.sort()
+
+    # 读取真实分片时长与保留序号，取不到用 10.0 兜底
+    durations, kept_indices = _load_preview_meta(seg_dir)
+    default_dur = 10.0
+    extinfs = [durations.get(idx, default_dur) for idx, _ in segs]
+    target_dur = int(max(extinfs)) + 1  # EXT-X-TARGETDURATION 须 ≥ 所有 EXTINF 上取整
+
     lines = [
         '#EXTM3U',
         '#EXT-X-VERSION:3',
         '#EXT-X-PLAYLIST-TYPE:EVENT',
-        '#EXT-X-TARGETDURATION:10',
+        f'#EXT-X-TARGETDURATION:{target_dur}',
         '#EXT-X-MEDIA-SEQUENCE:0',
     ]
-    # EXTINF 统一估算：TS 分片自带时间戳，hls.js 按流内 PTS 排播，时长不精确不影响播放
-    for _, fname in segs:
-        lines.append('#EXTINF:10.0,')
+    prev_idx = None
+    for dur, (idx, fname) in zip(extinfs, segs):
+        if prev_idx is not None and kept_indices is not None:
+            hole = range(prev_idx + 1, idx)
+            if hole and kept_indices.isdisjoint(hole):
+                lines.append('#EXT-X-DISCONTINUITY')
+        lines.append(f'#EXTINF:{dur:.3f},')
         lines.append(f'seg/{fname}')
+        prev_idx = idx
     return '\n'.join(lines) + '\n', None
 
 
@@ -1220,10 +1177,9 @@ def _do_single_download_attempt(base_name, url, referer, cookie, user_agent, tas
     is_direct_video, video_ext = classify_video_url(url, referer, cookie, user_agent)
 
     if is_direct_video:
-        # .f4v 等：curl_target 为源文件（.f4v），output_file 为转封装后的成品
-        curl_target, output_file, needs_convert = plan_direct_output(base_name, video_ext)
+        curl_target = output_file = os.path.join(get_download_dir(), f"{base_name}{video_ext}")
     else:
-        curl_target, output_file, needs_convert = None, os.path.join(get_download_dir(), f"{base_name}.{fmt}"), False
+        curl_target, output_file = None, os.path.join(get_download_dir(), f"{base_name}.{fmt}")
 
     # 尝试前先清理残留（避免上一次失败的残留影响，但是保留已存在的大文件 -> 直接成功）
     # .ts 源文件仍在（上次合成被打断）时优先直接重新合成，避免整段重新下载
@@ -1281,14 +1237,7 @@ def _do_single_download_attempt(base_name, url, referer, cookie, user_agent, tas
                             debug_print(f"[下载] curl 下载成功: {base_name}")
                         else:
                             debug_print(f"[下载] 返回非零码 {return_code} 但文件有效: {base_name}")
-                        if needs_convert:
-                            # .f4v 等：下载完成后转封装为用户指定格式
-                            if _post_process_direct_download(curl_target, output_file, fmt, base_name):
-                                success = True
-                            else:
-                                debug_print(f"[后处理] 转封装失败: {base_name}")
-                        else:
-                            success = True
+                        success = True
                         break
 
                     # 文件过小：可能是 CDN 调度 JSON（{"l": "真实地址"}）
@@ -1514,12 +1463,18 @@ def has_existing_video(base_name):
     return False, None
 
 
+# 缓存已编译的正则表达式，避免 has_any_existing_file 每次调用都重新编译
+_copy_pattern_cache = {}
+
 def has_any_existing_file(base_name):
     download_dir = get_download_dir()
     if not os.path.exists(download_dir):
         return False, None
 
-    copy_pattern = re.compile(rf'^{re.escape(base_name)}(?:\.copy)+(\.(?:mp4|mkv))?$', re.IGNORECASE)
+    if base_name not in _copy_pattern_cache:
+        _copy_pattern_cache[base_name] = re.compile(
+            rf'^{re.escape(base_name)}(?:\.copy)+(\.(?:mp4|mkv))?$', re.IGNORECASE)
+    copy_pattern = _copy_pattern_cache[base_name]
 
     for item in os.listdir(download_dir):
         if not match_base_name(item, base_name):
@@ -1865,16 +1820,10 @@ def _run_same_video_group_worker(task_id, base_name, output_format=None):
 
 
 def _run_direct_download_worker(task_id, url, output_file, referer, cookie, user_agent,
-                                initial_retry_count=0, final_file=None, target_format=None):
-    """直链下载 worker（curl + 断点续传）。
-
-    output_file 为 curl 下载目标；final_file 不为空且与 output_file 不同时
-    （.f4v 等格式），下载完成后转封装为 final_file（用户指定的 mp4/mkv）。
-    """
+                                initial_retry_count=0):
+    """直链下载 worker（curl + 断点续传）。output_file 为 curl 下载目标即成品。"""
     # 继承 per-user 上下文（后台线程 thread-local 默认为空）
     _inherit_task_context(task_id)
-    if final_file is None:
-        final_file = output_file
     try:
         base_name = os.path.basename(output_file)
         max_retries = 5
@@ -1934,23 +1883,9 @@ def _run_direct_download_worker(task_id, url, output_file, referer, cookie, user
                     if return_code != 0:
                         debug_print(f"[下载] 返回非零码 {return_code}，但检测到有效输出文件 "
                                     f"(大小 {file_size} bytes): {base_name}")
-                    # .f4v 等格式：curl 下载完成后转封装为用户指定格式
-                    if os.path.abspath(final_file) != os.path.abspath(output_file):
-                        with cfg.tasks_lock:
-                            if task_id in cfg.tasks:
-                                cfg.tasks[task_id]['progress'] = 90
-                        save_tasks()
-                        if _post_process_direct_download(
-                                output_file, final_file,
-                                target_format or cfg.output_format, base_name):
-                            debug_print(f"[下载] 直链下载+后处理成功: {base_name}")
-                            _finish_task(task_id, True)
-                            return
-                        debug_print(f"[后处理] 转封装未产出合格成品，准备重试下载: {base_name}")
-                    else:
-                        debug_print(f"[下载] 直链下载成功: {base_name}")
-                        _finish_task(task_id, True)
-                        return
+                    debug_print(f"[下载] 直链下载成功: {base_name}")
+                    _finish_task(task_id, True)
+                    return
                 else:
                     debug_print(f"[下载] 下载文件太小 ({file_size} bytes)，可能是错误页面: {base_name}")
                     # 小文件可能是 CDN 调度 JSON（如爱奇艺 pcw-data 返回 {"l": "真实地址"}）
@@ -2087,6 +2022,9 @@ def _resume_single_task(task):
     cookie = task.get('_cookie')
     user_agent = task.get('_user_agent')
     retry_count = task.get('_retry_count', 0)
+    # per-task 输出格式：优先用任务自带的，回退到全局默认
+    task_fmt = task.get('_output_format') or ''
+    fmt = task_fmt if task_fmt in ('mp4', 'mkv') else cfg.output_format
 
     # 设置 per-user 上下文（恢复期文件检查在主线程执行）
     user = task.get('user') or 'default'
@@ -2131,8 +2069,8 @@ def _resume_single_task(task):
     pending_src = find_pending_merge_source(base_name)
     if pending_src:
         debug_print(f"[恢复] 发现未合成完的源文件，直接重新合成（无需重新下载）: {pending_src}")
-        output_file = os.path.join(get_download_dir(), f"{base_name}.{cfg.output_format}")
-        ok, _ = _finalize_download_outputs(base_name, output_file, cfg.output_format)
+        output_file = os.path.join(get_download_dir(), f"{base_name}.{fmt}")
+        ok, _ = _finalize_download_outputs(base_name, output_file, fmt)
         _finish_task(task_id, ok)
         return
 
@@ -2141,15 +2079,6 @@ def _resume_single_task(task):
         debug_print(f"[恢复] 同名视频文件已存在，跳过恢复: {existing_path}")
         cleanup_copy_files(base_name)
         _finish_task(task_id, True)
-        return
-
-    # 检查是否存在 .f4v 直链已下载但未转 mp4 的残留源文件
-    f4v_source = os.path.join(get_download_dir(), f"{base_name}.f4v")
-    if os.path.exists(f4v_source) and os.path.getsize(f4v_source) >= cfg.MIN_FILE_SIZE:
-        debug_print(f"[恢复] 发现未转 mp4 的 .f4v 源文件，尝试收尾: {f4v_source}")
-        final_file = os.path.join(get_download_dir(), f"{base_name}.mp4")
-        ok = _post_process_direct_download(f4v_source, final_file, 'mp4', base_name)
-        _finish_task(task_id, ok)
         return
 
     has_any, any_path = has_any_existing_file(base_name)
@@ -2173,11 +2102,10 @@ def _resume_single_task(task):
     is_direct_video, video_ext = classify_video_url(url, referer, cookie, user_agent)
 
     if is_direct_video:
-        # .f4v 等：curl 目标为源文件，成品统一为 .mp4
-        curl_target, output_file, needs_convert = plan_direct_output(base_name, video_ext)
+        curl_target = output_file = os.path.join(get_download_dir(), f"{base_name}{video_ext}")
     else:
-        curl_target, output_file, needs_convert = None, \
-            os.path.join(get_download_dir(), f"{base_name}.{cfg.output_format}"), False
+        curl_target, output_file = None, \
+            os.path.join(get_download_dir(), f"{base_name}.{fmt}")
 
     if os.path.exists(output_file):
         if is_direct_video:
@@ -2189,9 +2117,19 @@ def _resume_single_task(task):
             else:
                 debug_print(f"[恢复] 文件已存在但过小 ({file_size} bytes)，继续断点续传: {output_file}")
         else:
-            debug_print(f"[恢复] 文件已存在，跳过恢复: {output_file}")
-            _finish_task(task_id, True)
-            return
+            # m3u8 下载经 ffmpeg 转封装，输出文件已存在时仍需检查完整性：
+            # 转封装中途被打断会留下体积不达标的残缺文件
+            file_size = os.path.getsize(output_file)
+            if file_size >= cfg.MIN_FILE_SIZE:
+                debug_print(f"[恢复] 文件已存在且完整，跳过恢复: {output_file}")
+                _finish_task(task_id, True)
+                return
+            else:
+                debug_print(f"[恢复] 文件已存在但过小 ({file_size} bytes)，重新下载: {output_file}")
+                try:
+                    os.remove(output_file)
+                except OSError:
+                    pass
 
     # 重建启动计划并回到排队状态：暂停恢复与容器重启恢复统一走队列，
     # 由队列泵按并发名额拉起（前端「继续」与重启恢复共用本函数）
@@ -2201,7 +2139,7 @@ def _resume_single_task(task):
         'base_name': base_name,
         'curl_target': curl_target,
         'output_file': output_file,
-        'target_format': cfg.output_format,
+        'target_format': fmt,
         'retry_count': retry_count,
     }
     with cfg.tasks_lock:
@@ -2425,7 +2363,11 @@ def run_download(url, save_name=None, referer=None, cookie=None, user_agent=None
                 if status in ('collecting', 'running'):
                     _reuse_result = existing_group['task_id']
                 elif status == 'done':
-                    _reuse_result = False
+                    # 视频组此前 5 轮失败后标记为 done，新 URL 提交时重置状态允许重试
+                    existing_group['status'] = 'collecting'
+                    existing_group['round_count'] = 0
+                    existing_group['current_index'] = len(existing_group['urls']) - 1
+                    debug_print(f"[调度器] 视频组 {base_name} 此前已失败，重置状态允许重试")
 
             if _reuse_result is None:
                 # 创建新视频组（existing_group 为 None，或状态非 collecting/running/done）
@@ -2475,6 +2417,7 @@ def run_download(url, save_name=None, referer=None, cookie=None, user_agent=None
                 '_user_agent': user_agent,
                 '_retry_count': 0,
                 '_qseq': _next_qseq(),
+                '_output_format': fmt,
                 '_plan': plan
             }
         save_tasks()
@@ -2530,11 +2473,10 @@ def run_download(url, save_name=None, referer=None, cookie=None, user_agent=None
         return None, False
 
     if is_direct_video:
-        # .f4v 等：curl 目标为源文件（.f4v），成品为转封装后的目标格式
-        curl_target, output_file, needs_convert = plan_direct_output(base_name, video_ext)
+        curl_target = output_file = os.path.join(get_download_dir(), f"{base_name}{video_ext}")
     else:
-        curl_target, output_file, needs_convert = None, \
-            os.path.join(get_download_dir(), f"{base_name}.{fmt}"), False
+        curl_target, output_file = None, \
+            os.path.join(get_download_dir(), f"{base_name}.{fmt}")
 
     if os.path.exists(output_file):
         if is_direct_video:
@@ -2581,6 +2523,7 @@ def run_download(url, save_name=None, referer=None, cookie=None, user_agent=None
             '_user_agent': user_agent,
             '_retry_count': 0,
             '_qseq': _next_qseq(),
+            '_output_format': fmt,
             '_plan': plan
         }
 
@@ -2590,10 +2533,7 @@ def run_download(url, save_name=None, referer=None, cookie=None, user_agent=None
                 f"类型={'直链' + str(video_ext) if is_direct_video else 'm3u8'} | "
                 f"输出={output_file}" + (f" | 文件名过滤 {ad_count} 处" if ad_count > 0 else ""))
     if is_direct_video:
-        if needs_convert:
-            debug_print(f"[下载] 直链视频 {video_ext}：curl 下载后转封装为 mp4: {base_name}")
-        else:
-            debug_print(f"[下载] 直链视频 {video_ext}：curl 直接下载: {base_name}")
+        debug_print(f"[下载] 直链视频 {video_ext}：curl 直接下载: {base_name}")
     else:
         _user_kws = get_ad_keywords(user)
         if _user_kws:

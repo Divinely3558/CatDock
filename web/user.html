@@ -286,36 +286,36 @@
       }
 
       /* ---------- 新建下载任务卡 + 进行中的任务卡：跨主题尺寸锁定 ---------- */
-      /* 4 色板各自覆盖了影响排布的度量（pixel 3px 粗边框、morandi 大留白、
-         tech/morandi 任务项内边距、标题字号行高各异），切换主题时两张卡片
+      /* 4 套主题各自覆盖了影响排布的度量（pixel 3px 粗边框、retro 大留白、
+         neo/retro 任务项内边距、标题字号行高各异），切换主题时两张卡片
          的外框高度随之互相适应、视觉跳动。此处统一这些度量——外框留白、
          字段与任务项高度、标题行高；颜色、圆角、字体仍随主题变化。
-         :root 前缀抬高优先级压过各色板同名覆盖（page 样式在注入的
+         :root 前缀抬高优先级压过各主题同名覆盖（page 样式在注入的
          shared.css 之后）。服务信息卡不参与锁定（独占整行，高度变化不影响
          上方两卡对的框架） */
       :root .card:has(> form#dlForm) .card-title,
       :root .card:has(> .task-list) .card-title {
-        line-height: 24px; /* 锁定标题行高：4 色板标题字号不同也保持同高 */
+        line-height: 24px; /* 锁定标题行高：4 套主题标题字号不同也保持同高 */
       }
-      :root[data-palette="morandi"] .card:has(> form#dlForm),
-      :root[data-palette="morandi"] .card:has(> .task-list) {
-        padding: 18px 20px; /* 还原基础留白，抵消 morandi 的 28px 32px */
+      :root[data-theme="retro"] .card:has(> form#dlForm),
+      :root[data-theme="retro"] .card:has(> .task-list) {
+        padding: 18px 20px; /* 还原基础留白，抵消 retro 的 28px 32px */
       }
-      :root[data-palette="pixel"] .card:has(> form#dlForm),
-      :root[data-palette="pixel"] .card:has(> .task-list) {
+      :root[data-theme="pixel"] .card:has(> form#dlForm),
+      :root[data-theme="pixel"] .card:has(> .task-list) {
         padding: 16px 18px; /* 3px 粗边框用 -2px 留白补偿，内容基准与基础版对齐 */
       }
       /* 任务项垂直尺寸对齐（26px 边框盒 = 垂直内边距×2 + 边框）：
-         default 14px/1px=30、tech 10px/1px=22、morandi 16px/1px=34，
+         flat 14px/1px=30、neo 10px/1px=22、retro 16px/1px=34，
          4 条任务的列表总高跨主题差最多 32px；pixel 10px/3px=26 恰好持平；
-         全部锁定为 default/tech/morandi 12px、pixel 10px（3px 粗边框补偿） */
-      :root[data-palette="default"] .task-item,
-      :root[data-palette="tech"] .task-item,
-      :root[data-palette="morandi"] .task-item {
+         全部锁定为 flat/neo/retro 12px、pixel 10px（3px 粗边框补偿） */
+      :root[data-theme="flat"] .task-item,
+      :root[data-theme="neo"] .task-item,
+      :root[data-theme="retro"] .task-item {
         padding-top: 12px;
         padding-bottom: 12px;
       }
-      /* 各主题继承的 line-height 系数不同（如 morandi ≈2.0、基础 ≈1.7），
+      /* 各主题继承的 line-height 系数不同（如 retro ≈2.0、基础 ≈1.7），
          文本行高随字体浮动是卡框变高的另一来源：给两卡内参与排布的文本行
          全部锁像素行高/行高盒（px 值会覆盖继承系数并随继承下传给行内子元素） */
       :root .card:has(> .task-list) .task-row1 {
@@ -338,7 +338,7 @@
       }
 
       /* ---------- 顶栏：跨主题高度锁定 ---------- */
-      /* pixel 用户胶囊 3px 粗边框、morandi 2.0 行高系数都会使顶栏变高，
+      /* pixel 用户胶囊 3px 粗边框、retro 2.0 行高系数都会使顶栏变高，
          顶栏一变整页内容随之推移；锁定行高并按边框宽度补偿内边距 */
       :root .brand {
         line-height: 28px;
@@ -357,11 +357,11 @@
         height: 28px;
         box-sizing: border-box;
       }
-      :root[data-palette="pixel"] .user-chip {
+      :root[data-theme="pixel"] .user-chip {
         padding-top: 1px; /* 3px 粗边框补偿，胶囊总高与其他主题一致 */
         padding-bottom: 1px;
       }
-      :root[data-palette="morandi"] .user-chip {
+      :root[data-theme="retro"] .user-chip {
         padding-top: 3px; /* 1px 边框补偿 */
         padding-bottom: 3px;
       }
@@ -369,10 +369,10 @@
       /* ---------- 服务信息卡：跨主题高度锁定 ---------- */
       /* 独占整行，高度变化会直接改变页面总高（滚动条出现/消失引发整页
          宽度跳动）；框架与文本行同样锁定，px 行高随继承下传卡内所有文本 */
-      :root[data-palette="morandi"] #infoCard {
+      :root[data-theme="retro"] #infoCard {
         padding: 18px 20px;
       }
-      :root[data-palette="pixel"] #infoCard {
+      :root[data-theme="pixel"] #infoCard {
         padding: 16px 18px;
       }
       #infoCard {
@@ -391,19 +391,19 @@
         padding-bottom: 0;
         box-sizing: border-box; /* 下拉按钮无全局 border-box，需单独声明 */
       }
-      :root[data-palette="pixel"] #dlForm .dropdown-trigger {
+      :root[data-theme="pixel"] #dlForm .dropdown-trigger {
         border: 3px solid var(--border); /* 与 pixel 输入框同等粗边框、直角，外观成套 */
         border-radius: 0;
       }
-      :root[data-palette="pixel"] #dlForm .adv-trigger,
-      :root[data-palette="pixel"] #dlForm .adv-panel {
+      :root[data-theme="pixel"] #dlForm .adv-trigger,
+      :root[data-theme="pixel"] #dlForm .adv-panel {
         border: 3px solid var(--border); /* 高级选项触发条/面板与 pixel 输入框成套 */
         border-radius: 0;
       }
 
       /* 提交反馈悬浮条：浮于两卡上方缝隙处，不占文档流，3 秒自动消失。
          四主题外观由 shared.css 的 .toast 主题覆盖自动适配（pixel 直角粗描边、
-         tech/morandi 配色），此处只定位与定透明度 */
+         neo/retro 配色），此处只定位与定透明度 */
       .dl-toast {
         top: 64px;
         bottom: auto;
@@ -415,7 +415,7 @@
         pointer-events: auto;
         transform: translateX(-50%) translateY(0);
       }
-      /* 成功/失败语义色须压过 morandi/tech/pixel 对 .toast 边框色的主题覆盖
+      /* 成功/失败语义色须压过 retro/neo/pixel 对 .toast 边框色的主题覆盖
          （主题覆盖最高 (0,4,0)，此处 (0,5,0)）：只改颜色，边框宽度/圆角仍随主题 */
       :root[data-mode] .toast.dl-toast.ok {
         border-color: var(--green);
@@ -910,7 +910,7 @@
         }
       }
       @media (max-width: 600px) {
-        /* 顶栏单行：brand + 健康状态（仅圆点）靠左，用户名靠右，与 PC 分布一致 */
+        /* 顶栏单行：brand + 健康状态（仅圆点）靠左，账号胶囊（仅图标）靠右 */
         .topbar-inner {
           padding: 10px 12px;
           gap: 6px;
@@ -918,11 +918,12 @@
         .brand {
           font-size: 16px;
         }
-        .user-chip {
-          max-width: 90px;
-          overflow: hidden;
-          text-overflow: ellipsis;
-          white-space: nowrap;
+        /* 手机端账号胶囊只显示头像图标+下拉箭头，不显示用户名 */
+        .user-chip .chip-name {
+          display: none;
+        }
+        .user-chip .chip-avatar {
+          margin-right: 0;
         }
         /* 任务操作按钮适度加大触控区（30px：可点但不挤占任务行） */
         .icon-btn {
@@ -970,7 +971,7 @@
         .task-row2 .pct {
           white-space: nowrap;
         }
-        :root[data-palette="pixel"] .task-row2 {
+        :root[data-theme="pixel"] .task-row2 {
           flex-wrap: wrap;
         }
         /* 个人页任务卡只显示自己的任务，用户名无意义，隐藏以保持 row2 单行 */
@@ -1776,7 +1777,8 @@
         function enterApp() {
           $("userChip").innerHTML =
             '<svg class="i chip-avatar" aria-hidden="true"><use href="#ic-avatar"></use></svg>' +
-            CD.esc(creds.user);
+            // 用户名单独包一层：手机端媒体查询只隐藏文字、保留头像图标
+            '<span class="chip-name">' + CD.esc(creds.user) + "</span>";
           startPolling();
           refreshTasks();
         }
@@ -2096,11 +2098,12 @@
         };
 
         // 状态徽标：排队中的任务额外显示队列位次（如「排队中 · 第 3 位」）
+        // 兜底 status 与 queue_pos 仍过 CD.esc：与全页转义纪律保持一致
         function statusBadge(t) {
-          var st = STATUS_MAP[t.status] || [t.status, "badge-running"];
+          var st = STATUS_MAP[t.status] || [CD.esc(t.status), "badge-running"];
           var label =
             t.status === "queued" && t.queue_pos
-              ? "排队中 · 第 " + t.queue_pos + " 位"
+              ? "排队中 · 第 " + CD.esc(t.queue_pos) + " 位"
               : st[0];
           return '<span class="badge ' + st[1] + '">' + label + "</span>";
         }
@@ -2146,7 +2149,7 @@
                   var pct = Math.max(0, Math.min(100, Number(t.progress) || 0));
                   var seg =
                     t.segments && t.segments.total > 0
-                      ? t.segments.done + "/" + t.segments.total + " "
+                      ? CD.esc(t.segments.done) + "/" + CD.esc(t.segments.total) + " "
                       : "";
                   return (
                     '<div class="task-item" data-id="' +
@@ -2300,7 +2303,7 @@
                 [
                   "进度",
                   (t.segments && t.segments.total > 0
-                    ? t.segments.done + "/" + t.segments.total + " "
+                    ? CD.esc(t.segments.done) + "/" + CD.esc(t.segments.total) + " "
                     : "") +
                     (Number(t.progress) || 0) +
                     "%",
@@ -2902,11 +2905,11 @@
                   .map(function (e) {
                     return (
                       '<div class="info-endpoint"><span class="method">' +
-                      e[0] +
+                      CD.esc(e[0]) +
                       '</span><span class="path">' +
-                      e[1] +
+                      CD.esc(e[1]) +
                       '</span><span class="desc">' +
-                      e[2] +
+                      CD.esc(e[2]) +
                       "</span></div>"
                     );
                   })

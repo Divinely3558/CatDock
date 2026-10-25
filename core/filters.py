@@ -37,6 +37,21 @@ def _log_error(msg):
     log_error(msg)
 
 
+def _is_safe_regex(pattern):
+    """检查正则表达式是否包含已知的危险构造（嵌套量词、指数级回溯等）。
+
+    返回 True 表示相对安全，False 表示可能存在 ReDoS 风险。
+    注意：这是启发式检查，不能保证 100% 覆盖所有危险模式。
+    """
+    # 检查嵌套量词：(x+)+、(x*)*、(x+)* 等
+    if re.search(r'\([^)]*[+*][^)]*\)[+*{]', pattern):
+        return False
+    # 检查交替分支内的量词重叠：(a|a)+ 等
+    if re.search(r'\([^)]*\|[^)]*\)[+*{]', pattern):
+        return False
+    return True
+
+
 def _load_rules_dict(path):
     """从文件加载过滤规则原始结构；文件缺失/损坏时返回 None。
 
@@ -74,10 +89,17 @@ def _load_rules_dict(path):
             replacement = str(rule.get('replacement', '') or '')
             if not pattern:
                 continue
+            if not _is_safe_regex(pattern):
+                _log_error(f"文件名去重正则存在 ReDoS 风险，已跳过 [{pattern}]")
+                continue
             try:
-                dd_rules.append((re.compile(pattern), replacement))
-            except re.error:
-                _log_error(f"文件名去重正则编译失败 [{pattern}]")
+                compiled = re.compile(pattern)
+                # 预检 replacement 中的回引用是否合法（\1 \2 等）
+                # 方法：用空字符串试替换一次，捕获 re.error
+                compiled.sub(replacement, '')
+                dd_rules.append((compiled, replacement))
+            except re.error as e:
+                _log_error(f"文件名去重正则或替换串无效 [{pattern}] -> [{replacement}]: {e}")
 
     return {
         'raw': raw,

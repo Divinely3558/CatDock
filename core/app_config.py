@@ -28,6 +28,18 @@ import data_db
 # ---- 文件路径 ----
 DOWNLOAD_DIR = "/home/downloader/downloads"
 TEMP_DIR = "/home/downloader/temp"
+
+# ---- 并发写入保护 ----
+# 每个文件路径一个锁,防止多线程并发写同一文件撕裂
+_write_locks = {}
+_write_locks_guard = threading.Lock()
+
+def _get_write_lock(path):
+    """获取指定路径的写入锁(惰性创建)。"""
+    with _write_locks_guard:
+        if path not in _write_locks:
+            _write_locks[path] = threading.Lock()
+        return _write_locks[path]
 # 每用户配置根目录（独立挂载卷 /home/downloader/user，容器重建后保留）：
 # user/<名>/ 下存放该用户的 tasks.json、success.log、failure.log、filter_rules.json
 USER_DIR = "/home/downloader/user"
@@ -153,6 +165,8 @@ _BLOCKED_NETWORKS = [
     ipaddress.ip_network('240.0.0.0/4'),
     ipaddress.ip_network('::/128'),  # IPv6 未指定地址（http://[::]/ 等价 0.0.0.0）
     ipaddress.ip_network('::1/128'),
+    ipaddress.ip_network('::/96'),  # IPv4-compatible IPv6（::ffff:a.b.c.d 的前身）
+    ipaddress.ip_network('64:ff9b::/96'),  # NAT64 前缀
     ipaddress.ip_network('fc00::/7'),
     ipaddress.ip_network('fe80::/10'),
 ]
@@ -366,22 +380,30 @@ def _read_admin_dict():
 
 
 def _write_json_atomic(path, obj, mode=0o600):
-    """JSON 原子写入：临时文件 + fsync + os.replace，异常时清理残留。"""
-    tmp_path = path + '.tmp'
-    fd = os.open(tmp_path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, mode)
-    try:
-        with os.fdopen(fd, 'w', encoding='utf-8') as f:
-            json.dump(obj, f, ensure_ascii=False, indent=2)
-            f.flush()
-            os.fsync(f.fileno())
-        os.replace(tmp_path, path)
-    except Exception:
+    """JSON 原子写入：临时文件 + fsync + os.replace，异常时清理残留。
+
+    并发安全:
+      - 每路径写入锁,防止多线程并发写同一文件撕裂
+      - 临时文件名加 pid + 随机后缀,避免固定名冲突
+    """
+    write_lock = _get_write_lock(path)
+    with write_lock:
+        # 临时文件名:路径 + pid + 随机后缀,避免并发冲突
+        tmp_path = f"{path}.tmp.{os.getpid()}.{secrets.token_hex(4)}"
+        fd = os.open(tmp_path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, mode)
         try:
-            if os.path.exists(tmp_path):
-                os.remove(tmp_path)
-        except OSError:
-            pass
-        raise
+            with os.fdopen(fd, 'w', encoding='utf-8') as f:
+                json.dump(obj, f, ensure_ascii=False, indent=2)
+                f.flush()
+                os.fsync(f.fileno())
+            os.replace(tmp_path, path)
+        except Exception:
+            try:
+                if os.path.exists(tmp_path):
+                    os.remove(tmp_path)
+            except OSError:
+                pass
+            raise
 
 
 def load_admin_config():

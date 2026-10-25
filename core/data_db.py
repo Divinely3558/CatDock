@@ -734,6 +734,7 @@ def add_user(username, password, role='user'):
         raise ValueError("密码不能为空")
     if role not in ('user', 'admin'):
         role = 'user'
+    password_hash = _hash_password(password)
     with _db_lock:
         conn = _get_conn()
         cursor = conn.execute("SELECT 1 FROM users WHERE username = ?", (username,))
@@ -742,7 +743,7 @@ def add_user(username, password, role='user'):
         conn.execute(
             "INSERT INTO users (username, password_hash, created_at, role, disabled) "
             "VALUES (?, ?, ?, ?, 0)",
-            (username, _hash_password(password),
+            (username, password_hash,
              time.strftime('%Y-%m-%d %H:%M:%S'), role),
         )
         conn.commit()
@@ -776,6 +777,7 @@ def change_password(username, new_password):
     """
     if not new_password:
         raise ValueError("密码不能为空")
+    new_hash = _hash_password(new_password)
     with _db_lock:
         conn = _get_conn()
         cursor = conn.execute("SELECT 1 FROM users WHERE username = ?", (username,))
@@ -783,7 +785,7 @@ def change_password(username, new_password):
             raise ValueError(f"用户不存在: {username}")
         conn.execute(
             "UPDATE users SET password_hash = ? WHERE username = ?",
-            (_hash_password(new_password), username),
+            (new_hash, username),
         )
         conn.execute("UPDATE auth_tokens SET revoked = 1 WHERE username = ?", (username,))
         conn.commit()
@@ -797,9 +799,9 @@ def verify_user(username, password):
             "SELECT password_hash FROM users WHERE username = ? AND disabled = 0",
             (username,))
         row = cursor.fetchone()
-        if row is None:
-            return False
-        return _verify_password(password, row[0])
+    if row is None:
+        return False
+    return _verify_password(password, row[0])
 
 
 def verify_user_password(username, password):
@@ -812,9 +814,9 @@ def verify_user_password(username, password):
         cursor = conn.execute(
             "SELECT password_hash FROM users WHERE username = ?", (username,))
         row = cursor.fetchone()
-        if row is None:
-            return False
-        return _verify_password(password, row[0])
+    if row is None:
+        return False
+    return _verify_password(password, row[0])
 
 
 def user_exists(username):

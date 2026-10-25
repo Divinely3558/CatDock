@@ -96,6 +96,32 @@
         background: var(--primary-soft);
       }
 
+      /* pixel 用户胶囊 3px 粗边框、retro 2.0 行高系数都会使顶栏变高，
+         顶栏一变整页内容随之推移；锁定行高并按边框宽度补偿内边距
+         （与下载控制台 user.html 同一套规则，保证两页顶栏高度一致） */
+      :root .brand {
+        line-height: 28px;
+      }
+      :root .brand .tag,
+      :root .user-chip,
+      :root .health {
+        line-height: 20px;
+      }
+      :root .user-chip {
+        /* 盒高锁定：内联头像 svg 的行盒扩张随主题字体度量浮动
+           （Inter/思源撑到 21px、Courier 20px），钉死盒高后四主题胶囊恒 28px */
+        height: 28px;
+        box-sizing: border-box;
+      }
+      :root[data-theme="pixel"] .user-chip {
+        padding-top: 1px; /* 3px 粗边框补偿，胶囊总高与其他主题一致 */
+        padding-bottom: 1px;
+      }
+      :root[data-theme="retro"] .user-chip {
+        padding-top: 3px; /* 1px 边框补偿 */
+        padding-bottom: 3px;
+      }
+
       /* ---------- 主体（与下载控制台一致） ---------- */
       .container {
         max-width: 1080px;
@@ -521,7 +547,7 @@
         }
       }
       @media (max-width: 600px) {
-        /* 顶栏单行：brand + 健康状态（仅圆点）靠左，用户名靠右，与 PC 分布一致 */
+        /* 顶栏单行：brand + 健康状态（仅圆点）靠左，账号胶囊（仅图标）靠右 */
         .topbar-inner {
           padding: 10px 12px;
           gap: 6px;
@@ -529,11 +555,12 @@
         .brand {
           font-size: 16px;
         }
-        .user-chip {
-          max-width: 90px;
-          overflow: hidden;
-          text-overflow: ellipsis;
-          white-space: nowrap;
+        /* 手机端账号胶囊只显示头像图标+下拉箭头，不显示用户名 */
+        .user-chip .chip-name {
+          display: none;
+        }
+        .user-chip .chip-avatar {
+          margin-right: 0;
         }
         /* 手机端表格紧凑：缩小内边距与字号，降低横向溢出幅度 */
         th,
@@ -1422,7 +1449,8 @@
 
       document.getElementById("userChip").innerHTML =
         '<svg class="i chip-avatar" aria-hidden="true"><use href="#ic-avatar"></use></svg>' +
-        CD.esc(userName || "管理员");
+        // 用户名单独包一层：手机端媒体查询只隐藏文字、保留头像图标
+        '<span class="chip-name">' + CD.esc(userName || "管理员") + "</span>";
 
       function backToLogin() {
         localStorage.removeItem(LS.token);
@@ -2131,14 +2159,9 @@
         });
       };
       document.getElementById("menuLogout").onclick = function () {
-        fetch(BASE + "logout", {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-            Authorization: "Bearer " + token,
-          },
-          body: "{}",
-        }).then(backToLogin, backToLogin);
+        // 先通知服务端吊销当前令牌（尽力而为，失败也继续清理本地跳转）；
+        // 与 user 端一致走 CD.apiPost，403 由 CD.onUnauthorized 兜底
+        CD.apiPost("logout", {}).then(backToLogin, backToLogin);
       };
 
       // ---------- 过滤规则模板编辑器（与 user 端共用 shared.js 的实现） ----------

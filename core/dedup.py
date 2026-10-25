@@ -80,9 +80,11 @@ def drop_user_cache(user):
 def note_log_entry(user, kind, save_name, unique_urls):
     """append_log 写入日志后增量更新去重缓存。
 
-    kind: 'success' / 'failure'；user 为空时不更新。
+    kind: 'success' / 'failure'；user 为空时规范化为 'default'。
     """
-    if not user or kind not in ('success', 'failure'):
+    # 统一 user 键：None/空串 规范化为 'default'
+    user = user or 'default'
+    if kind not in ('success', 'failure'):
         return
     with _dedup_lock:
         cache = _get_cache(user)
@@ -100,6 +102,8 @@ def is_url_downloaded(url, user=None, check_failure=True):
     Returns:
         (hit: bool, status: str | None) — status 为 'success' 或 'failure'
     """
+    # 统一 user 键：None/空串 规范化为 'default'，避免与日志写入时的键不对称
+    user = user or 'default'
     normalized_url = url.strip().rstrip('/')
     with _dedup_lock:
         cache = _get_cache(user)
@@ -121,17 +125,24 @@ def is_filename_downloaded(save_name, user=None, check_failure=True):
     """
     if not save_name:
         return False, None
+    # 统一 user 键：None/空串 规范化为 'default'
+    user = user or 'default'
     with _dedup_lock:
         cache = _get_cache(user)
         for name_key, status in [('success_names', 'success'), ('failure_names', 'failure')]:
             if status == 'failure' and not check_failure:
                 continue
             for entry_save_name in cache[name_key]:
-                if entry_save_name == save_name or \
-                   entry_save_name.startswith(save_name + '.') or \
-                   entry_save_name.startswith(save_name + '_') or \
-                   save_name.startswith(entry_save_name + '.') or \
-                   save_name.startswith(entry_save_name + '_'):
+                # 精确匹配
+                if entry_save_name == save_name:
+                    debug_print(f"[去重] 文件名命中{('成功' if status == 'success' else '失败')}日志（用户={user}）: {save_name}")
+                    return True, status
+                # .copy 变体匹配：仅匹配 ".copy" 或 ".copy.N" 形式，避免误伤不同视频
+                # 例如 "episode1" 不应匹配 "episode1_extra"
+                entry_base = entry_save_name.split('.copy')[0] if '.copy' in entry_save_name else entry_save_name
+                save_base = save_name.split('.copy')[0] if '.copy' in save_name else save_name
+                if entry_base == save_base and entry_base != entry_save_name and save_base != save_name:
+                    # 两者都是同一基础名的 .copy 变体
                     debug_print(f"[去重] 文件名命中{('成功' if status == 'success' else '失败')}日志（用户={user}）: {save_name}")
                     return True, status
     # 未命中是常态，不打日志降噪

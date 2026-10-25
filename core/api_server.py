@@ -30,7 +30,7 @@ from filters import is_ad_content, get_user_rules, save_user_rules
 from task_store import load_tasks
 import chat
 import theme_prefs
-from downloader import run_download, resume_tasks, pause_task, resume_paused_task, delete_task, pin_task, queue_position, cleanup_user_data, build_preview_playlist, resolve_preview_segment
+from downloader import run_download, resume_tasks, pause_task, resume_paused_task, delete_task, pin_task, queue_position, cleanup_user_data, build_preview_playlist, resolve_preview_segment, unsupported_video_ext
 from webui import get_login_html, get_user_html, get_admin_html
 
 
@@ -76,6 +76,7 @@ def _record_failure_and_log(client_ip):
 # 业务接口通过 Authorization: Bearer <token> 请求头携带，
 # 避免在 URL 查询参数中传递密钥/账号密码（URL 会进入浏览器历史与各级访问日志）。
 TOKEN_TTL_SECONDS = 7200  # 令牌有效期 2 小时，过期后需重新登录
+_TOKEN_RENEW_THRESHOLD = 1800  # 令牌剩余时间少于 30 分钟时自动续期
 _TOKEN_INFO = b'catdock-token-v1'  # 派生盐，AUTH_KEY 变更后旧令牌自动全部失效
 
 
@@ -151,6 +152,8 @@ def verify_auth_token_full(token):
     「禁用」（明确提示、不计入 IP 封禁）与「无效」（计入 IP 封禁）。
     相比先 verify_token_claims 再 verify_auth_token 的两次验签，
     本函数只验一次签名。
+    
+    角色从 DB 实时读取，避免 DB 降权后旧令牌 2h 内仍是 admin。
     """
     data = verify_token_claims(token)
     if data is None:
@@ -164,14 +167,46 @@ def verify_auth_token_full(token):
     # 保留 claims 返回，让 _check_auth 能对「禁用」单独提示且不计 IP 封禁
     if not username or not data_db.is_user_active(username):
         return None, data
+    # 角色从 DB 实时读取，覆盖令牌内的旧角色（防止降权后旧令牌仍为 admin）
+    current_role = data_db.user_role(username)
+    if current_role:
+        data['role'] = current_role
     return username, data
+
+
+def verify_auth_token_with_renewal(token):
+    """完整校验令牌并在即将过期时自动续期。
+
+    返回 (username, claims, new_token_or_None)：
+      - username/claims：同 verify_auth_token_full
+      - new_token：令牌剩余时间少于阈值时签发的新令牌，否则为 None
+    调用方应将 new_token 通过 X-New-Token 响应头返回给前端。
+    """
+    username, claims = verify_auth_token_full(token)
+    if username is None:
+        return None, None, None
+    # 检查是否需要续期
+    exp = claims.get('exp', 0)
+    remaining = exp - int(time.time())
+    if remaining < _TOKEN_RENEW_THRESHOLD:
+        new_token = issue_auth_token(username, claims.get('role', 'user'))
+        return username, claims, new_token
+    return username, claims, None
 
 
 class DownloadHandler(http.server.BaseHTTPRequestHandler):
     REQUEST_TIMEOUT = 30
 
-    def send_json(self, data, status=200):
+    def send_json(self, data, status=200, extra_headers=None):
         try:
+            # 自动添加令牌续期响应头
+            if hasattr(self, '_new_auth_token') and self._new_auth_token:
+                if extra_headers is None:
+                    extra_headers = {}
+                extra_headers['X-New-Token'] = self._new_auth_token
+                # 一次性使用，避免后续请求重复发送
+                self._new_auth_token = None
+            
             # 先序列化 body，再发响应头：若 json.dumps 失败（如含不可序列化对象），
             # 此时尚未发送任何字节，客户端不会收到"有头无体"的截断响应
             body = json.dumps(data, ensure_ascii=False).encode('utf-8')
@@ -179,6 +214,9 @@ class DownloadHandler(http.server.BaseHTTPRequestHandler):
             self.send_header('Content-Type', 'application/json')
             self.send_header('Content-Length', str(len(body)))
             self.send_header('Connection', 'close')
+            if extra_headers:
+                for key, value in extra_headers.items():
+                    self.send_header(key, value)
             self.end_headers()
             self.wfile.write(body)
         except Exception as e:
@@ -495,7 +533,7 @@ class DownloadHandler(http.server.BaseHTTPRequestHandler):
         auth_header = self.headers.get('Authorization', '')
         if auth_header.startswith('Bearer '):
             token = auth_header[len('Bearer '):].strip()
-            username, claims = verify_auth_token_full(token) if token else (None, None)
+            username, claims, new_token = verify_auth_token_with_renewal(token) if token else (None, None, None)
             if username:
                 # 认证成功：清除该 IP 的失败计数，避免历史偶发失误累积导致误封；
                 # 同时移除"已封禁账号首次警告"标记，防止集合长期残留导致内存增长
@@ -504,6 +542,9 @@ class DownloadHandler(http.server.BaseHTTPRequestHandler):
                 self.authenticated_user = username
                 self.authenticated_role = (claims.get('role') if claims else None) \
                     or data_db.user_role(username) or 'user'
+                # 存储新令牌，供后续 send_json 添加到响应头
+                if new_token:
+                    self._new_auth_token = new_token
                 return True
             # 签名有效但账号已被禁用：明确提示且不计入 IP 封禁（用户已被管理员禁用）
             if claims and data_db.user_exists(claims.get('user', '')) \
@@ -936,11 +977,11 @@ class DownloadHandler(http.server.BaseHTTPRequestHandler):
                 },
             }})
         elif path == '/theme':
-            # 当前账号的默认主题色板（未设置时 palette 为 null，前端按会话随机）
+            # 当前账号的默认主题（未设置时 theme 为 null，前端按会话随机）
             # 下载用户与管理员共用：两个控制台顶栏都有收藏星星
             # 存储按角色分流：用户存 user/<名>/theme_prefs.json，管理员存 config/theme_admin.json
             self.send_json({'success': True, 'data': {
-                'palette': theme_prefs.get_palette(
+                'theme': theme_prefs.get_theme(
                     self.authenticated_user,
                     getattr(self, 'authenticated_role', 'user')),
             }})
@@ -1027,6 +1068,7 @@ class DownloadHandler(http.server.BaseHTTPRequestHandler):
 
             # 目标用户不存在
             if not data_db.user_exists(target_user):
+                _record_failure_and_log(self._client_ip)
                 self.send_json({'success': False, 'message': '目标用户不存在'}, 403)
                 return
 
@@ -1046,6 +1088,8 @@ class DownloadHandler(http.server.BaseHTTPRequestHandler):
 
             if not data_db.verify_user(target_user, target_password):
                 locked = data_db.record_account_failure(target_user)
+                # 同时计入 IP 级失败（防止低速爆破：账号锁定后换目标继续试）
+                _record_failure_and_log(self._client_ip)
                 if locked:
                     self.send_json({'success': False,
                                     'message': f'密码错误次数过多，目标账号已锁定 '
@@ -1183,8 +1227,8 @@ class DownloadHandler(http.server.BaseHTTPRequestHandler):
             except Exception as e:
                 self._server_error(e)
         elif path == '/theme':
-            # 保存/取消当前账号的默认主题色板（顶栏星星）：
-            # palette 为四主题 id 之一时保存；null/空串时取消默认（恢复随机）
+            # 保存/取消当前账号的默认主题（顶栏星星）：
+            # theme 为四主题 id 之一时保存；null/空串时取消默认（恢复随机）
             try:
                 data = self._read_json_body()
                 if data is None:
@@ -1197,19 +1241,19 @@ class DownloadHandler(http.server.BaseHTTPRequestHandler):
                     return
 
                 username = self.authenticated_user
-                palette = self._get_param(data, 'palette')
-                if palette is not None and str(palette) not in theme_prefs.VALID_PALETTES:
-                    self.send_json({'success': False, 'message': '未知的主题色板'}, 400)
+                theme_id = self._get_param(data, 'theme')
+                if theme_id is not None and str(theme_id) not in theme_prefs.VALID_THEMES:
+                    self.send_json({'success': False, 'message': '未知的主题'}, 400)
                     return
-                palette = theme_prefs.set_palette(
+                theme_id = theme_prefs.set_theme(
                     username,
-                    str(palette) if palette is not None else None,
+                    str(theme_id) if theme_id is not None else None,
                     getattr(self, 'authenticated_role', 'user'))
-                if palette:
-                    self.send_json({'success': True, 'data': {'palette': palette},
+                if theme_id:
+                    self.send_json({'success': True, 'data': {'theme': theme_id},
                                     'message': '已设为我的默认主题'})
                 else:
-                    self.send_json({'success': True, 'data': {'palette': None},
+                    self.send_json({'success': True, 'data': {'theme': None},
                                     'message': '已取消默认主题，下次打开将随机'})
             except Exception as e:
                 self._server_error(e)
@@ -1291,6 +1335,19 @@ class DownloadHandler(http.server.BaseHTTPRequestHandler):
                 if not safe:
                     log_error(f"SSRF 防护：重定向链指向不安全地址: {sanitize_url_for_log(bad_url)}")
                     self.send_json({'success': False, 'message': 'URL重定向指向内网地址，已拒绝'}, 400)
+                    return
+
+                # 明确不支持的视频格式（rmvb/mpg/vob 等探测救不回的格式）
+                # 在入口直接拒绝，避免误入 m3u8 路径产生无效重试；无扩展名
+                # URL 仍交给探测兜底判定，不做预判
+                bad_ext = unsupported_video_ext(url)
+                if bad_ext:
+                    log_info(f"已拒绝不支持的视频格式 {bad_ext}: {sanitize_url_for_log(url)}")
+                    self.send_json({
+                        'success': False,
+                        'message': f'不支持的视频格式: {bad_ext}，'
+                                   '目前支持 mp4/mkv/ts/flv/avi/webm/mov/wmv 直链与 m3u8/mpd 播放列表'
+                    }, 400)
                     return
 
                 save_name = self._get_sanitized_param(data, 'saveName', 'save_name', 'name', 'filename', 'title')

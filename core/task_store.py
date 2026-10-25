@@ -43,6 +43,13 @@ def save_tasks(force=False):
                     'retry_count': task.get('_retry_count', 0),
                     # preview_resume_time：预览播放位置（秒），刷新/重登录后续播
                     'preview_resume_time': task.get('preview_resume_time', 0),
+                    # referer/cookie/user_agent：下载参数，重启后继续断点续传
+                    'referer': task.get('_referer', ''),
+                    'cookie': task.get('_cookie', ''),
+                    'user_agent': task.get('_user_agent', ''),
+                    # output_format：per-task 输出格式（mp4/mkv），不持久化时回退全局默认
+                    'output_format': task.get('_output_format', '')
+                                     or task.get('_plan', {}).get('target_format', ''),
                 }
                 grouped.setdefault(user, []).append(task_data)
 
@@ -57,13 +64,27 @@ def save_tasks(force=False):
                         users_to_write.add(username)
 
             for user in users_to_write:
-                tasks_data = grouped.get(user, [])
-                tasks_file = cfg.user_tasks_file(user)
-                os.makedirs(os.path.dirname(tasks_file), exist_ok=True)
-                temp_file = tasks_file + '.tmp'
-                with open(temp_file, 'w', encoding='utf-8') as f:
-                    json.dump(tasks_data, f, ensure_ascii=False, indent=2)
-                os.replace(temp_file, tasks_file)
+                try:
+                    tasks_data = grouped.get(user, [])
+                    tasks_file = cfg.user_tasks_file(user)
+                    os.makedirs(os.path.dirname(tasks_file), exist_ok=True)
+                    # 临时文件加 pid + 随机后缀，避免并发写同一文件
+                    import secrets
+                    temp_file = f"{tasks_file}.tmp.{os.getpid()}.{secrets.token_hex(4)}"
+                    with open(temp_file, 'w', encoding='utf-8') as f:
+                        json.dump(tasks_data, f, ensure_ascii=False, indent=2)
+                        f.flush()
+                        os.fsync(f.fileno())
+                    os.replace(temp_file, tasks_file)
+                except Exception as e:
+                    # 单用户写盘失败不影响其他用户
+                    log_error(f"保存用户 {user} 任务失败: {e}")
+                    # 清理残留临时文件
+                    try:
+                        if os.path.exists(temp_file):
+                            os.remove(temp_file)
+                    except OSError:
+                        pass
 
             cfg.last_save_time = current_time
     except Exception as e:
@@ -102,12 +123,13 @@ def load_tasks():
                             'status': task.get('status', 'running'),
                             'progress': task.get('progress', 0),
                             'user': task.get('user', '') or username,
-                            '_referer': '',
-                            '_cookie': '',
-                            '_user_agent': '',
+                            '_referer': task.get('referer', ''),
+                            '_cookie': task.get('cookie', ''),
+                            '_user_agent': task.get('user_agent', ''),
                             '_retry_count': task.get('retry_count', 0),
                             '_qseq': task.get('qseq', 0),
-                            'preview_resume_time': task.get('preview_resume_time', 0)
+                            'preview_resume_time': task.get('preview_resume_time', 0),
+                            '_output_format': task.get('output_format', ''),
                         }
                         loaded_count += 1
                     except Exception as e:
