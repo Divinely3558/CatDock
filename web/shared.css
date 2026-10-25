@@ -384,7 +384,7 @@
   --sb-thumb-hover: rgba(108,92,231,.35);
   --sb-radius: 4px;
   --sb-track: #e0e5ec;
-  --sb-track-border: none;
+  --sb-track-border: 1px solid rgba(163,177,198,.3);
   --sb-glow: none;
   --sb-fw: thin;
 }
@@ -409,6 +409,7 @@
   --neo-inset-sm: inset 3px 3px 6px rgba(0,0,0,.3), inset -3px -3px 6px rgba(255,255,255,.03);
   --sb-thumb: rgba(162,155,254,.2);
   --sb-thumb-hover: rgba(162,155,254,.35);
+  --sb-track-border: 1px solid rgba(0,0,0,.3);
 }
 :root[data-theme="neo"] body {
   font-family: "Inter", -apple-system, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
