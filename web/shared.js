@@ -464,8 +464,8 @@
 
     // 去重主视图固定只显示 1 条，其余进「更多」
     var DD_VISIBLE = 1;
-    // 广告关键字主视图最多占 3 行；文件名过滤固定 1 行，超出的收纳进「更多」弹窗
-    var CHIP_ROWS = { keywords: 3, filename_filter: 1 };
+    // 广告关键字主视图最多占 2 行；文件名过滤固定 1 行，超出的收纳进「更多」弹窗
+    var CHIP_ROWS = { keywords: 2, filename_filter: 1 };
     // 两个 chips 区主视图实测可容纳的芯片数，超出部分全部收纳进「更多」弹窗
     var visibleCount = { keywords: 0, filename_filter: 0 };
     var moreCtx = null; // 当前展开的「更多」区块：'keywords' | 'filename_filter' | 'filename_dedup'
