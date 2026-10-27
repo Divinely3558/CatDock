@@ -1325,7 +1325,7 @@
 
     <!-- ================= 过滤规则模板弹窗 ================= -->
     <div class="mask" id="filterMask">
-      <div class="modal" style="max-width: 520px">
+      <div class="modal" style="max-width: 520px; max-height: 85vh; overflow-y: auto">
         <h3>过滤规则模板</h3>
         <div class="msg">作为新用户首次登录的初始规则</div>
         <div class="filter-editor">
@@ -1540,14 +1540,14 @@
             function (ev) {
               var btn = ev.target.closest("button[data-act]");
               if (!btn) return;
-              handleUserAction(btn.getAttribute("data-act"), u);
+              handleUserAction(btn.getAttribute("data-act"), u, btn);
             },
           );
           tbody.appendChild(tr);
         });
       }
 
-      function handleUserAction(act, u) {
+      function handleUserAction(act, u, btn) {
         if (act === "pwd") {
           CD.openModal({
             title: "重置用户密码 - " + u.username,
@@ -1585,12 +1585,7 @@
             },
           });
         } else if (act === "ban") {
-          CD.openModal({
-            title: "禁用用户 - " + u.username,
-            msg: "禁用后该用户立即无法登录、已登录的令牌立即失效；可随时解禁。",
-            danger: true,
-            okText: "禁用",
-            onOk: function () {
+          CD.popconfirm(btn, function () {
               CD.apiPost("admin/users/ban", { username: u.username })
                 .then(function (j) {
                   CD.toast(j.message);
@@ -1599,7 +1594,6 @@
                 .catch(function (e) {
                   CD.toast(e.message, true);
                 });
-            },
           });
         } else if (act === "unban") {
           CD.apiPost("admin/users/unban", { username: u.username })
@@ -1611,12 +1605,7 @@
               CD.toast(e.message, true);
             });
         } else if (act === "del") {
-          CD.openModal({
-            title: "删除用户 - " + u.username,
-            msg: "将删除该用户<b>全部数据</b>（任务记录、过滤规则、下载文件）并吊销登录，<b>不可恢复</b>。",
-            danger: true,
-            okText: "全部删除",
-            onOk: function () {
+          CD.popconfirm(btn, function () {
               CD.apiPost("admin/users/delete", { username: u.username })
                 .then(function (j) {
                   CD.toast(j.message);
@@ -1625,7 +1614,6 @@
                 .catch(function (e) {
                   CD.toast(e.message, true);
                 });
-            },
           });
         }
       }
@@ -1733,20 +1721,15 @@
             function (ev) {
               var btn = ev.target.closest("button[data-act]");
               if (!btn) return;
-              handleBanAction(btn.getAttribute("data-act"), b);
+              handleBanAction(btn.getAttribute("data-act"), b, btn);
             },
           );
           tbody.appendChild(tr);
         });
       }
-      function handleBanAction(act, b) {
+      function handleBanAction(act, b, btn) {
         if (act === "del") {
-          CD.openModal({
-            title: "解封 IP - " + b.ip,
-            msg: "解封后该 IP 恢复访问，同时清除其认证失败计数与阶梯封禁统计。",
-            danger: true,
-            okText: "解封",
-            onOk: function () {
+          CD.popconfirm(btn, function () {
               CD.apiPost("admin/bans/delete", { ip: b.ip })
                 .then(function (j) {
                   CD.toast(j.message);
@@ -1755,7 +1738,6 @@
                 .catch(function (e) {
                   CD.toast(e.message, true);
                 });
-            },
           });
         }
       }
@@ -1832,12 +1814,7 @@
         var key = document.getElementById("newKey").value.trim();
         if (!key)
           return (CD.toast("请先点击「随机」生成 AUTH_KEY", true), false);
-        CD.openModal({
-          title: "确认修改 AUTH_KEY？",
-          msg: "修改后所有用户（含管理员）需重新登录，确认继续？",
-          danger: true,
-          okText: "修改并全员下线",
-          onOk: function () {
+        CD.popconfirm(this, function () {
             CD.apiPost("admin/auth-key", { newKey: key })
               .then(function (j) {
                 CD.toast(j.message + " 即将返回登录页…");
@@ -1846,7 +1823,6 @@
               .catch(function (e) {
                 CD.toast(e.message, true);
               });
-          },
         });
       };
 
@@ -2421,20 +2397,23 @@
       document
         .getElementById("chatClear")
         .addEventListener("click", function () {
-          CD.apiPost("chat/clear", {})
-            .then(function (res) {
-              var clearedId = (res.data || {}).cleared_id || 0;
-              chatRenderedId = Math.max(chatRenderedId, clearedId);
-              chatLastId = Math.max(chatLastId, clearedId);
-              markChatSeen(chatLastId);
-              document.getElementById("chatBox").innerHTML =
-                '<div class="chat-empty">已清除聊天记录</div>';
-              chatLastDay = "";
-              applyDot();
-            })
-            .catch(function (e) {
-              CD.toast(e.message, true);
-            });
+          var btn = this;
+          CD.popconfirm(btn, function () {
+            CD.apiPost("chat/clear", {})
+              .then(function (res) {
+                var clearedId = (res.data || {}).cleared_id || 0;
+                chatRenderedId = Math.max(chatRenderedId, clearedId);
+                chatLastId = Math.max(chatLastId, clearedId);
+                markChatSeen(chatLastId);
+                document.getElementById("chatBox").innerHTML =
+                  '<div class="chat-empty">已清除聊天记录</div>';
+                chatLastDay = "";
+                applyDot();
+              })
+              .catch(function (e) {
+                CD.toast(e.message, true);
+              });
+          });
         });
       document
         .getElementById("chatCancel")

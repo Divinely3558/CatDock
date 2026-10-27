@@ -8,94 +8,59 @@
     <style>
       /*__SHARED_CSS__*/
 
-      /* ---------- 自绘下拉框（输出格式：脱离原生 select，选项列表适配主题） ---------- */
-      .dropdown {
-        position: relative;
-        width: 100%;
+      /* ---------- 输出格式单选框（两选项分段控件，四套主题各自适配） ---------- */
+      .fmt-radios {
+        display: flex;
+        gap: 0;
+        border: 1px solid var(--border);
+        border-radius: 10px;
+        overflow: hidden;
+        background: var(--input-bg);
       }
-      .dropdown-trigger {
-        width: 100%;
+      .fmt-radio {
+        flex: 1;
         display: flex;
         align-items: center;
-        justify-content: space-between;
-        gap: 8px;
+        justify-content: center;
+        gap: 6px;
         padding: 9px 12px;
-        border: 1px solid var(--border);
-        border-radius: 10px;
-        background: var(--input-bg);
-        color: var(--text);
         font-size: 14px;
         font-family: inherit;
-        cursor: pointer;
-        outline: none;
-        transition:
-          border-color 0.15s,
-          box-shadow 0.15s;
-      }
-      .dropdown-trigger:hover {
-        border-color: var(--primary);
-      }
-      .dropdown-trigger:focus,
-      .dropdown.open .dropdown-trigger {
-        border-color: var(--primary);
-        box-shadow: 0 0 0 3px var(--focus-ring);
-      }
-      .dropdown-label {
-        flex: 1;
-        min-width: 0;
-        text-align: left;
-        overflow: hidden;
-        text-overflow: ellipsis;
-        white-space: nowrap;
-      }
-      .dropdown-arrow {
-        width: 0;
-        height: 0;
-        border-left: 4px solid transparent;
-        border-right: 4px solid transparent;
-        border-top: 5px solid var(--text-2);
-        transition: transform 0.15s;
-        flex-shrink: 0;
-      }
-      .dropdown.open .dropdown-arrow {
-        transform: rotate(180deg);
-      }
-      .dropdown-menu {
-        position: absolute;
-        top: calc(100% + 4px);
-        left: 0;
-        right: 0;
-        background: var(--card);
-        border: 1px solid var(--border);
-        border-radius: 10px;
-        box-shadow: var(--shadow);
-        overflow: hidden;
-        z-index: 30;
-        display: none;
-        flex-direction: column;
-        padding: 4px;
-      }
-      .dropdown.open .dropdown-menu {
-        display: flex;
-      }
-      .dropdown-option {
-        padding: 8px 10px;
-        border-radius: 7px;
-        font-size: 14px;
         color: var(--text);
         cursor: pointer;
+        user-select: none;
+        border-right: 1px solid var(--border);
         transition:
-          background 0.12s,
-          color 0.12s;
+          background 0.15s,
+          color 0.15s;
       }
-      .dropdown-option:hover {
+      .fmt-radio:first-child {
+        border-top-left-radius: 10px;
+        border-bottom-left-radius: 10px;
+      }
+      .fmt-radio:last-child {
+        border-right: none;
+        border-top-right-radius: 10px;
+        border-bottom-right-radius: 10px;
+      }
+      .fmt-radio:hover {
         background: var(--ghost-hover);
-        color: var(--primary);
       }
-      .dropdown-option.active {
-        background: var(--primary-soft);
-        color: var(--primary);
+      .fmt-radio.checked {
+        background: var(--primary);
+        color: #fff;
         font-weight: 600;
+      }
+      .fmt-radio.checked:hover {
+        background: var(--primary-hover);
+      }
+      .fmt-radio svg.i {
+        width: 16px;
+        height: 16px;
+        flex-shrink: 0;
+      }
+      .fmt-radio.checked svg.i {
+        color: #fff;
       }
 
       /* ---------- 顶栏（与管理控制台一致） ---------- */
@@ -385,13 +350,13 @@
         line-height: 20px; /* 覆盖其自带 1.7 系数（随主题字体浮动） */
       }
       #dlForm input[type="text"],
-      #dlForm .dropdown-trigger {
+      #dlForm .fmt-radios {
         height: 44px;
         padding-top: 0;
         padding-bottom: 0;
-        box-sizing: border-box; /* 下拉按钮无全局 border-box，需单独声明 */
+        box-sizing: border-box; /* 单选框容器无全局 border-box，需单独声明 */
       }
-      :root[data-theme="pixel"] #dlForm .dropdown-trigger {
+      :root[data-theme="pixel"] #dlForm .fmt-radios {
         border: 3px solid var(--border); /* 与 pixel 输入框同等粗边框、直角，外观成套 */
         border-radius: 0;
       }
@@ -739,6 +704,130 @@
       .chat-input-row {
         margin-bottom: 14px;
       }
+
+      /* ---- 像素风：方角 + 粗描边 + 像素阴影 ---- */
+      :root[data-theme="pixel"] .fmt-radios {
+        border: 3px solid var(--border);
+        border-radius: 0;
+      }
+      :root[data-theme="pixel"] .fmt-radio {
+        border-right: 3px solid var(--border);
+        font-weight: 700;
+        font-size: 13px;
+      }
+      :root[data-theme="pixel"] .fmt-radio:first-child {
+        border-top-left-radius: 0;
+        border-bottom-left-radius: 0;
+      }
+      :root[data-theme="pixel"] .fmt-radio:last-child {
+        border-top-right-radius: 0;
+        border-bottom-right-radius: 0;
+      }
+      :root[data-theme="pixel"] .fmt-radio:hover {
+        background: var(--primary-soft);
+        color: var(--primary);
+      }
+      :root[data-theme="pixel"] .fmt-radio.checked {
+        background: var(--primary);
+        color: #fff;
+        box-shadow: 3px 3px 0 rgba(45,42,38,.25);
+      }
+      :root[data-theme="pixel"] .fmt-radio.checked:hover {
+        background: var(--primary-hover);
+        filter: brightness(1.1);
+      }
+      :root[data-theme="pixel"][data-mode="dark"] .fmt-radios {
+        border-color: var(--primary);
+      }
+      :root[data-theme="pixel"][data-mode="dark"] .fmt-radio {
+        border-right-color: var(--primary);
+      }
+      :root[data-theme="pixel"][data-mode="dark"] .fmt-radio.checked {
+        box-shadow: 3px 3px 0 rgba(255,107,0,.3);
+      }
+      :root[data-theme="pixel"][data-mode="dark"] .fmt-radio.checked:hover {
+        filter: brightness(1.15);
+      }
+
+      /* ---- 新拟态：无边框 + 凹陷容器 + 凸起选中 ---- */
+      :root[data-theme="neo"] .fmt-radios {
+        border: none;
+        box-shadow: var(--neo-inset-sm);
+        border-radius: 12px;
+        padding: 4px;
+        background: var(--card);
+      }
+      :root[data-theme="neo"] .fmt-radio {
+        border-right: none;
+        border-radius: 10px;
+        padding: 7px 12px;
+      }
+      :root[data-theme="neo"] .fmt-radio:first-child {
+        border-top-left-radius: 10px;
+        border-bottom-left-radius: 10px;
+      }
+      :root[data-theme="neo"] .fmt-radio:last-child {
+        border-top-right-radius: 10px;
+        border-bottom-right-radius: 10px;
+      }
+      :root[data-theme="neo"] .fmt-radio:hover {
+        background: var(--ghost-hover);
+      }
+      :root[data-theme="neo"] .fmt-radio.checked {
+        background: var(--primary);
+        color: #fff;
+        box-shadow: 3px 3px 6px rgba(163,177,198,.4), -3px -3px 6px rgba(255,255,255,.7);
+      }
+      :root[data-theme="neo"] .fmt-radio.checked:hover {
+        background: var(--primary-hover);
+        box-shadow: 4px 4px 8px rgba(163,177,198,.45), -4px -4px 8px rgba(255,255,255,.75);
+      }
+      :root[data-theme="neo"][data-mode="dark"] .fmt-radio.checked {
+        box-shadow: 3px 3px 6px rgba(0,0,0,.35), -3px -3px 6px rgba(255,255,255,.04);
+      }
+      :root[data-theme="neo"][data-mode="dark"] .fmt-radio.checked:hover {
+        box-shadow: 4px 4px 8px rgba(0,0,0,.4), -4px -4px 8px rgba(255,255,255,.05);
+      }
+
+      /* ---- 复古互联网：outset 边框 + 按下 inset ---- */
+      :root[data-theme="retro"] .fmt-radios {
+        border: 2px outset var(--border);
+        border-radius: 0;
+      }
+      :root[data-theme="retro"] .fmt-radio {
+        border-right: 2px outset var(--border);
+        font-size: 12px;
+        font-weight: 500;
+      }
+      :root[data-theme="retro"] .fmt-radio:first-child {
+        border-top-left-radius: 0;
+        border-bottom-left-radius: 0;
+      }
+      :root[data-theme="retro"] .fmt-radio:last-child {
+        border-top-right-radius: 0;
+        border-bottom-right-radius: 0;
+      }
+      :root[data-theme="retro"] .fmt-radio:hover {
+        background: var(--ghost-hover);
+      }
+      :root[data-theme="retro"] .fmt-radio.checked {
+        border-style: inset;
+        background: var(--primary);
+        color: #fff;
+      }
+      :root[data-theme="retro"] .fmt-radio.checked:hover {
+        filter: brightness(1.1);
+      }
+      :root[data-theme="retro"][data-mode="dark"] .fmt-radios {
+        border: 2px solid var(--border);
+      }
+      :root[data-theme="retro"][data-mode="dark"] .fmt-radio {
+        border-right-color: var(--border);
+      }
+      :root[data-theme="retro"][data-mode="dark"] .fmt-radio.checked:hover {
+        filter: brightness(1.15);
+      }
+
       @media (max-width: 480px) {
         .chat-box {
           height: 200px;
@@ -905,7 +994,7 @@
         input[type="password"],
         textarea,
         select,
-        .dropdown-trigger {
+        .fmt-radios {
           font-size: 16px;
         }
       }
@@ -1435,21 +1524,15 @@
             </label>
             <div class="field">
               <span>输出格式</span>
-              <div class="dropdown" id="fFormatWrap">
+              <div class="fmt-radios" id="fFormatWrap">
                 <input type="hidden" id="fFormat" value="mp4" />
-                <button
-                  type="button"
-                  class="dropdown-trigger"
-                  id="fFormatTrigger"
-                  aria-haspopup="listbox"
-                  aria-expanded="false"
-                >
-                  <span class="dropdown-label" id="fFormatLabel">MP4</span>
-                  <span class="dropdown-arrow"></span>
-                </button>
-                <div class="dropdown-menu" id="fFormatMenu" role="listbox">
-                  <div class="dropdown-option active" data-value="mp4">MP4</div>
-                  <div class="dropdown-option" data-value="mkv">MKV</div>
+                <div class="fmt-radio checked" data-value="mp4" role="radio" aria-checked="true" tabindex="0">
+                  <svg class="i" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polygon points="5 3 19 12 5 21 5 3"/></svg>
+                  <span>MP4</span>
+                </div>
+                <div class="fmt-radio" data-value="mkv" role="radio" aria-checked="false" tabindex="0">
+                  <svg class="i" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="2" y="2" width="20" height="20" rx="2.18" ry="2.18"/><line x1="7" y1="2" x2="7" y2="22"/><line x1="17" y1="2" x2="17" y2="22"/><line x1="2" y1="12" x2="22" y2="12"/><line x1="2" y1="7" x2="7" y2="7"/><line x1="2" y1="17" x2="7" y2="17"/><line x1="17" y1="7" x2="22" y2="7"/><line x1="17" y1="17" x2="22" y2="17"/></svg>
+                  <span>MKV</span>
                 </div>
               </div>
               <div class="hint">
@@ -1571,18 +1654,6 @@
         ></video>
         <div class="btns">
           <button class="btn btn-ghost" id="playerClose">关闭</button>
-        </div>
-      </div>
-    </div>
-
-    <!-- ================= 操作确认弹窗（外框风格与管理端 admin.html 一致） ================= -->
-    <div class="mask" id="confirmMask">
-      <div class="modal">
-        <h3 id="confirmTitle">确认操作</h3>
-        <p class="msg" id="confirmMsg"></p>
-        <div class="btns">
-          <button class="btn btn-ghost" id="confirmCancel">取消</button>
-          <button class="btn" id="confirmOk">确认</button>
         </div>
       </div>
     </div>
@@ -1769,7 +1840,7 @@
           // 清理旧版本残留的明文凭证（key/user/pwd 已改为令牌模式）
           localStorage.removeItem("catdock_key");
           localStorage.removeItem("catdock_pwd");
-          // 恢复上次选择的输出格式（自绘下拉框需同步显示标签与高亮项）
+          // 恢复上次选择的输出格式（单选框需同步高亮）
           var savedFmt = localStorage.getItem(LS.fmt);
           if (savedFmt === "mp4" || savedFmt === "mkv") setFormat(savedFmt);
         }
@@ -1941,58 +2012,45 @@
         });
 
         // ---------- 过滤规则编辑器（与 admin 端共用 shared.js 的实现） ----------
-        CD.initFilterEditor({ basePath: "filters" });
+        // 保存成功/失败用顶部悬浮条提示，与下载任务提交保持同款外观
+        CD.initFilterEditor({
+          basePath: "filters",
+          notifyOk: function (msg) {
+            showDlAlert("✅ " + msg, true);
+          },
+          notifyErr: function (msg) {
+            showDlAlert("❌ " + msg, false);
+          },
+        });
 
-        // ---------- 输出格式自绘下拉框 ----------
+        // ---------- 输出格式单选框（两选项分段控件） ----------
         var fmtWrap = $("fFormatWrap");
-        var fmtTrigger = $("fFormatTrigger");
-        var fmtMenu = $("fFormatMenu");
         var fmtInput = $("fFormat");
-        var fmtLabel = $("fFormatLabel");
+        var fmtRadios = fmtWrap.querySelectorAll(".fmt-radio");
 
-        function setFormat(value, label) {
+        function setFormat(value) {
           fmtInput.value = value;
-          var opts = fmtMenu.querySelectorAll(".dropdown-option");
-          for (var i = 0; i < opts.length; i++) {
-            var o = opts[i];
-            var match = o.getAttribute("data-value") === value;
-            o.classList.toggle("active", match);
-            if (match && !label) label = o.textContent;
+          for (var i = 0; i < fmtRadios.length; i++) {
+            var r = fmtRadios[i];
+            var match = r.getAttribute("data-value") === value;
+            r.classList.toggle("checked", match);
+            r.setAttribute("aria-checked", match ? "true" : "false");
           }
-          fmtLabel.textContent = label || value.toUpperCase();
         }
 
-        function closeFormatMenu() {
-          fmtWrap.classList.remove("open");
-          fmtTrigger.setAttribute("aria-expanded", "false");
+        for (var i = 0; i < fmtRadios.length; i++) {
+          (function (r) {
+            r.addEventListener("click", function () {
+              setFormat(r.getAttribute("data-value"));
+            });
+            r.addEventListener("keydown", function (e) {
+              if (e.key === "Enter" || e.key === " ") {
+                e.preventDefault();
+                setFormat(r.getAttribute("data-value"));
+              }
+            });
+          })(fmtRadios[i]);
         }
-
-        fmtTrigger.addEventListener("click", function (e) {
-          e.preventDefault();
-          var isOpen = fmtWrap.classList.toggle("open");
-          fmtTrigger.setAttribute("aria-expanded", isOpen ? "true" : "false");
-        });
-
-        fmtMenu.addEventListener("click", function (e) {
-          var opt = e.target;
-          if (!opt.classList.contains("dropdown-option")) return;
-          setFormat(opt.getAttribute("data-value"), opt.textContent);
-          closeFormatMenu();
-        });
-
-        document.addEventListener("click", function (e) {
-          if (
-            fmtWrap.classList.contains("open") &&
-            !fmtWrap.contains(e.target)
-          ) {
-            closeFormatMenu();
-          }
-        });
-        document.addEventListener("keydown", function (e) {
-          if (e.key === "Escape" && fmtWrap.classList.contains("open")) {
-            closeFormatMenu();
-          }
-        });
 
         // ---------- 高级选项悬浮面板（点外部/Esc/再点触发条关闭） ----------
         var advWrap = $("advWrap");
@@ -2212,6 +2270,7 @@
             handleTaskAction(
               btn.getAttribute("data-act"),
               btn.getAttribute("data-id"),
+              btn,
             );
             return;
           }
@@ -2220,7 +2279,7 @@
         });
 
         // ---------- 任务操作（暂停 / 继续 / 删除） ----------
-        function handleTaskAction(act, id) {
+        function handleTaskAction(act, id, btn) {
           if (!id) return;
           if (act === "pause") {
             taskActionRequest("task/pause", id); // 暂停可逆，直接执行；仅删除弹确认框
@@ -2229,14 +2288,9 @@
           } else if (act === "pin") {
             taskActionRequest("task/pin", id); // 置顶到队首，可逆
           } else if (act === "delete") {
-            showConfirm(
-              "删除任务",
-              "确定删除该任务？文件将被一并删除且不可恢复。",
-              true,
-              function () {
-                taskActionRequest("task/delete", id);
-              },
-            );
+            CD.popconfirm(btn, function () {
+              taskActionRequest("task/delete", id);
+            });
           }
         }
 
@@ -2249,30 +2303,6 @@
               CD.toast("操作失败：" + err.message, true);
             });
         }
-
-        function showConfirm(title, msgHtml, danger, onOk) {
-          $("confirmTitle").textContent = title;
-          $("confirmMsg").innerHTML = msgHtml;
-          $("confirmOk").className =
-            "btn " + (danger ? "btn-danger" : "btn-primary");
-          confirmOkHandler = onOk;
-          $("confirmMask").classList.add("show");
-        }
-
-        var confirmOkHandler = null;
-        function closeConfirm() {
-          $("confirmMask").classList.remove("show");
-          confirmOkHandler = null;
-        }
-        $("confirmOk").addEventListener("click", function () {
-          var handler = confirmOkHandler;
-          closeConfirm();
-          if (handler) handler();
-        });
-        $("confirmCancel").addEventListener("click", closeConfirm);
-        $("confirmMask").addEventListener("click", function (e) {
-          if (e.target === $("confirmMask")) closeConfirm();
-        });
 
         function showDetail(id) {
           CD.apiGet("tasks/" + encodeURIComponent(id))
@@ -2707,20 +2737,23 @@
         // 清除聊天记录：请求服务端记录本账号的清理水位，
         // 之后（含刷新/重新登录）不再返回水位之前的消息（存档不删除）
         $("chatClear").addEventListener("click", function () {
-          CD.apiPost("chat/clear", {})
-            .then(function (res) {
-              var clearedId = (res.data || {}).cleared_id || 0;
-              chatRenderedId = Math.max(chatRenderedId, clearedId);
-              chatLastId = Math.max(chatLastId, clearedId);
-              markChatSeen(chatLastId);
-              $("chatBox").innerHTML =
-                '<div class="chat-empty">已清除聊天记录</div>';
-              chatLastDay = "";
-              applyDot();
-            })
-            .catch(function (e) {
-              CD.toast(e.message, true);
-            });
+          var btn = this;
+          CD.popconfirm(btn, function () {
+            CD.apiPost("chat/clear", {})
+              .then(function (res) {
+                var clearedId = (res.data || {}).cleared_id || 0;
+                chatRenderedId = Math.max(chatRenderedId, clearedId);
+                chatLastId = Math.max(chatLastId, clearedId);
+                markChatSeen(chatLastId);
+                $("chatBox").innerHTML =
+                  '<div class="chat-empty">已清除聊天记录</div>';
+                chatLastDay = "";
+                applyDot();
+              })
+              .catch(function (e) {
+                CD.toast(e.message, true);
+              });
+          });
         });
         $("chatCancel").addEventListener("click", closeChat);
         // 导出聊天记录：服务端固定导出最近 7 天（含今天），合并为单个 .log 文件下载

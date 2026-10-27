@@ -279,6 +279,15 @@
   transform: translate(3px, 3px);
   box-shadow: 0 0 0;
 }
+:root[data-theme="pixel"] .btn-danger {
+  border-color: var(--red);
+  background: var(--red);
+  color: #fff;
+}
+:root[data-theme="pixel"] .btn-danger:hover {
+  filter: brightness(1.12);
+  background: var(--red);
+}
 :root[data-theme="pixel"] .card-title {
   font-family: "Press Start 2P", "Courier New", monospace;
   font-weight: 700;
@@ -513,10 +522,6 @@
 :root[data-theme="neo"][data-mode="dark"] .filter-editor .fe-section {
   box-shadow: 6px 6px 12px rgba(0,0,0,.35), -6px -6px 12px rgba(255,255,255,.04);
 }
-:root[data-theme="neo"] .dropdown-trigger {
-  border: none;
-  box-shadow: var(--neo-inset-sm);
-}
 
 /* ===== 复古互联网 (Retro Internet / Web 1.0) ===== */
 :root[data-theme="retro"] {
@@ -614,6 +619,8 @@
   border-style: inset;
 }
 :root[data-theme="retro"] .btn-danger {
+  background: var(--red);
+  color: #fff;
   border: 2px outset #ff4444;
 }
 :root[data-theme="retro"][data-mode="dark"] .btn {
@@ -622,6 +629,11 @@
 }
 :root[data-theme="retro"][data-mode="dark"] .btn-primary {
   border: 2px solid var(--primary);
+}
+:root[data-theme="retro"][data-mode="dark"] .btn-danger {
+  background: var(--red);
+  color: #fff;
+  border: 2px solid var(--red);
 }
 :root[data-theme="retro"] .card-title {
   font-weight: 700;
@@ -677,9 +689,6 @@
 :root[data-theme="retro"][data-mode="dark"] .filter-editor .fe-section {
   border: 2px solid var(--border);
   box-shadow: 2px 2px 0 rgba(0,0,0,.4);
-}
-:root[data-theme="retro"] .dropdown-trigger {
-  border: 2px inset var(--border);
 }
 :root[data-theme="retro"] .progress {
   border: 1px inset var(--border);
@@ -1210,7 +1219,8 @@ select {
   border-radius: 999px;
   padding: 3px 12px;
   font-size: 12px;
-  font-weight: 500;
+  font-weight: normal;
+  font-family: inherit;
   line-height: inherit;
   box-shadow: none;
   align-self: center;
@@ -1284,4 +1294,103 @@ select {
 .filter-actions .btn {
   flex: 1;
   min-width: 0;
+}
+
+/* ---------- Popconfirm 气泡确认框 ---------- */
+.popconfirm {
+  position: fixed;
+  z-index: 150;
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  box-shadow: var(--shadow);
+  padding: 10px 12px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  opacity: 0;
+  transform: scale(0.9);
+  transition: opacity 0.15s, transform 0.15s;
+  pointer-events: none;
+}
+.popconfirm.show {
+  opacity: 1;
+  transform: scale(1);
+  pointer-events: auto;
+}
+.popconfirm .popconfirm-btn {
+  padding: 5px 14px;
+  font-size: 13px;
+  border-radius: 8px;
+  white-space: nowrap;
+}
+.popconfirm .popconfirm-arrow {
+  position: absolute;
+  width: 10px;
+  height: 10px;
+  background: var(--card);
+  border: 1px solid var(--border);
+  transform: rotate(45deg);
+}
+.popconfirm.arrow-top .popconfirm-arrow {
+  top: -6px;
+  border-bottom: none;
+  border-right: none;
+}
+.popconfirm.arrow-bottom .popconfirm-arrow {
+  bottom: -6px;
+  border-top: none;
+  border-left: none;
+}
+/* 像素风：方角 + 粗描边 */
+:root[data-theme="pixel"] .popconfirm {
+  border: 3px solid var(--border);
+  box-shadow: 3px 3px 0 rgba(45,42,38,0.2);
+}
+:root[data-theme="pixel"][data-mode="dark"] .popconfirm {
+  border-color: var(--primary);
+  box-shadow: 3px 3px 0 rgba(255,107,0,0.25);
+}
+:root[data-theme="pixel"] .popconfirm .popconfirm-btn {
+  border: 2px solid var(--border);
+  background: var(--red);
+  color: #fff;
+}
+:root[data-theme="pixel"] .popconfirm .popconfirm-btn:hover {
+  filter: brightness(1.12);
+  background: var(--red);
+}
+/* 新拟态：无描边 + 凹凸阴影 */
+:root[data-theme="neo"] .popconfirm {
+  border: none;
+  box-shadow: 6px 6px 12px rgba(163,177,198,0.4), -6px -6px 12px rgba(255,255,255,0.7);
+}
+:root[data-theme="neo"][data-mode="dark"] .popconfirm {
+  box-shadow: 6px 6px 12px rgba(0,0,0,0.35), -6px -6px 12px rgba(255,255,255,0.04);
+}
+:root[data-theme="neo"] .popconfirm .popconfirm-btn {
+  border: none;
+  box-shadow: 2px 2px 4px rgba(163,177,198,0.3), -2px -2px 4px rgba(255,255,255,0.6);
+}
+:root[data-theme="neo"][data-mode="dark"] .popconfirm .popconfirm-btn {
+  box-shadow: 2px 2px 4px rgba(0,0,0,0.3), -2px -2px 4px rgba(255,255,255,0.03);
+}
+/* 复古互联网：outset 描边 */
+:root[data-theme="retro"] .popconfirm {
+  border: 2px outset var(--border);
+  box-shadow: 2px 2px 0 #808080;
+}
+:root[data-theme="retro"][data-mode="dark"] .popconfirm {
+  border: 2px solid var(--border);
+  box-shadow: 2px 2px 0 rgba(0,0,0,0.4);
+}
+:root[data-theme="retro"] .popconfirm .popconfirm-btn {
+  background: var(--red);
+  color: #fff;
+  border: 2px outset #ff4444;
+}
+:root[data-theme="retro"][data-mode="dark"] .popconfirm .popconfirm-btn {
+  background: var(--red);
+  color: #fff;
+  border: 2px solid var(--red);
 }

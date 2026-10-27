@@ -386,6 +386,84 @@
     $("mask").classList.remove("show");
   }
 
+  // ---------- Popconfirm 气泡确认框 ----------
+  var popconfirmEl = null;
+  var popconfirmHandler = null;
+
+  function closePopconfirm() {
+    if (popconfirmEl) {
+      popconfirmEl.classList.remove("show");
+      setTimeout(function () {
+        if (popconfirmEl && popconfirmEl.parentNode) {
+          popconfirmEl.parentNode.removeChild(popconfirmEl);
+        }
+        popconfirmEl = null;
+      }, 150);
+    }
+    popconfirmHandler = null;
+    document.removeEventListener("click", popconfirmOutsideHandler);
+  }
+
+  function popconfirmOutsideHandler(e) {
+    if (popconfirmEl && !popconfirmEl.contains(e.target)) {
+      closePopconfirm();
+    }
+  }
+
+  function popconfirm(btn, onConfirm) {
+    if (popconfirmEl) {
+      closePopconfirm();
+      return;
+    }
+    popconfirmHandler = onConfirm;
+    var rect = btn.getBoundingClientRect();
+    var el = document.createElement("div");
+    el.className = "popconfirm";
+    el.innerHTML = '<button class="btn btn-danger popconfirm-btn">确认</button>' +
+      '<div class="popconfirm-arrow"></div>';
+    document.body.appendChild(el);
+    popconfirmEl = el;
+
+    var popW = el.offsetWidth;
+    var popH = el.offsetHeight;
+    var gap = 8;
+    var top, arrowClass;
+
+    if (rect.top > popH + gap + 10) {
+      top = rect.top - popH - gap;
+      arrowClass = "arrow-bottom";
+    } else {
+      top = rect.bottom + gap;
+      arrowClass = "arrow-top";
+    }
+    var left = rect.left + rect.width / 2 - popW / 2;
+    left = Math.max(10, Math.min(left, window.innerWidth - popW - 10));
+
+    el.className = "popconfirm " + arrowClass;
+    el.style.top = top + "px";
+    el.style.left = left + "px";
+
+    var arrow = el.querySelector(".popconfirm-arrow");
+    var arrowLeft = rect.left + rect.width / 2 - left;
+    arrowLeft = Math.max(15, Math.min(arrowLeft, popW - 15));
+    arrow.style.left = arrowLeft + "px";
+
+    requestAnimationFrame(function () {
+      el.classList.add("show");
+    });
+
+    el.querySelector(".popconfirm-btn").onclick = function (e) {
+      e.stopPropagation();
+      var handler = popconfirmHandler;
+      closePopconfirm();
+      if (handler) handler();
+    };
+
+    setTimeout(function () {
+      document.addEventListener("click", popconfirmOutsideHandler);
+    }, 0);
+  }
+
   // ---------- API 封装（令牌直读 localStorage，403 交给 CD.onUnauthorized） ----------
   function handleResp(resp) {
     // 检查是否有新令牌（服务端在令牌即将过期时自动续期）
@@ -453,8 +531,27 @@
 
   // ---------- 过滤规则编辑器（user「我的过滤规则」/ admin「过滤规则模板」共用） ----------
   // options.basePath：加载/保存的 API 路径，user 传 "filters"，admin 传 "admin/filters"
+  // options.notifyOk / options.notifyErr：保存成功/失败的提示方式，user 传顶部悬浮条
+  //                   （与「下载任务已添加」同款），不传则沿用弹窗内的 .alert 提示条（admin）
   function initFilterEditor(options) {
     var basePath = options && options.basePath ? options.basePath : "filters";
+    var notifyOk =
+      options && typeof options.notifyOk === "function"
+        ? options.notifyOk
+        : null;
+    var notifyErr =
+      options && typeof options.notifyErr === "function"
+        ? options.notifyErr
+        : null;
+    // 保存失败的统一出口：有 notifyErr 走顶部悬浮条，否则弹窗内提示条
+    function notifyFail(msg) {
+      if (notifyErr) {
+        hideAlert($("filterAlert"));
+        notifyErr(msg);
+      } else {
+        showAlert($("filterAlert"), msg, false);
+      }
+    }
 
     var filterState = {
       keywords: { enabled: false, list: [] },
@@ -464,8 +561,8 @@
 
     // 去重主视图固定只显示 1 条，其余进「更多」
     var DD_VISIBLE = 1;
-    // 广告关键字主视图最多占 2 行；文件名过滤固定 1 行，超出的收纳进「更多」弹窗
-    var CHIP_ROWS = { keywords: 2, filename_filter: 1 };
+    // 广告关键字、文件名过滤主视图各最多占 2 行，超出的收纳进「更多」弹窗
+    var CHIP_ROWS = { keywords: 2, filename_filter: 2 };
     // 两个 chips 区主视图实测可容纳的芯片数，超出部分全部收纳进「更多」弹窗
     var visibleCount = { keywords: 0, filename_filter: 0 };
     var moreCtx = null; // 当前展开的「更多」区块：'keywords' | 'filename_filter' | 'filename_dedup'
@@ -506,43 +603,113 @@
       return chip;
     }
 
-    function fitChipsInRows(wrap, els, gap, key, maxRows) {
+    function fitChipsInRows(wrap, els, key, maxRows) {
       if (!els.length) return 0;
-      // 必须用 getBoundingClientRect 的小数坐标：offsetTop/offsetHeight
-      // 会各自取整（如实际 25.5px 的高度报 26、行距 31.5px 报 31），
-      // 阈值按取整值放大后临界行的芯片恰好差 1px 逃过判定，
-      // 出现「铺了 4 行却被判 3 行内、不出现 +N」的失真
-      var baseTop = els[0].getBoundingClientRect().top;
-      var chipH = els[0].getBoundingClientRect().height;
-      var threshold = baseTop + maxRows * (chipH + gap);
+      // 找到弹窗容器并强制显示滚动条，避免「测量时无滚动条→算出宽度偏大→
+      // 渲染后滚动条出现吃掉宽度→+N 被挤到下一行」的时序错位
+      var modal = wrap.closest(".modal");
+      var savedOverflow = "";
+      if (modal) {
+        savedOverflow = modal.style.overflowY || "";
+        modal.style.overflowY = "scroll";
+      }
+      // 行数判定一律读取芯片的真实行首，不再用「最高芯片 + 行距」推算行高：
+      // 关键字过长会被压成多行、各主题字号/回退字体也会让芯片高度不一致，
+      // 等高铁律会把第 3 行误判成第 2 行，导致 +N 掉到第 3 行
+      function relTop(el) {
+        return el.getBoundingClientRect().top - wrap.getBoundingClientRect().top;
+      }
+      // 已显示芯片占用的行首（1px 容差合并同一行）
+      function chipRowTops() {
+        var tops = [];
+        els.forEach(function (el) {
+          if (el.parentNode !== wrap) return;
+          var t = relTop(el);
+          for (var n = 0; n < tops.length; n++) {
+            if (Math.abs(tops[n] - t) <= 1) return;
+          }
+          tops.push(t);
+        });
+        tops.sort(function (a, b) {
+          return a - b;
+        });
+        return tops;
+      }
+      // 允许区域的下边界：第 maxRows+1 行的行首；行数尚未超限时为 Infinity
+      function rowLimit() {
+        var tops = chipRowTops();
+        return tops.length <= maxRows ? Infinity : tops[maxRows] - 0.5;
+      }
       // 找到第一个超出 maxRows 行的芯片
+      var i;
       var cutoff = els.length;
-      for (var i = 0; i < els.length; i++) {
-        if (els[i].getBoundingClientRect().top >= threshold) {
+      var limit = rowLimit();
+      for (i = 0; i < els.length; i++) {
+        if (relTop(els[i]) >= limit) {
           cutoff = i;
           break;
         }
       }
-      if (cutoff >= els.length) return els.length;
+      if (cutoff >= els.length) {
+        if (modal) modal.style.overflowY = savedOverflow;
+        return els.length;
+      }
       // 移除超量芯片
-      for (var k = els.length - 1; k >= cutoff; k--) wrap.removeChild(els[k]);
+      for (i = els.length - 1; i >= cutoff; i--) wrap.removeChild(els[i]);
       // 探测「更多」按钮是否放得下最后一行
       var probe = document.createElement("button");
       probe.type = "button";
       probe.className = "btn btn-ghost btn-more";
-      probe.textContent = "+" + (els.length - cutoff);
       probe.style.visibility = "hidden";
       wrap.appendChild(probe);
-      if (probe.getBoundingClientRect().top >= threshold && cutoff > 0) {
+      function label() {
+        probe.textContent = "+" + (els.length - cutoff);
+      }
+      label();
+      // +N 是否安稳落在允许行数内：既不越界到下一行，也不贴着容器右缘。
+      // 必须留右缘余量——芯片与 +N 贴边时，字体加载完成后宽度会微变 1~2px，
+      // +N 就会掉到下一行导致主视图行数超标（管理端窄弹窗里最容易卡这条边界）
+      function probeOk() {
+        var pr = probe.getBoundingClientRect();
+        var wr = wrap.getBoundingClientRect();
+        // 最后一行芯片的底边：+N 的 top 落在它上方即视为与芯片同行，
+        // 否则是另起一行（行数直接按「芯片行数 + 1」判断）
+        var lastBottom = 0;
+        els.forEach(function (el) {
+          if (el.parentNode !== wrap) return;
+          var b = el.getBoundingClientRect().bottom - wr.top;
+          if (b > lastBottom) lastBottom = b;
+        });
+        var rows = chipRowTops().length + (pr.top - wr.top < lastBottom ? 0 : 1);
+        if (rows > maxRows) return false;
+        return pr.right <= wr.left + wrap.clientWidth - 2;
+      }
+      // +N 落到允许行数之外或贴边时继续收芯片，直到它安稳待在最后一行行尾
+      while (cutoff > 0 && !probeOk()) {
         cutoff--;
         wrap.removeChild(els[cutoff]);
-        probe.textContent = "+" + (els.length - cutoff);
+        label();
+      }
+      // 收起芯片后弹窗若不再出现滚动条，可用宽度会变大：把收起的芯片逐枚放回，
+      // 只要 +N 仍安稳在允许行数内就保留，放不下立即回滚（同一帧内完成，不会闪烁）
+      var next = cutoff;
+      while (next < els.length) {
+        wrap.insertBefore(els[next], probe);
+        if (!probeOk()) {
+          wrap.removeChild(els[next]);
+          break;
+        }
+        next++;
+        cutoff++;
+        label();
       }
       probe.style.visibility = "";
       probe.title = "查看剩余 " + (els.length - cutoff) + " 项";
       probe.onclick = (function (k) {
         return function () { openMore(k); };
       })(key);
+      // 恢复弹窗原始 overflow 设置
+      if (modal) modal.style.overflowY = savedOverflow;
       return cutoff;
     }
 
@@ -579,9 +746,7 @@
       els.forEach(function (el) {
         wrap.appendChild(el);
       });
-      var gap = parseFloat(getComputedStyle(wrap).columnGap);
-      if (!isFinite(gap) || gap <= 0) gap = 6;
-      visibleCount[key] = fitChipsInRows(wrap, els, gap, key, CHIP_ROWS[key] || 1);
+      visibleCount[key] = fitChipsInRows(wrap, els, key, CHIP_ROWS[key] || 1);
     }
 
     function addKeywords(key, listId, inputId) {
@@ -865,21 +1030,27 @@
           if ((rule.pattern || "").trim()) new RegExp(rule.pattern.trim());
         });
       } catch (err) {
-        showAlert($("filterAlert"), "正则表达式不合法: " + err.message, false);
+        notifyFail("正则表达式不合法: " + err.message);
         return;
       }
       var btn = $("filterSave");
       btn.disabled = true;
       apiPost(basePath, filterState)
         .then(function (data) {
-          showAlert($("filterAlert"), data.message || "已保存", true);
+          var msg = data.message || "已保存";
+          if (notifyOk) {
+            hideAlert($("filterAlert"));
+            notifyOk(msg);
+          } else {
+            showAlert($("filterAlert"), msg, true);
+          }
           setTimeout(function () {
             closeMore();
             $("filterMask").classList.remove("show");
           }, 1200);
         })
         .catch(function (e) {
-          showAlert($("filterAlert"), e.message, false);
+          notifyFail(e.message);
         })
         .finally(function () {
           btn.disabled = false;
@@ -899,6 +1070,27 @@
       clearTimeout(refitTimer);
       refitTimer = setTimeout(refitChips, 120);
     });
+    // 弹窗滚动条出现/消失（内容变高变矮）会改变 chips 可用宽度：
+    // 宽度一变就重测，避免「测量时 +N 放得下、渲染后宽度变窄 +N 掉到第 3 行」
+    if (window.ResizeObserver) {
+      var chipWidths = {};
+      var chipObserver = new ResizeObserver(function (entries) {
+        var widthChanged = false;
+        entries.forEach(function (entry) {
+          var id = entry.target.id;
+          var w = Math.round(entry.contentRect.width);
+          if (chipWidths[id] !== w) {
+            chipWidths[id] = w;
+            widthChanged = true;
+          }
+        });
+        if (!widthChanged) return;
+        clearTimeout(refitTimer);
+        refitTimer = setTimeout(refitChips, 60);
+      });
+      chipObserver.observe($("kwChips"));
+      chipObserver.observe($("ffChips"));
+    }
     if (window.MutationObserver) {
       new MutationObserver(function () {
         clearTimeout(refitTimer);
@@ -932,6 +1124,7 @@
     toast: toast,
     openModal: openModal,
     closeModal: closeModal,
+    popconfirm: popconfirm,
     apiGet: apiGet,
     apiPost: apiPost,
     initFilterEditor: initFilterEditor,
