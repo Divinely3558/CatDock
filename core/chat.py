@@ -6,9 +6,12 @@ config/chatlog/ 目录（随配置卷持久化），每日一个文件（与系�
 文件名 YYYY-MM-DD.log，每行一条（管理与用户格式一致，不区分角色）：
   {"user":"junjie","time":"2026-10-02 15:52:11","msg":"你好"}
 
-- 文件内不存 id：消息 id = 基准值 + 全局行号（每日文件按日期升序合并编号；
-  基准值 = 已被容量裁剪掉的消息总数，存于清理水位文件的 _id_base 键，
-  属内部实现不入日志）；前端凭 id 增量拉取（?after=N）与判断新消息
+- 消息 id 持久化在行内（新格式行带 id 字段）；旧格式行（无 id 字段）按
+  基准值 + 全局行号动态编号（基准值 = 已被容量裁剪掉的消息总数，存于清理
+  水位文件的 _id_base 键）；新消息取号器 _next_id 也持久化在水位文件，
+  与文件行号解耦：存档被外部清理/重建后 id 仍单调递增，不会重排变小
+  （id 重排会让清理水位失准，曾导致聊天室被遗留高水位整体过滤）；
+  前端凭 id 增量拉取（?after=N）与判断新消息
 - 旧版单文件 chat.log 不做迁移（保留原样，不再读写）
 - 「清除聊天记录」按用户记录清理水位（chat_cleared.json），
   拉取时过滤水位之前的消息，刷新/重登后不再出现
@@ -30,9 +33,12 @@ CHAT_DIR = os.path.join(cfg.CONFIG_DIR, 'chatlog')
 # 每日存档文件名
 _DAY_FILE_RE = re.compile(r'^\d{4}-\d{2}-\d{2}\.log$')
 # 各用户的清理水位：{username: 已清理到的最大消息 id}（config 挂载卷内持久化）。
-# 特殊键 _ID_BASE_KEY 保存 id 基准值（非用户名：用户名规则保证不会以下划线开头）
+# 特殊键（非用户名：用户名规则保证不会以下划线开头）：
+#   _ID_BASE_KEY  旧格式行的 id 基准值（被容量裁剪掉的消息总数）
+#   _NEXT_ID_KEY  新消息取号器（下一条消息的 id），与文件行号解耦
 CLEARED_FILE = os.path.join(cfg.CONFIG_DIR, 'chat_cleared.json')
 _ID_BASE_KEY = '_id_base'
+_NEXT_ID_KEY = '_next_id'
 # 水位文件结构版本。存档改为 chatlog/ 按天分文件后 id 从 1 重新编号，与旧版
 # 单文件体系（消息自带 id、文件不迁移）的 id 空间互不相通：旧版遗留的水位
 # 会把新体系的消息全部过滤掉（表现为点开弹窗消息"消失"），故版本不符时
@@ -47,10 +53,14 @@ _lock = threading.Lock()
 
 
 def _line_payload(item):
-    """提取写入文件的字段（id 等内部字段不入日志）"""
-    return {'user': str(item.get('user', '')),
-            'time': str(item.get('time', '')),
-            'msg': str(item.get('msg', ''))}
+    """提取写入文件的字段（新消息行内持久化 id；旧格式行无 id 字段）"""
+    payload = {'user': str(item.get('user', '')),
+               'time': str(item.get('time', '')),
+               'msg': str(item.get('msg', ''))}
+    mid = item.get('id')
+    if isinstance(mid, int) and mid > 0:
+        payload['id'] = mid
+    return payload
 
 
 def _read_base():
@@ -63,6 +73,19 @@ def _save_base(base):
     """更新 id 基准值（与清理水位同文件存储）"""
     data = _read_cleared()
     data[_ID_BASE_KEY] = base
+    _write_cleared(data)
+
+
+def _read_next_id():
+    """新消息取号器（下一条消息的 id）；未初始化返回 0"""
+    v = _read_cleared().get(_NEXT_ID_KEY, 0)
+    return v if isinstance(v, int) and v > 0 else 0
+
+
+def _save_next_id(next_id):
+    """更新新消息取号器（与清理水位同文件存储）"""
+    data = _read_cleared()
+    data[_NEXT_ID_KEY] = next_id
     _write_cleared(data)
 
 
@@ -104,15 +127,20 @@ def _iter_jsonl(path):
 def _load_state():
     """读取消息列表与 id 基准值，须在 _lock 内调用。
 
-    每日文件按日期升序逐行合并，消息 id = base + 全局行序（跨文件连续）。
+    新格式行直接用行内持久化 id；旧格式行（无 id 字段）按 基准值+全局行序
+    动态编号（裁剪只删全局序列前缀并同步推进基准值，旧行 id 保持不变）。
     返回 (messages, base)。
     """
     raw = []
     for path in _list_day_files():
         raw.extend(_iter_jsonl(path))
     base = _read_base()
-    messages = [dict(_line_payload(item), id=base + i)
-                for i, item in enumerate(raw, 1)]
+    messages = []
+    for i, item in enumerate(raw, 1):
+        mid = item.get('id')
+        if not (isinstance(mid, int) and mid > 0):
+            mid = base + i
+        messages.append(dict(_line_payload(item), id=mid))
     return messages, base
 
 
@@ -225,11 +253,16 @@ def read_messages(after_id=0, user=None):
     after_id 传 0 / 负数返回全部（打开弹窗时全量拉取）。
     user 非 None 时叠加该用户的清理水位：id <= 水位的消息一并不返回
     （「清除聊天记录」后刷新/重登不再出现）。
+    兜底：水位超过当前最大 id（存档被外部清理/重建导致 id 重排的遗留状态，
+    表现为所有人永远拉不到任何消息）时视为失效（按未清除处理）——
+    该水位所属的 id 空间已不存在，现存消息立即可见，聊天室自愈。
     """
     with _lock:
         messages, _ = _load_state()
         cleared = _read_cleared().get(str(user), 0) if user else 0
     last_id = messages[-1]['id'] if messages else 0
+    if cleared > last_id:
+        cleared = 0
     floor = max(after_id or 0, cleared or 0)
     if floor <= 0:
         return messages, last_id
@@ -237,14 +270,19 @@ def read_messages(after_id=0, user=None):
 
 
 def append_message(user, msg):
-    """追加一条消息并返回（含动态分配的 id 与服务端时间，东八区）。
+    """追加一条消息并返回（含服务端时间，东八区）。
 
+    消息 id 由持久化取号器 _next_id 分配（与文件行号解耦，存档被外部
+    清理/重建后 id 仍单调递增）；取号器缺失时从当前状态衔接（存量兼容）。
     消息写入当日存档文件；总量超限时从最旧的文件删起收缩。
     写入失败时向上抛出异常，由调用方返回 500。
     """
     with _lock:
         messages, base = _load_state()
-        next_id = (messages[-1]['id'] + 1) if messages else base + 1
+        next_id = _read_next_id()
+        floor = (messages[-1]['id'] + 1) if messages else base + 1
+        if next_id < floor:
+            next_id = floor
         item = {
             'id': next_id,
             'user': str(user),
@@ -252,6 +290,7 @@ def append_message(user, msg):
             'msg': str(msg)[:MAX_LENGTH],
         }
         _append_line(item)
+        _save_next_id(next_id + 1)
         if len(messages) + 1 > MAX_MESSAGES:
             removed = _trim_to_limit()
             if removed:
