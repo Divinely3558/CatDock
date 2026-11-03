@@ -1,0 +1,52 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 720 432" font-family="-apple-system,'Segoe UI',Roboto,'PingFang SC','Microsoft YaHei',sans-serif">
+  <style>
+    .edge{stroke:#1a73e8;stroke-width:2;fill:none;stroke-linecap:round;stroke-linejoin:round}
+    .head{fill:#6b7280}
+    .panel{fill:#f1f4f8;stroke:#e2e5ea}
+    .panel-t{font-size:16px;font-weight:600;fill:#1f2937}
+    .panel-s{font-size:12px;fill:#6b7280}
+    .chip{fill:#ffffff;stroke:#e2e5ea}
+    .chip-t{font-size:14px;font-weight:500;fill:#1f2937}
+    .chip-brand{fill:#e8f0fe;stroke:#1a73e8}
+    .chip-brand-t{font-size:14px;font-weight:500;fill:#1a73e8}
+    .root{fill:#1a73e8}
+    .root-t{font-size:16px;font-weight:600;fill:#ffffff}
+    .root-s{font-size:11px;fill:#ffffff;opacity:.85}
+    .pill{fill:#ffffff;stroke:#1a73e8}
+    .pill-t{font-size:12px;font-weight:500;fill:#1a73e8}
+  </style>
+  <defs>
+    <marker id="arw" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="8" markerHeight="8" markerUnits="userSpaceOnUse" orient="auto">
+      <path d="M1 1 L7 4 L1 7 Z" class="head"/>
+    </marker>
+  </defs>
+  <path class="edge" d="M140 212 H172 Q184 212 184 200 V123 Q184 111 196 111 H222" marker-end="url(#arw)"/>
+  <path class="edge" d="M140 212 H172 Q184 212 184 224 V305 Q184 317 196 317 H222" marker-end="url(#arw)"/>
+  <rect class="pill" x="112" y="140" width="68" height="24" rx="12"/>
+  <text class="pill-t" x="146" y="156" text-anchor="middle">下载用户</text>
+  <rect class="pill" x="112" y="246" width="68" height="24" rx="12"/>
+  <text class="pill-t" x="146" y="262" text-anchor="middle">管理员</text>
+  <rect class="root" x="36" y="186" width="104" height="52" rx="26"/>
+  <text class="root-t" x="88" y="210" text-anchor="middle">登录</text>
+  <text class="root-s" x="88" y="228" text-anchor="middle">AUTH_KEY + 账号</text>
+  <rect class="panel" x="230" y="36" width="454" height="150" rx="12"/>
+  <text class="panel-t" x="258" y="68">下载用户端</text>
+  <text class="panel-s" x="356" y="68">3 个底部 Tab</text>
+  <rect class="chip" x="258" y="92" width="126" height="46" rx="10"/>
+  <text class="chip-t" x="321" y="120" text-anchor="middle">任务</text>
+  <rect class="chip" x="408" y="92" width="126" height="46" rx="10"/>
+  <text class="chip-t" x="471" y="120" text-anchor="middle">聊天室</text>
+  <rect class="chip" x="558" y="92" width="126" height="46" rx="10"/>
+  <text class="chip-t" x="621" y="120" text-anchor="middle">我的</text>
+  <rect class="panel" x="230" y="222" width="454" height="190" rx="12"/>
+  <text class="panel-t" x="258" y="254">管理员端</text>
+  <text class="panel-s" x="344" y="254">3 个底部 Tab</text>
+  <rect class="chip-brand" x="258" y="278" width="126" height="46" rx="10"/>
+  <text class="chip-brand-t" x="321" y="306" text-anchor="middle">运维</text>
+  <rect class="chip" x="408" y="278" width="126" height="46" rx="10"/>
+  <text class="chip-t" x="471" y="306" text-anchor="middle">聊天室</text>
+  <rect class="chip" x="558" y="278" width="126" height="46" rx="10"/>
+  <text class="chip-t" x="621" y="306" text-anchor="middle">我的</text>
+  <rect class="chip" x="258" y="340" width="426" height="46" rx="10"/>
+  <text class="chip-t" x="471" y="368" text-anchor="middle">运维内含：用户管理 · IP 封禁 · 服务器配置 · 日志导出</text>
+</svg>

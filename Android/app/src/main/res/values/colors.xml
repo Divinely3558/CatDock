@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- 窗口底色 = flat 色板 bg：Compose 首帧前的启动底色，避免深色模式闪白 -->
+    <color name="window_background">#F5F7FA</color>
+</resources>

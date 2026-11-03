@@ -72,3 +72,17 @@ ghcr_cleanup.py
 
 # SSH 密钥管理脚本（本地使用，勿提交）
 key.py
+
+# ============================================================
+# Android 构建产物与签名文件（顶层目录的 APK/密钥库）
+# Android/ 子目录的构建产物由 Android/.gitignore 单独管理
+# ============================================================
+*.apk
+*.aab
+*.jks
+*.keystore
+.gradle/
+.kotlin/
+build/
+local.properties
+

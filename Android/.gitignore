@@ -1,0 +1,20 @@
+# Android 构建产物与本地缓存
+build/
+.gradle/
+.kotlin/
+.externalNativeBuild/
+.cxx/
+captures/
+*.apk
+*.aab
+*.log
+
+# 本地 IDE 与 SDK 配置
+local.properties
+.idea/
+*.iml
+.DS_Store
+
+# 本地签名文件
+*.jks
+*.keystore
