@@ -31,11 +31,19 @@ fun AppNav(session: Session, repository: AppRepository, sessionStore: SessionSto
     var addingAccount by remember { mutableStateOf(false) }
 
     val onAuthExpired: (String) -> Unit = { _ ->
-        // 403 后清掉本账号的失效令牌（保留账号条目，重登时预填）
+        // 403 后清掉本账号的失效令牌（保留账号条目与加密凭据，静默重登或预填）
         val accountKey = session.accountKey
         scope.launch { sessionStore.invalidate(accountKey) }
         addingAccount = false
         nav.navigate("login") { popUpTo(0) { inclusive = true } }
+    }
+
+    // 令牌失效（含切网络后长时间未用、后台超时）时用本地加密凭据静默重登，
+    // 成功则立即回到主界面；凭据失效或网络不可达才停留在登录页（字段已预填）
+    LaunchedEffect(session.accountKey, session.isLoggedIn, addingAccount) {
+        if (!session.isLoggedIn && session.accountKey.isNotEmpty() && !addingAccount) {
+            repository.tryAutoRelogin(session)
+        }
     }
 
     NavHost(navController = nav, startDestination = "login") {

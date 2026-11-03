@@ -40,6 +40,13 @@
 - 🛠️ 管理控制台：用户管理（增删改密、禁用/解禁、添加管理员）、IP 封禁管理、AUTH_KEY 随机热更新、全局过滤模板编辑、按日期范围导出运行日志、命令行参考卡片；管理员不能提交下载任务
 - 📝 运行日志按天写入 `config/log/YYYY-MM-DD.log`，管理网页按日期范围合并导出（单次 ≤15 天、跳过无日志日期）
 
+**Android 客户端**
+
+- 📱 原生 Kotlin + Jetpack Compose 客户端（包名 `com.catdock.app`，Android 7.0+）：登录、任务提交与列表、暂停 / 恢复 / 删除 / 置顶、m3u8 边下边看（Media3 ExoPlayer）、聊天室、过滤规则、管理员运维面板（用户 / IP 封禁 / 过滤模板 / `AUTH_KEY` / 日志导出）
+- 🔑 登录只需「服务器完整链接（含 URL 前缀）+ `AUTH_KEY` + 用户名/密码」，与网页两层认证一致；支持多账号保存与一键切换，各账号令牌独立
+- 🛡️ 凭据加密与静默重登：`AUTH_KEY` 与密码经 Android Keystore（AES-256-GCM，密钥不可导出）加密后本地保存，磁盘无明文；令牌过期 / 切换网络后自动重新登录，凭据确认失效或网络不可达时才停留登录页
+- 🎨 与网页同源的四套色板 × 亮暗模式，账号默认色板跨设备同步
+
 **安全与调试**
 
 - 🛡️ SSRF 防护（默认开启）拦截内网/回环/云元数据地址，含重定向逐跳校验（最多 5 跳）；`banip` 与网页均可管理封禁；补充 IPv6 保留网段（`::/96`、`64:ff9b::/96`）防止绕过
@@ -84,6 +91,15 @@ catdock/
 │   ├── favicon.ico      # 🌐 网页图标
 │   ├── vendor/          # 📦 前端第三方库（hls.min.js，构建时内联进 user.html）
 │   └── svg/             # 🎨 主题图标 SVG 素材（供页面内联使用，不随镜像打包）
+├── Android/             # 📱 Android 客户端（Jetpack Compose，不参与镜像构建）
+│   ├── app/src/main/java/com/catdock/app/
+│   │   ├── data/        # 🔌 Retrofit API 客户端 / 多账号会话 / Keystore 加密凭据
+│   │   ├── ui/          # 🎨 登录 / 任务 / 聊天 / 运维 / 我的 / 播放器 / 主题（Compose）
+│   │   ├── MainActivity.kt    # 🚪 入口 Activity（Edge-to-Edge）
+│   │   ├── CatdockApp.kt      # 🧩 Application 装配
+│   │   └── CrashHandler.kt    # 🐞 崩溃捕获与反馈页
+│   ├── app/build.gradle.kts   # 📦 应用配置（applicationId / minSdk 24 / targetSdk 35）
+│   └── gradlew          # 🔧 Gradle Wrapper（构建需 JDK 17 + Android SDK 35）
 ├── sh/                  # 📜 Shell 脚本
 │   ├── entrypoint.sh    # 🚀 容器启动脚本
 │   └── deploy.sh        # 📦 镜像构建/推送/清理脚本（本地使用；仓库不写死 token，凭证走 --token 或 GH_TOKEN/GITHUB_TOKEN）
@@ -253,6 +269,33 @@ docker logs -f catdock     # 查看启动信息
 - **服务信息卡片**（页面底部常驻）：版本号与运行配置摘要（端口/前缀/SSRF/并发/同视频/过滤开关/下载用户数），以及当前前缀对应的猫抓发送地址、请求体模板与常用 API 一览
 
 页面均为纯静态外壳（不含任何敏感信息），所有数据操作都在 `Authorization: Bearer` 请求头中携带令牌调用 API。
+
+## 📱 Android 客户端
+
+源码位于 `Android/`，Kotlin + Jetpack Compose，包名 `com.catdock.app`，最低 Android 7.0（API 24），targetSdk 35。
+
+| 模块 | 说明 |
+| --- | --- |
+| 登录 | 服务器完整链接（含 URL 前缀）+ `AUTH_KEY` + 用户名/密码，与网页两层认证一致；令牌 2 小时、`X-New-Token` 自动续期 |
+| 任务 | 3 秒轮询任务列表，新建下载（文件名 / 格式 / Referer / Cookie / User-Agent），暂停 / 恢复 / 删除 / 置顶，仅显示本人任务 |
+| 预览 | m3u8 边下边看（Media3 ExoPlayer HLS），退出时上报断点，支持断点续看 |
+| 聊天 | 顶栏状态灯入口，新消息变蓝；已读水位按账号保存，支持清除与导出 |
+| 运维 | 管理员面板：用户管理、IP 封禁、过滤模板、`AUTH_KEY` 随机热更新、日志导出 |
+| 多账号 | 保存多个服务器/账号并一键切换，令牌、轮询与聊天水位各自独立 |
+| 外观 | 与网页同源的四套色板 × 亮暗模式，点星星设为账号默认（跨设备同步） |
+
+**凭据存储**：本地持久化令牌、用户名、角色、服务器地址与前缀；`AUTH_KEY` 与密码经 Android Keystore（AES-256-GCM，密钥不可导出、不随备份外流）加密后落盘，仅在令牌失效时用于静默重登。令牌失效不清账号，登录页自动回填四项；凭据被服务端明确拒绝（改密码 / 换 `AUTH_KEY` / 禁用账号）时自动清除并转人工登录，网络不可达则保留凭据待恢复。主动退出或删除账号会同步删除该账号凭据。
+
+**构建**（需 JDK 17 与 Android SDK 35）：
+
+```bash
+cd Android
+./gradlew assembleRelease
+```
+
+产物为 `app/build/outputs/apk/release/app-release-unsigned.apk`，安装前需自行签名（`*.jks`、`*.keystore`、`*.apk` 均已在 `.gitignore` 中排除，密钥不入库）。
+
+**安装提示**：自签名 APK 需在系统设置中允许「未知来源」安装；覆盖升级必须使用同一签名密钥，否则提示签名冲突——若旧版本被安装到访客空间或应用分身，需在各用户空间分别卸载后再安装（例如 `adb shell pm uninstall --user 10 com.catdock.app`）。
 
 ## 🛠️ 管理控制台
 
@@ -862,3 +905,29 @@ A: 可以，容器内 `/home/downloader/N_m3u8DL-RE` 为 Linux amd64 版本。
 - [N_m3u8DL-RE](https://github.com/nilaoda/N_m3u8DL-RE) - 📥 核心下载工具
 - [FFmpeg](https://ffmpeg.org/) - 🎬 视频处理工具
 - [猫抓插件](https://cat-catch.94cat.com/) - 🔌 浏览器资源嗅探插件
+
+## 📋 更新日志
+
+### Android 1.0.1
+
+**新增**
+
+- 🔐 加密保存 `AUTH_KEY` 与密码（Android Keystore AES-256-GCM，密钥不可导出、不随备份外流），令牌失效后自动静默重登
+
+**变更**
+
+- 登录页自动回填服务器完整链接、前缀、用户名、`AUTH_KEY` 与密码
+- 修改密码 / 热更新 `AUTH_KEY` 后同步本地保存的凭据，避免下次重登使用失效凭据
+- 登录页字段按账号维度记忆，令牌续期或会话刷新不再清空正在输入的内容
+
+**修复**
+
+- 切换网络或长时间后台导致令牌失效后，需要重新输入账号、密码与 `AUTH_KEY`（根因：令牌为空时账号信息被一并丢弃，登录页预填失效）
+- 主动退出 / 删除账号时未清除本地加密凭据，存在异常自动重登的风险
+
+### Android 1.0.0
+
+**新增**
+
+- 📱 原生 Android 客户端首发（Kotlin + Jetpack Compose，包名 `com.catdock.app`）：登录、任务提交与管理、暂停 / 恢复 / 删除 / 置顶、m3u8 预览播放、聊天室、过滤规则、管理员运维面板、多账号切换、四套主题 × 亮暗模式
+

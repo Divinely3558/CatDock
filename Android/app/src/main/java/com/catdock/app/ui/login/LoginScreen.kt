@@ -22,6 +22,7 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -72,20 +73,28 @@ fun LoginScreen(
     val spec = LocalSpec.current
     val saved by sessionStore.session.collectAsState(initial = Session())
 
-    var server by remember(saved) {
+    var server by remember(saved.accountKey) {
         mutableStateOf(
             if (saved.serverUrl.isEmpty()) ""
             else saved.serverUrl.trimEnd('/') + "/" + saved.urlPrefix,
         )
     }
-    var key by remember { mutableStateOf("") }
-    var user by remember(saved) { mutableStateOf(saved.username) }
-    var password by remember { mutableStateOf("") }
-    var trustAll by remember(saved) { mutableStateOf(saved.trustAllCerts) }
+    var key by remember(saved.accountKey) { mutableStateOf("") }
+    var user by remember(saved.accountKey) { mutableStateOf(saved.username) }
+    var password by remember(saved.accountKey) { mutableStateOf("") }
+    var trustAll by remember(saved.accountKey) { mutableStateOf(saved.trustAllCerts) }
     var showPwd by remember { mutableStateOf(false) }
     var loading by remember { mutableStateOf(false) }
     var error by remember { mutableStateOf<String?>(null) }
     val scope = rememberCoroutineScope()
+
+    // 回填本地加密保存的 AUTH_KEY / 密码（令牌过期只需点一次登录，无需重输）
+    LaunchedEffect(saved.accountKey) {
+        if (saved.accountKey.isEmpty()) return@LaunchedEffect
+        val cred = sessionStore.credentialsFor(saved.accountKey) ?: return@LaunchedEffect
+        if (key.isBlank()) key = cred.first
+        if (password.isBlank()) password = cred.second
+    }
 
     fun submit() {
         if (loading) return

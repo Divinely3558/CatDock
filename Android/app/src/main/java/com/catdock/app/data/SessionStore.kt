@@ -36,8 +36,9 @@ data class SavedAccount(
 /**
  * 会话状态持久化（多账号版）。
  *
- * 安全纪律对齐网页端：本地仅存 token+user+role+服务器地址/前缀，
- * 从不持久化明文 key/pwd；令牌失效仅清空该账号 token（保留账号条目便于重登预填）。
+ * AUTH_KEY/密码经 [SecureCredentials]（Android Keystore AES-GCM）加密后落盘，
+ * 仅用于令牌失效时静默重登；令牌失效只清空该账号 token，账号条目与加密凭据保留，
+ * 因此登录页永远能预填服务器地址、前缀、用户名与凭据。
  */
 data class Session(
     val serverUrl: String = "",   // 形如 http://host:port（无尾斜杠、无前缀）
@@ -68,11 +69,19 @@ data class Session(
     }
 }
 
+/** 加密前的凭据结构（仅在内存在明文，落盘走 [SecureCredentials.seal]） */
+@Serializable
+private data class CredPayload(
+    val key: String = "",
+    val password: String = "",
+)
+
 class SessionStore(private val context: Context) {
 
     private object Keys {
         val ACCOUNTS = stringPreferencesKey("accounts_json")
         val ACTIVE = stringPreferencesKey("active_key")
+        val CREDENTIALS = stringPreferencesKey("credentials_json")
         // ---- 旧版单账号键：仅用于一次性迁移 ----
         val LEGACY_SERVER = stringPreferencesKey("server_url")
         val LEGACY_PREFIX = stringPreferencesKey("url_prefix")
@@ -127,8 +136,9 @@ class SessionStore(private val context: Context) {
     val accounts: Flow<List<SavedAccount>> = state.map { it.list }
 
     val session: Flow<Session> = state.map { (list, activeKey) ->
+        // 令牌为空也要返回账号信息：登录页据此预填服务器/前缀/用户名，
+        // 并在持有加密凭据时静默重登。isLoggedIn 由 token 是否非空决定。
         list.firstOrNull { it.key == activeKey }
-            ?.takeIf { it.token.isNotEmpty() }
             ?.let { Session.from(it) }
             ?: Session()
     }
@@ -137,13 +147,15 @@ class SessionStore(private val context: Context) {
 
     suspend fun currentAccounts(): List<SavedAccount> = accounts.first()
 
-    /** 登录成功：upsert 账号并设为激活 */
+    /** 登录成功：upsert 账号并设为激活，同时加密保存 AUTH_KEY/密码（供静默重登） */
     suspend fun saveLogin(
         serverUrl: String,
         prefix: String,
         username: String,
         login: LoginData,
         trustAll: Boolean,
+        authKey: String = "",
+        password: String = "",
     ) {
         val acc = SavedAccount(
             serverUrl = serverUrl.trimEnd('/'),
@@ -158,6 +170,63 @@ class SessionStore(private val context: Context) {
             val updated = list.filterNot { it.key == acc.key } + acc
             p[Keys.ACCOUNTS] = encodeAccounts(updated)
             p[Keys.ACTIVE] = acc.key
+        }
+        if (authKey.isNotBlank() || password.isNotBlank()) {
+            saveCredentials(acc.key, authKey, password)
+        }
+    }
+
+    // ---------- 加密凭据（AUTH_KEY / 密码）：仅用于令牌失效后的静默重登 ----------
+
+    private fun decodeCredentials(raw: String?): Map<String, String> =
+        raw?.let { r ->
+            runCatching {
+                json.decodeFromString(MapSerializer(String.serializer(), String.serializer()), r)
+            }.getOrDefault(emptyMap())
+        } ?: emptyMap()
+
+    private fun encodeCredentials(map: Map<String, String>): String =
+        json.encodeToString(MapSerializer(String.serializer(), String.serializer()), map)
+
+    /** 保存某账号的 AUTH_KEY 与密码（加密后写入 DataStore） */
+    suspend fun saveCredentials(accountKey: String, authKey: String, password: String) {
+        if (accountKey.isEmpty()) return
+        val payload = json.encodeToString(CredPayload.serializer(), CredPayload(authKey, password))
+        val sealed = SecureCredentials.seal(payload) ?: return
+        context.dataStore.edit { p ->
+            p[Keys.CREDENTIALS] = encodeCredentials(
+                decodeCredentials(p[Keys.CREDENTIALS]) + (accountKey to sealed),
+            )
+        }
+    }
+
+    /** 读取某账号的 (AUTH_KEY, 密码)；未保存或解密失败返回 null */
+    suspend fun credentialsFor(accountKey: String): Pair<String, String>? {
+        if (accountKey.isEmpty()) return null
+        val sealed = decodeCredentials(context.dataStore.data.first()[Keys.CREDENTIALS])[accountKey]
+            ?: return null
+        val plain = SecureCredentials.open(sealed) ?: return null
+        val payload = runCatching {
+            json.decodeFromString(CredPayload.serializer(), plain)
+        }.getOrNull() ?: return null
+        if (payload.key.isEmpty() && payload.password.isEmpty()) return null
+        return payload.key to payload.password
+    }
+
+    /** 改密成功后同步本地保存的密码，避免下次静默重登仍用旧密码 */
+    suspend fun updateStoredPassword(accountKey: String, password: String) {
+        val saved = credentialsFor(accountKey) ?: return
+        saveCredentials(accountKey, saved.first, password)
+    }
+
+    /** 删除某账号的加密凭据（注销 / 删除账号 / 凭据确认失效时） */
+    suspend fun clearCredentials(accountKey: String) {
+        if (accountKey.isEmpty()) return
+        context.dataStore.edit { p ->
+            val map = decodeCredentials(p[Keys.CREDENTIALS])
+            if (map.containsKey(accountKey)) {
+                p[Keys.CREDENTIALS] = encodeCredentials(map - accountKey)
+            }
         }
     }
 
@@ -216,14 +285,16 @@ class SessionStore(private val context: Context) {
         }
     }
 
-    /** 注销：移除激活账号条目 */
+    /** 注销：移除激活账号条目并删除其加密凭据（避免自动重登） */
     suspend fun logoutActive() {
+        val activeKey = context.dataStore.data.first()[Keys.ACTIVE]
+        if (activeKey.isNullOrEmpty()) return
         context.dataStore.edit { p ->
-            val activeKey = p[Keys.ACTIVE] ?: return@edit
             val list = decodeAccounts(p[Keys.ACCOUNTS])
             p[Keys.ACCOUNTS] = encodeAccounts(list.filterNot { it.key == activeKey })
             p.remove(Keys.ACTIVE)
         }
+        clearCredentials(activeKey)
     }
 
     /** 切换激活账号（不校验令牌，过期账号由 403 流程接管） */
@@ -238,5 +309,6 @@ class SessionStore(private val context: Context) {
             p[Keys.ACCOUNTS] = encodeAccounts(list.filterNot { it.key == acc.key })
             if (p[Keys.ACTIVE] == acc.key) p.remove(Keys.ACTIVE)
         }
+        clearCredentials(acc.key)
     }
 }
