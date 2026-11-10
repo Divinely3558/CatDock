@@ -118,7 +118,8 @@ fun FiltersEditor(
         modifier = Modifier.fillMaxSize(),
         // 左右不留内缩：外层页面已经给了 spec.screenPadding，这里再缩一次会让卡片贴不进栅格宽度
         contentPadding = PaddingValues(top = 4.dp, bottom = spec.bottomInset.dp + 20.dp),
-        verticalArrangement = Arrangement.spacedBy(spec.gap.dp),
+        // 三段规则之间按 16dp 组档，卡内栅格仍用 gap
+        verticalArrangement = Arrangement.spacedBy(spec.groupGap.dp),
     ) {
         if (loading) {
             item { BentoSkeleton(rows = 3, cellHeight = 120.dp) }

@@ -107,7 +107,8 @@ private val BentoLight = CatPalette(
     glow = rgba(230, 57, 124, 0.18f),
     text = C(0x222222),
     text2 = C(0x444444),
-    text3 = C(0x777777),
+    // 玻璃上最浅的一档：#777777 实测 3.84:1，12sp 辅助文字读不清，压深到 4.78:1
+    text3 = C(0x686868),
     primary = C(0xE6397C),
     primaryHover = C(0xC22B64),
     primarySoft = rgba(230, 57, 124, 0.13f),
@@ -142,12 +143,14 @@ private val BentoDark = CatPalette(
     glassStrong = rgba(46, 42, 39, 0.72f),
     card = rgba(52, 47, 42, 0.88f),
     dialog = rgba(48, 43, 38, 0.97f),
-    border = rgba(232, 221, 200, 0.16f),
+    // 玻璃描边提到白 0.20，落进 glassmorphism 的 0.2~0.4 区间
+    border = rgba(232, 221, 200, 0.20f),
     hairline = rgba(232, 221, 200, 0.14f),
     glow = rgba(198, 154, 75, 0.42f),
     text = C(0xE8DDC8),
     text2 = C(0xBFB29C),
-    text3 = C(0x8F8471),
+    // 玻璃上最浅的一档：#8F8471 实测 3.40:1，提到 4.81:1
+    text3 = C(0xA7A08F),
     primary = C(0xC69A4B),
     primaryHover = C(0xD9AE63),
     primarySoft = rgba(198, 154, 75, 0.20f),

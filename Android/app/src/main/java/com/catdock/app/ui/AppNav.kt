@@ -1,18 +1,24 @@
 package com.catdock.app.ui
 
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.Modifier
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.rememberNavController
 import com.catdock.app.data.AppRepository
 import com.catdock.app.data.Session
 import com.catdock.app.data.SessionStore
+import com.catdock.app.ui.components.BentoBackdrop
+import com.catdock.app.ui.login.AccountPickerScreen
 import com.catdock.app.ui.login.LoginScreen
 import com.catdock.app.ui.main.MainScreen
 import com.catdock.app.ui.player.PlayerScreen
@@ -20,46 +26,89 @@ import kotlinx.coroutines.launch
 
 /**
  * 顶层导航：
- *   login（无有效会话） → main（底部三栏：任务/聊天/我的） → player（预览播放）
- * 支持多账号：切换账号原位生效；令牌失效（403）清该账号令牌回登录页；
- * 「添加新账号」从 main 进入 login，此时抑制自动登录回跳。
+ *   accounts（有记录账号） / login（一台都没登录过） → main（底部三栏） → player（预览播放）
+ *
+ * 启动三档：令牌仍有效 → 直接进主界面；有记录账号 → 账号选择页；无记录账号 → 登录表单。
+ * 令牌失效（403）/ 注销 / 删除当前账号 → 回账号选择页（账号都删光了才回登录表单）。
+ * 「添加新账号」「新用户登录」进空表单，可返回账号列表。
  */
 @Composable
 fun AppNav(session: Session, repository: AppRepository, sessionStore: SessionStore) {
     val nav = rememberNavController()
     val scope = rememberCoroutineScope()
-    var addingAccount by remember { mutableStateOf(false) }
+    val accounts by sessionStore.accounts.collectAsState(initial = emptyList())
 
-    val onAuthExpired: (String) -> Unit = { _ ->
-        // 403 后清掉本账号的失效令牌（保留账号条目与加密凭据，静默重登或预填）
-        val accountKey = session.accountKey
-        scope.launch { sessionStore.invalidate(accountKey) }
-        addingAccount = false
-        nav.navigate("login") { popUpTo(0) { inclusive = true } }
-    }
+    // 起始页要等本地会话读出来才能定，先留一帧空态避免闪一下登录表单
+    var startRoute by remember { mutableStateOf<String?>(null) }
+    var blankLoginForm by remember { mutableStateOf(false) }
+    /** 登录页来源：accounts（可返回账号列表）/ main（「我的」添加账号，返回上级） */
+    var loginSource by remember { mutableStateOf("") }
 
-    // 令牌失效（含切网络后长时间未用、后台超时）时用本地加密凭据静默重登，
-    // 成功则立即回到主界面；凭据失效或网络不可达才停留在登录页（字段已预填）
-    LaunchedEffect(session.accountKey, session.isLoggedIn, addingAccount) {
-        if (!session.isLoggedIn && session.accountKey.isNotEmpty() && !addingAccount) {
-            repository.tryAutoRelogin(session)
+    LaunchedEffect(Unit) {
+        val current = sessionStore.current()
+        startRoute = when {
+            current.isLoggedIn -> "main"
+            sessionStore.currentAccounts().isNotEmpty() -> "accounts"
+            else -> "login"
         }
     }
 
-    NavHost(navController = nav, startDestination = "login") {
+    fun enterMain() {
+        nav.navigate("main") { popUpTo(0) { inclusive = true } }
+    }
+
+    /** 回到账号列表；一个账号都不剩时回登录表单（新用户第一次进来就是这个路径） */
+    suspend fun backToAccountList() {
+        val remain = sessionStore.currentAccounts()
+        val target = if (remain.isEmpty()) "login" else "accounts"
+        if (nav.currentBackStackEntry?.destination?.route == target) return
+        nav.navigate(target) { popUpTo(0) { inclusive = true } }
+    }
+
+    val onAuthExpired: (String) -> Unit = { _ ->
+        // 403 后清掉本账号的失效令牌（保留账号条目与加密凭据，账号列表里可直接重登）
+        val accountKey = session.accountKey
+        scope.launch {
+            sessionStore.invalidate(accountKey)
+            backToAccountList()
+        }
+    }
+
+    val route = startRoute
+    if (route == null) {
+        Box(Modifier.fillMaxSize()) { BentoBackdrop() }
+        return
+    }
+
+    NavHost(navController = nav, startDestination = route) {
+        composable("accounts") {
+            AccountPickerScreen(
+                repository = repository,
+                sessionStore = sessionStore,
+                accounts = accounts,
+                session = session,
+                onEnterApp = { enterMain() },
+                onNeedPassword = {
+                    blankLoginForm = false
+                    loginSource = "accounts"
+                    nav.navigate("login")
+                },
+                onNewLogin = {
+                    blankLoginForm = true
+                    loginSource = "accounts"
+                    nav.navigate("login")
+                },
+            )
+        }
         composable("login") {
             LoginScreen(
                 repository = repository,
                 sessionStore = sessionStore,
-                addingAccount = addingAccount,
-                onCancelAdd = {
-                    addingAccount = false
-                    nav.popBackStack()
-                },
-                onLoggedIn = {
-                    addingAccount = false
-                    nav.navigate("main") { popUpTo("login") { inclusive = true } }
-                },
+                blankForm = blankLoginForm,
+                showBack = loginSource.isNotEmpty(),
+                backLabel = if (loginSource == "accounts") "返回账号列表" else "返回",
+                onBack = { nav.popBackStack() },
+                onLoggedIn = { enterMain() },
             )
         }
         composable("main") {
@@ -70,7 +119,8 @@ fun AppNav(session: Session, repository: AppRepository, sessionStore: SessionSto
                 onAuthExpired = onAuthExpired,
                 onOpenPlayer = { taskId -> nav.navigate("player/$taskId") },
                 onAddAccount = {
-                    addingAccount = true
+                    blankLoginForm = true
+                    loginSource = "main"
                     nav.navigate("login")
                 },
             )
@@ -87,15 +137,9 @@ fun AppNav(session: Session, repository: AppRepository, sessionStore: SessionSto
         }
     }
 
-    // 会话驱动的自动跳转：
-    //  - 启动时已持有效令牌 → 进主界面（添加账号模式除外）
-    //  - 会话被清空（删除当前账号 / 注销 / 令牌失效）→ 回登录页
-    LaunchedEffect(session.isLoggedIn, addingAccount) {
+    // 当前账号被删除（注销 / 「我的」里移除）后会话清空：主界面没有可用身份，回账号列表
+    LaunchedEffect(session.accountKey, session.isLoggedIn) {
         val current = nav.currentBackStackEntry?.destination?.route
-        if (session.isLoggedIn && current == "login" && !addingAccount) {
-            nav.navigate("main") { popUpTo("login") { inclusive = true } }
-        } else if (!session.isLoggedIn && current == "main") {
-            nav.navigate("login") { popUpTo(0) { inclusive = true } }
-        }
+        if (current == "main" && session.accountKey.isEmpty()) backToAccountList()
     }
 }

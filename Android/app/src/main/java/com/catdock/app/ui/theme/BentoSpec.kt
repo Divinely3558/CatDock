@@ -18,6 +18,10 @@ data class BentoSpec(
     val grid: Float = 8f,
     /** 网格 gap：亮 12 / 暗 14，小屏压缩到 10 */
     val gap: Float,
+    /** 组与组之间的留白，比栅格 gap 大一档，让分组读得出来 */
+    val groupGap: Float = 16f,
+    /** 通栏列表卡里「带操作按钮的行」的行高下限 */
+    val listRowHeight: Float = 56f,
     /** 屏幕左右内边距 */
     val screenPadding: Float = 14f,
     /** 卡片内边距（最小 10） */
@@ -26,9 +30,9 @@ data class BentoSpec(
     val topInset: Float = 22f,
     /** 手势导航区预留（18–24） */
     val bottomInset: Float = 20f,
-    /** 卡片圆角，全局统一 12 */
-    val cardRadius: Float = 12f,
-    /** 控件圆角，与卡片同值，避免圆角种类过多 */
+    /** 卡片圆角 16：bento 规范区间 16~24dp 取下限，兼顾中文信息密度 */
+    val cardRadius: Float = 16f,
+    /** 控件圆角维持 12，比卡片小一档形成嵌套层次 */
     val controlRadius: Float = 12f,
     /** 徽章用胶囊 */
     val badgeRadius: Float = 999f,
@@ -103,7 +107,7 @@ val LocalBento: ProvidableCompositionLocal<BentoWindow> =
 @Composable
 fun bentoSpec(): BentoSpec = LocalSpec.current
 
-/** 统一 12dp 卡片圆角 */
+/** 统一 16dp 卡片圆角 */
 @Composable
 fun catCardShape(): Shape =
     RoundedCornerShape(LocalSpec.current.cardRadius.dp)

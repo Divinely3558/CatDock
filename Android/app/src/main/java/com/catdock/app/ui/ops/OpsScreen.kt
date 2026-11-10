@@ -8,6 +8,7 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.text.KeyboardOptions
@@ -27,6 +28,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
@@ -278,7 +280,7 @@ private fun SectionScroll(content: @Composable () -> Unit) {
             .fillMaxSize()
             .verticalScroll(scroll)
             .padding(top = 2.dp, bottom = spec.bottomInset.dp + 12.dp),
-        verticalArrangement = Arrangement.spacedBy(spec.gap.dp),
+        verticalArrangement = Arrangement.spacedBy(spec.groupGap.dp),
     ) { content() }
 }
 
@@ -291,27 +293,40 @@ private fun InlineMsg(error: String?, notice: String?) {
 
 @Composable
 private fun UsersSection(users: List<AdminUser>, model: OpsModel, onAdd: () -> Unit, onPassword: (String) -> Unit) {
+    val p = LocalPalette.current
+    val spec = LocalSpec.current
+    // 主操作钉顶做视觉锚点；删除这类危险按钮留在列表卡里，不与主色同卡混排
     CatCard(Modifier.fillMaxWidth().bentoEnter(0)) {
-        CatCardTitle("用户管理", trailing = {
-            Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                CatButton("添加用户", onAdd, variant = CatButtonVariant.PRIMARY, icon = Icons.Filled.Add, small = true)
-                CatButton("刷新", { model.loadUsers() }, variant = CatButtonVariant.GHOST, icon = Icons.Filled.Refresh, small = true)
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            Column(Modifier.weight(1f)) {
+                Text("新增用户", fontSize = 15.sp, fontWeight = FontWeight.SemiBold, color = p.text)
+                Text("用户名 + 初始密码，可选管理员角色", fontSize = 12.sp, color = p.text3)
             }
+            CatButton("添加用户", onAdd, icon = Icons.Filled.Add)
+        }
+    }
+
+    CatCard(Modifier.fillMaxWidth().bentoEnter(1)) {
+        CatCardTitle("用户列表", trailing = {
+            CatButton("刷新", { model.loadUsers() }, variant = CatButtonVariant.GHOST, icon = Icons.Filled.Refresh, small = true)
         })
-        Text("管理员的改密、删除需在容器内用 adminctl 操作。", fontSize = 12.sp, color = LocalPalette.current.text3)
+        Text("管理员的改密、删除需在容器内用 adminctl 操作。", fontSize = 12.sp, color = p.text3)
 
         if (users.isEmpty()) {
-            Text("暂无用户", fontSize = 13.sp, color = LocalPalette.current.text3)
+            Text("暂无用户", fontSize = 13.sp, color = p.text3)
         }
         users.forEach { u ->
             Row(
-                Modifier.fillMaxWidth().padding(vertical = 6.dp),
+                Modifier.fillMaxWidth().heightIn(min = spec.listRowHeight.dp).padding(vertical = 6.dp),
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
             ) {
                 Column(Modifier.weight(1f)) {
-                    Text(u.username, fontSize = 14.sp, color = LocalPalette.current.text)
-                    Text(u.createdAt.ifBlank { "-" }, fontSize = 12.sp, color = LocalPalette.current.text3)
+                    Text(u.username, fontSize = 14.sp, color = p.text)
+                    Text(u.createdAt.ifBlank { "-" }, fontSize = 12.sp, color = p.text3)
                 }
                 Column(
                     horizontalAlignment = Alignment.End,
@@ -328,7 +343,7 @@ private fun UsersSection(users: List<AdminUser>, model: OpsModel, onAdd: () -> U
                             CatButton(if (u.disabled) "解禁" else "禁用", {}, variant = CatButtonVariant.GHOST, small = true, enabled = false)
                             CatButton("删除", {}, variant = CatButtonVariant.DANGER, small = true, enabled = false)
                         }
-                        Text("请用 adminctl 管理", fontSize = 12.sp, color = LocalPalette.current.text3)
+                        Text("请用 adminctl 管理", fontSize = 12.sp, color = p.text3)
                     } else {
                         Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
                             CatButton("改密", { onPassword(u.username) }, variant = CatButtonVariant.GHOST, small = true)
@@ -357,19 +372,31 @@ private fun UsersSection(users: List<AdminUser>, model: OpsModel, onAdd: () -> U
 
 @Composable
 private fun BansSection(bans: List<BanEntry>, model: OpsModel, onBan: () -> Unit) {
+    val p = LocalPalette.current
+    val spec = LocalSpec.current
     CatCard(Modifier.fillMaxWidth().bentoEnter(0)) {
-        CatCardTitle("IP 封禁管理", trailing = {
-            Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                CatButton("封禁 IP", onBan, variant = CatButtonVariant.PRIMARY, icon = Icons.Filled.Add, small = true)
-                CatButton("刷新", { model.loadBans() }, variant = CatButtonVariant.GHOST, icon = Icons.Filled.Refresh, small = true)
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            Column(Modifier.weight(1f)) {
+                Text("封禁新 IP", fontSize = 15.sp, fontWeight = FontWeight.SemiBold, color = p.text)
+                Text("命中风控会自动追加临时封禁", fontSize = 12.sp, color = p.text3)
             }
+            CatButton("封禁 IP", onBan, icon = Icons.Filled.Add)
+        }
+    }
+
+    CatCard(Modifier.fillMaxWidth().bentoEnter(1)) {
+        CatCardTitle("封禁列表", trailing = {
+            CatButton("刷新", { model.loadBans() }, variant = CatButtonVariant.GHOST, icon = Icons.Filled.Refresh, small = true)
         })
         if (bans.isEmpty()) {
-            Text("当前没有被封禁的 IP", fontSize = 13.sp, color = LocalPalette.current.text3)
+            Text("当前没有被封禁的 IP", fontSize = 13.sp, color = p.text3)
         }
         bans.forEach { b ->
             Row(
-                Modifier.fillMaxWidth().padding(vertical = 6.dp),
+                Modifier.fillMaxWidth().heightIn(min = spec.listRowHeight.dp).padding(vertical = 6.dp),
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
             ) {

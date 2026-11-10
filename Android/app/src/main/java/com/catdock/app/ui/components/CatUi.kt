@@ -12,6 +12,7 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.interaction.collectIsFocusedAsState
 import androidx.compose.foundation.interaction.collectIsPressedAsState
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -23,7 +24,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
-import androidx.compose.foundation.layout.navigationBarsPadding
+import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -242,10 +243,10 @@ fun CatButton(
                 enabled = enabled,
                 onClick = onClick,
             )
-            // 主按钮铺满 48dp 触控热区；行内小按钮视觉收一档，靠行间距补足可点区域
-            .heightIn(min = if (small) 40.dp else spec.minTouch.dp)
+            // 主按钮铺满 48dp 触控热区；行内小按钮按 mobile-first 下限收到 44dp，不再更小
+            .heightIn(min = if (small) 44.dp else spec.minTouch.dp)
             .widthIn(min = spec.minTouch.dp)
-            .padding(horizontal = if (small) 12.dp else 18.dp, vertical = if (small) 6.dp else 10.dp),
+            .padding(horizontal = if (small) 12.dp else 18.dp, vertical = if (small) 8.dp else 10.dp),
         contentAlignment = Alignment.Center,
     ) {
         Row(
@@ -332,6 +333,10 @@ fun CatField(
             fontWeight = FontWeight.Medium,
             modifier = Modifier.padding(bottom = 6.dp, start = 2.dp),
         )
+        // M3 1.3.0 的 OutlinedTextField 不开放描边宽度（聚焦恒 2dp），
+        // 这里把它的边框涂成透明、自己补一圈：聚焦 1.5dp 主色，静置 1dp 细边
+        val interaction = remember { MutableInteractionSource() }
+        val focused by interaction.collectIsFocusedAsState()
         OutlinedTextField(
             value = value,
             onValueChange = onValueChange,
@@ -342,6 +347,7 @@ fun CatField(
             keyboardOptions = keyboardOptions,
             visualTransformation = visualTransformation,
             trailingIcon = trailingIcon,
+            interactionSource = interaction,
             // 移动端输入统一 16sp：保证触控手感，也避免系统按小字号缩出行高
             textStyle = TextStyle(fontSize = 16.sp, color = p.text),
             shape = catControlShape(),
@@ -354,12 +360,23 @@ fun CatField(
                 disabledContainerColor = p.codeBg,
                 errorContainerColor = p.inputBg,
                 cursorColor = p.primary,
-                focusedBorderColor = p.primary,
-                unfocusedBorderColor = p.border,
-                errorBorderColor = p.red,
+                focusedBorderColor = Color.Transparent,
+                unfocusedBorderColor = Color.Transparent,
+                errorBorderColor = Color.Transparent,
                 focusedLabelColor = p.primary,
             ),
-            modifier = Modifier.fillMaxWidth().heightIn(min = 52.dp),
+            modifier = Modifier
+                .fillMaxWidth()
+                .heightIn(min = 52.dp)
+                .border(
+                    width = if (focused) 1.5.dp else 1.dp,
+                    color = when {
+                        error != null -> p.red
+                        focused -> p.primary
+                        else -> p.border
+                    },
+                    shape = catControlShape(),
+                ),
         )
         helper?.let {
             Text(it, fontSize = 12.sp, color = p.text3, modifier = Modifier.padding(top = 5.dp, start = 2.dp))
@@ -372,7 +389,7 @@ fun CatField(
 
 // ---------- 进度条 ----------
 
-/** 半透玻璃轨道 + 主色进度条；宽度按 400ms 缓动过渡，不吃轮询的瞬跳值 */
+/** 凹槽 + 实色条：轨道用描边色压暗读出未走完的部分，进度走主色，两端圆头 */
 @Composable
 fun CatProgress(fraction: Float, modifier: Modifier = Modifier) {
     val p = LocalPalette.current
@@ -387,6 +404,8 @@ fun CatProgress(fraction: Float, modifier: Modifier = Modifier) {
         modifier = modifier
             .height(height)
             .fillMaxWidth()
+            // 规范第 97 行写「轨道用 glassCard」，但两个玻璃档都是白底，铺在白卡上等于没画，
+            // 轨道仍用描边色压暗，靠 1dp 描边收边
             .background(p.border.copy(alpha = 0.55f), shape)
             .border(1.dp, p.border, shape),
     ) {
@@ -394,10 +413,7 @@ fun CatProgress(fraction: Float, modifier: Modifier = Modifier) {
             modifier = Modifier
                 .fillMaxWidth(width)
                 .height(height)
-                .background(
-                    Brush.horizontalGradient(listOf(p.primary.copy(alpha = 0.75f), p.primary)),
-                    shape,
-                ),
+                .background(p.primary, shape),
         )
     }
 }
@@ -586,7 +602,7 @@ class CatToastState {
 @Composable
 fun rememberCatToastState(): CatToastState = remember { CatToastState() }
 
-/** 玻璃提示条：贴底部安全区，离手势导航栏 ≥12dp，不贴边、不遮关键按钮 */
+/** 玻璃提示条：顶部居中毛玻璃、5 秒自消，与网页版 CD.toast 行为对齐（顶部不遮底部操作区） */
 @Composable
 fun CatToastHost(state: CatToastState, modifier: Modifier = Modifier) {
     val current = state.message
@@ -597,7 +613,7 @@ fun CatToastHost(state: CatToastState, modifier: Modifier = Modifier) {
 
     LaunchedEffect(nonce) {
         if (current != null) {
-            delay(if (current.error) 4200L else 2600L)
+            delay(5000L)
             if (state.nonce == nonce) state.dismiss()
         }
     }
@@ -605,14 +621,14 @@ fun CatToastHost(state: CatToastState, modifier: Modifier = Modifier) {
     Box(
         modifier = modifier
             .fillMaxSize()
-            .navigationBarsPadding()
+            .statusBarsPadding()
             .padding(horizontal = 28.dp, vertical = 12.dp),
-        contentAlignment = Alignment.BottomCenter,
+        contentAlignment = Alignment.TopCenter,
     ) {
         AnimatedVisibility(
             visible = current != null,
-            enter = fadeIn(tween(220)) + slideInVertically(tween(220)) { it / 2 },
-            exit = fadeOut(tween(180)) + slideOutVertically(tween(180)) { it / 2 },
+            enter = fadeIn(tween(220)) + slideInVertically(tween(220)) { -it / 2 },
+            exit = fadeOut(tween(180)) + slideOutVertically(tween(180)) { -it / 2 },
         ) {
             val p = LocalPalette.current
             Box(

@@ -1,9 +1,12 @@
 package com.catdock.app.ui.components
 
+import android.provider.Settings
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.FastOutSlowInEasing
+import androidx.compose.animation.core.LinearEasing
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.RepeatMode
 import androidx.compose.animation.core.infiniteRepeatable
 import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.tween
@@ -40,6 +43,7 @@ import androidx.compose.animation.core.animateFloat
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.ProvidableCompositionLocal
+import androidx.compose.runtime.State
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.remember
@@ -62,6 +66,7 @@ import androidx.compose.ui.graphics.Shape
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.lerp
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.Dp
@@ -120,16 +125,49 @@ private fun Modifier.softBlur(radius: Dp): Modifier =
     if (supportsSystemBlur && radius > 0.dp) this.blur(radius) else this
 
 /**
- * 背景层：45° 线性渐变（柔黄→浅冰蓝 / 乌木→深乌木）+ 三团同色系柔光 + 滚动视差。
- * 透明度压得很低，不抢卡片内容；状态栏与手势区由渐变本身覆盖。
+ * 光斑呼吸位：aurora-ui 的「Living motion」。返回 null 表示静止（低端机 motion=false，
+ * 或系统「移除动画」被打开），此时降级成纯静态渐变。
  */
 @Composable
-fun BentoBackdrop(modifier: Modifier = Modifier) {
+private fun auroraDrift(durationMillis: Int): State<Float>? {
+    val spec = LocalSpec.current
+    val reduced = LocalContext.current.let { ctx ->
+        remember(ctx) {
+            Settings.Global.getFloat(ctx.contentResolver, Settings.Global.ANIMATOR_DURATION_SCALE, 1f) == 0f
+        }
+    }
+    if (!spec.motion || reduced) return null
+    val transition = rememberInfiniteTransition(label = "aurora$durationMillis")
+    return transition.animateFloat(
+        initialValue = -1f,
+        targetValue = 1f,
+        animationSpec = infiniteRepeatable(
+            animation = tween(durationMillis, easing = LinearEasing),
+            repeatMode = RepeatMode.Reverse,
+        ),
+        label = "drift$durationMillis",
+    )
+}
+
+/**
+ * 背景层：45° 线性渐变（柔黄→浅冰蓝 / 乌木→深乌木）+ 三团同色系柔光 + 滚动视差。
+ * 透明度压得很低，不抢卡片内容；状态栏与手势区由渐变本身覆盖。
+ * blobLift > 1 给登录这类没有正文遮挡的页面用，让光斑在空底上更明显。
+ */
+@Composable
+fun BentoBackdrop(modifier: Modifier = Modifier, blobLift: Float = 1f) {
     val p = LocalPalette.current
     val spec = LocalSpec.current
     val fx = LocalBentoFx.current
     val blur = spec.blurRadius.dp
     val parallax = -fx.scrollPx * 0.25f
+
+    fun lift(c: Color) = c.copy(alpha = (c.alpha * blobLift).coerceAtMost(1f))
+
+    // 三团各走各的周期，错开才不像同一块背景在整体平移；13/17/20s 都在规范 10~30s 区间内
+    val driftA = auroraDrift(13_000)
+    val driftB = auroraDrift(17_000)
+    val driftC = auroraDrift(20_000)
 
     Box(modifier.fillMaxSize()) {
         Box(
@@ -144,9 +182,9 @@ fun BentoBackdrop(modifier: Modifier = Modifier) {
                 ),
         )
         Box(Modifier.fillMaxSize().graphicsLayer { translationY = parallax }) {
-            SoftBlob(Alignment.TopStart, offsetX = (-56).dp, offsetY = (-32).dp, size = 300.dp, color = p.blobA, blur = blur)
-            SoftBlob(Alignment.TopEnd, offsetX = (-24).dp, offsetY = 84.dp, size = 220.dp, color = p.blobB, blur = blur)
-            SoftBlob(Alignment.BottomStart, offsetX = 44.dp, offsetY = (-160).dp, size = 260.dp, color = p.blobC, blur = blur)
+            SoftBlob(Alignment.TopStart, offsetX = (-56).dp, offsetY = (-32).dp, diameter = 300.dp, color = lift(p.blobA), blur = blur, drift = driftA)
+            SoftBlob(Alignment.TopEnd, offsetX = (-24).dp, offsetY = 84.dp, diameter = 220.dp, color = lift(p.blobB), blur = blur, drift = driftB)
+            SoftBlob(Alignment.BottomStart, offsetX = 44.dp, offsetY = (-160).dp, diameter = 260.dp, color = lift(p.blobC), blur = blur, drift = driftC)
         }
     }
 }
@@ -156,20 +194,31 @@ private fun BoxScope.SoftBlob(
     align: Alignment,
     offsetX: Dp,
     offsetY: Dp,
-    size: Dp,
+    diameter: Dp,
     color: Color,
     blur: Dp,
+    drift: State<Float>?,
 ) {
     Box(
         Modifier
             .align(align)
             .offset(x = offsetX, y = offsetY)
-            .size(size)
+            .size(diameter)
             .softBlur(blur)
             .background(
                 Brush.radialGradient(colors = listOf(color, color.copy(alpha = 0f))),
                 CircleShape,
-            ),
+            )
+            // 位移与透明度都只在 graphicsLayer 里改：读 drift.value 不触发重组，掉不到主线程上
+            // 幅度上限 5%（规范「呼吸感但不能抢内容」），透明度只在 0.95~1.0 之间起伏
+            .graphicsLayer {
+                drift?.value?.let { d ->
+                    val r = size.minDimension
+                    translationX = d * 0.05f * r
+                    translationY = -d * 0.04f * r
+                    alpha = 0.95f + 0.05f * (d + 1f) / 2f
+                }
+            },
     )
 }
 

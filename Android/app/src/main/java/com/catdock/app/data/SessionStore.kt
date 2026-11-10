@@ -147,7 +147,10 @@ class SessionStore(private val context: Context) {
 
     suspend fun currentAccounts(): List<SavedAccount> = accounts.first()
 
-    /** 登录成功：upsert 账号并设为激活，同时加密保存 AUTH_KEY/密码（供静默重登） */
+    /**
+     * 登录成功：upsert 账号并设为激活，同时加密保存 AUTH_KEY / 密码。
+     * 无需用户勾选：换网、重启、令牌失效都靠它静默重登。
+     */
     suspend fun saveLogin(
         serverUrl: String,
         prefix: String,
@@ -213,10 +216,19 @@ class SessionStore(private val context: Context) {
         return payload.key to payload.password
     }
 
-    /** 改密成功后同步本地保存的密码，避免下次静默重登仍用旧密码 */
+    /** 改密成功后同步本地保存的密码，避免静默重登仍用旧密码 */
     suspend fun updateStoredPassword(accountKey: String, password: String) {
         val saved = credentialsFor(accountKey) ?: return
         saveCredentials(accountKey, saved.first, password)
+    }
+
+    /**
+     * 凭据被服务端拒绝（KEY 被换 / 密码被改 / 账号禁用）：
+     * 只清密码，保留服务器地址、AUTH_KEY 与用户名，登录页仍可预填。
+     */
+    suspend fun forgetPassword(accountKey: String) {
+        if (accountKey.isEmpty()) return
+        credentialsFor(accountKey)?.let { saveCredentials(accountKey, it.first, "") }
     }
 
     /** 删除某账号的加密凭据（注销 / 删除账号 / 凭据确认失效时） */

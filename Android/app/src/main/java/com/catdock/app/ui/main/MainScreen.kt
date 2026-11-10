@@ -1,6 +1,7 @@
 package com.catdock.app.ui.main
 
 import android.util.Log
+import androidx.compose.foundation.border
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -16,6 +17,7 @@ import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.Chat
 import androidx.compose.material.icons.filled.DarkMode
@@ -37,6 +39,7 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
@@ -56,8 +59,8 @@ import com.catdock.app.ui.components.CatTone
 import com.catdock.app.ui.components.HealthDot
 import com.catdock.app.ui.components.HealthState
 import com.catdock.app.ui.components.LocalBentoFx
-import com.catdock.app.ui.components.bentoPress
 import com.catdock.app.ui.components.bentoSurface
+import com.catdock.app.ui.components.catTap
 import com.catdock.app.ui.components.rememberBentoFx
 import com.catdock.app.ui.ops.OpsScreen
 import com.catdock.app.ui.profile.ProfileScreen
@@ -67,6 +70,7 @@ import com.catdock.app.ui.theme.Appearance
 import com.catdock.app.ui.theme.LocalPalette
 import com.catdock.app.ui.theme.LocalSpec
 import com.catdock.app.ui.theme.ModePreference
+import com.catdock.app.ui.theme.catBadgeShape
 import com.catdock.app.ui.theme.catControlShape
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -172,7 +176,7 @@ fun MainScreen(
     }
 }
 
-/** 顶栏：透明压在渐变上，只留状态灯、标题、身份徽章与右上角主题锚点 */
+/** 顶栏：架构第 2 层玻璃层，玻璃压住渐变与状态栏，标题左、操作右成组间距 8dp */
 @Composable
 private fun CatTopBar(
     title: String,
@@ -181,15 +185,21 @@ private fun CatTopBar(
 ) {
     val p = LocalPalette.current
     val spec = LocalSpec.current
+    val barShape = RoundedCornerShape(
+        bottomStart = spec.cardRadius.dp,
+        bottomEnd = spec.cardRadius.dp,
+    )
     Row(
         Modifier
             .fillMaxWidth()
+            // 模糊压在 statusBarsPadding 之前：玻璃要盖到状态栏那一条，否则头顶露出裸渐变
+            .bentoSurface(shape = barShape, strong = true)
             .statusBarsPadding()
             .padding(horizontal = spec.screenPadding.dp)
             // 状态栏之外再留 20–28dp，标题不透头顶
             .padding(top = spec.topInset.dp - 10.dp, bottom = 10.dp),
         verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(10.dp),
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
     ) {
         HealthDot(dot)
         // 左上黄金视觉区：页面标题 + 当前账号
@@ -231,18 +241,15 @@ private fun CatNavBar(tabs: List<NavTab>, selected: Int, onSelect: (Int) -> Unit
 @Composable
 private fun NavItem(tab: NavTab, on: Boolean, modifier: Modifier = Modifier, onSelect: () -> Unit) {
     val p = LocalPalette.current
+    val spec = LocalSpec.current
     Column(
         modifier
             .padding(horizontal = 4.dp)
-            .heightIn(min = 44.dp)
-            .bentoPress(
-                onClick = onSelect,
-                emphasis = on,
-                shape = catControlShape(),
-                minHeight = 44.dp,
-            ),
+            // 条目本身不再铺玻璃：导航条已经是一层玻璃，再叠就冲破三层纪律
+            .heightIn(min = spec.listRowHeight.dp - 8.dp)
+            .catTap(onClick = onSelect, shape = catControlShape(), ripple = true),
         horizontalAlignment = Alignment.CenterHorizontally,
-        verticalArrangement = Arrangement.spacedBy(2.dp, Alignment.CenterVertically),
+        verticalArrangement = Arrangement.spacedBy(3.dp, Alignment.CenterVertically),
     ) {
         Icon(
             tab.icon,
@@ -250,11 +257,16 @@ private fun NavItem(tab: NavTab, on: Boolean, modifier: Modifier = Modifier, onS
             modifier = Modifier.size(22.dp),
             tint = if (on) p.primary else p.text3,
         )
+        // 当前页只描一枚主色胶囊，不铺填充色块，保持通透
         Text(
             tab.label,
             fontSize = 12.sp,
             fontWeight = if (on) FontWeight.SemiBold else FontWeight.Normal,
             color = if (on) p.primary else p.text3,
+            maxLines = 1,
+            modifier = Modifier
+                .border(spec.stroke.dp, if (on) p.primary else Color.Transparent, catBadgeShape())
+                .padding(horizontal = 7.dp, vertical = 1.dp),
         )
     }
 }

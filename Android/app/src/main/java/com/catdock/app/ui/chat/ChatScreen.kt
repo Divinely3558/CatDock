@@ -299,8 +299,13 @@ fun ChatScreen(
                 }
             }
 
+            // 输入条按玻璃导航那一档做：强玻璃底压住背景，控件本身不再各自透一层
             Row(
-                Modifier.fillMaxWidth().imePadding(),
+                Modifier
+                    .fillMaxWidth()
+                    .imePadding()
+                    .bentoSurface(shape = catControlShape(), strong = true)
+                    .padding(8.dp),
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
             ) {
@@ -367,8 +372,11 @@ private fun ChatRow(m: ChatMessage, mine: Boolean, prev: ChatMessage?) {
             Box(
                 Modifier
                     .padding(horizontal = 4.dp)
-                    // 气泡走同一套玻璃面：自己的用主色着色，对方的只留底与描边
-                    .bentoSurface(shape = catControlShape(), emphasis = mine, strong = mine)
+                    // 气泡不套玻璃：本页信息密度最高，玻璃叠到第三层就压不住正文。
+                    // 用不透明 card 底，自己的那侧再着主色
+                    .background(p.card, catControlShape())
+                    .then(if (mine) Modifier.background(p.primarySoft, catControlShape()) else Modifier)
+                    .border(1.dp, if (mine) p.primary.copy(alpha = 0.45f) else p.border, catControlShape())
                     .padding(horizontal = 12.dp, vertical = 9.dp),
             ) {
                 Text(m.msg, fontSize = 14.sp, color = p.text, lineHeight = 21.sp)

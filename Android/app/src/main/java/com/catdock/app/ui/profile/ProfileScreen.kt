@@ -110,7 +110,8 @@ fun ProfileScreen(
             .verticalScroll(scroll)
             .padding(horizontal = spec.screenPadding.dp)
             .padding(top = spec.topInset.dp - 8.dp, bottom = spec.bottomInset.dp + 16.dp),
-        verticalArrangement = Arrangement.spacedBy(spec.gap.dp),
+        // 组与组之间按 16dp 档，比卡内栅格 gap 大一档，分组读得出来
+        verticalArrangement = Arrangement.spacedBy(spec.groupGap.dp),
     ) {
         // 首屏左上黄金区放最高权重信息：当前账号与角色
         CatCard(

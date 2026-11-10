@@ -3,11 +3,13 @@ package com.catdock.app.ui.tasks
 import android.util.Log
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.widthIn
@@ -218,50 +220,68 @@ fun TasksScreen(
             .fillMaxSize()
             .padding(horizontal = spec.screenPadding.dp)
     ) {
-        when {
-            loading -> BentoSkeleton(
-                rows = 4,
-                modifier = Modifier.fillMaxWidth().padding(top = spec.topInset.dp - 8.dp, bottom = 104.dp),
-            )
-
-            tasks.isEmpty() -> Box(
-                Modifier.fillMaxSize().padding(vertical = 24.dp, horizontal = 8.dp),
-                contentAlignment = Alignment.Center,
+        Column(Modifier.fillMaxSize()) {
+            // bento 视觉锚点：主操作做成 2x1 通栏大卡钉在顶部，替掉原先压在卡片上的悬浮 FAB
+            CatCard(
+                Modifier
+                    .fillMaxWidth()
+                    .bentoEnter(0),
             ) {
-                CatEmptyState(
-                    icon = Icons.Filled.Download,
-                    text = "暂无任务",
-                    hint = "点下方「新建下载」粘贴视频链接",
-                )
-            }
-
-            else -> LazyColumn(
-                // 底部多留 104dp：悬浮的「新建下载」不压住最后一张任务卡
-                contentPadding = PaddingValues(
-                    top = spec.topInset.dp - 8.dp,
-                    bottom = 104.dp,
-                ),
-                verticalArrangement = Arrangement.spacedBy(spec.gap.dp),
-                modifier = Modifier.fillMaxSize(),
-            ) {
-                itemsIndexed(tasks, key = { _, t -> t.id }) { index, t ->
-                    TaskCard(
-                        task = t,
-                        enterIndex = index % 6,
-                        onAction = { act -> vm.op(act, t.id) },
-                        onPreview = { onOpenPlayer(t.id) },
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    val p = LocalPalette.current
+                    Column(Modifier.weight(1f)) {
+                        Text("新建下载", fontSize = 15.sp, fontWeight = FontWeight.SemiBold, color = p.text)
+                        Text("粘贴 m3u8 或视频直链，提交后立即进队列", fontSize = 12.sp, color = p.text3)
+                    }
+                    CatButton(
+                        text = "粘贴链接",
+                        icon = Icons.Filled.Add,
+                        onClick = { showNewTask = true },
                     )
                 }
             }
-        }
 
-        // 主操作落在底部优先操作区，避开手势条与导航栏的安全留白
-        CatButton(
-            text = "新建下载",
-            icon = Icons.Filled.Add,
-            onClick = { showNewTask = true },
-            modifier = Modifier.align(Alignment.BottomEnd).padding(end = 4.dp, bottom = 4.dp),
-        )
+            Box(Modifier.weight(1f).fillMaxWidth()) {
+                when {
+                    loading -> BentoSkeleton(
+                        rows = 4,
+                        modifier = Modifier.fillMaxWidth().padding(top = spec.gap.dp, bottom = spec.bottomInset.dp + 12.dp),
+                    )
+
+                    tasks.isEmpty() -> Box(
+                        Modifier.fillMaxSize().padding(vertical = 24.dp, horizontal = 8.dp),
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        CatEmptyState(
+                            icon = Icons.Filled.Download,
+                            text = "暂无任务",
+                            hint = "点上方「粘贴链接」新建下载任务",
+                        )
+                    }
+
+                    else -> LazyColumn(
+                        contentPadding = PaddingValues(
+                            top = spec.gap.dp,
+                            bottom = spec.bottomInset.dp + 12.dp,
+                        ),
+                        verticalArrangement = Arrangement.spacedBy(spec.gap.dp),
+                        modifier = Modifier.fillMaxSize(),
+                    ) {
+                        itemsIndexed(tasks, key = { _, t -> t.id }) { index, t ->
+                            TaskCard(
+                                task = t,
+                                enterIndex = index % 6,
+                                onAction = { act -> vm.op(act, t.id) },
+                                onPreview = { onOpenPlayer(t.id) },
+                            )
+                        }
+                    }
+                }
+            }
+        }
         CatToastHost(toast)
     }
 
@@ -284,6 +304,7 @@ private fun TaskCard(
     onPreview: () -> Unit,
 ) {
     val p = LocalPalette.current
+    val spec = LocalSpec.current
     val tone = STATUS_TONE[task.status] ?: CatTone.NEUTRAL
     val (toneFg, _) = tone.colors()
     val previewable = task.status == "running" || task.status == "paused"
@@ -337,6 +358,8 @@ private fun TaskCard(
         )
 
         Row(
+            // 操作行按通栏列表卡的 56dp 行高下限撑开，拇指落点不挤
+            modifier = Modifier.fillMaxWidth().heightIn(min = spec.listRowHeight.dp),
             horizontalArrangement = Arrangement.spacedBy(6.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {

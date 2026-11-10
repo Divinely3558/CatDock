@@ -6,7 +6,6 @@ import kotlinx.serialization.json.JsonElement
 import okhttp3.ResponseBody
 import retrofit2.HttpException
 import retrofit2.Response
-import java.util.concurrent.ConcurrentHashMap
 
 /**
  * 仓库层：统一错误处理。所有调用挂 IO 调度器，
@@ -19,8 +18,6 @@ class AppRepository(
     private val sessionStore: SessionStore,
     private val apiClient: ApiClient,
 ) {
-    /** 静默重登已尝试的账号（每进程每账号一次，防止反复失败触发服务端锁定/封禁） */
-    private val autoReloginTried = ConcurrentHashMap.newKeySet<String>()
 
     private suspend fun api(): CatdockApi {
         val session = sessionStore.current()
@@ -85,7 +82,14 @@ class AppRepository(
 
     // ---------- 认证 ----------
 
-    suspend fun login(serverUrl: String, prefix: String, key: String, user: String, password: String, trustAll: Boolean) {
+    suspend fun login(
+        serverUrl: String,
+        prefix: String,
+        key: String,
+        user: String,
+        password: String,
+        trustAll: Boolean,
+    ) {
         val trimmed = serverUrl.trimEnd('/')
         val session = Session(
             serverUrl = trimmed,
@@ -109,38 +113,6 @@ class AppRepository(
             authKey = key,
             password = password,
         )
-    }
-
-    /**
-     * 令牌失效后的静默重登。
-     *
-     * 仅当本地存有该账号的加密凭据时尝试；每账号每进程最多一次。
-     * 服务端明确拒绝（KEY 更换 / 密码改动 / 账号禁用）→ 清除凭据转人工登录；
-     * 网络类故障保留凭据并允许后续重试（换网恢复后即可自动续上）。
-     */
-    suspend fun tryAutoRelogin(session: Session): Boolean {
-        if (session.isLoggedIn || session.accountKey.isEmpty()) return false
-        if (!autoReloginTried.add(session.accountKey)) return false
-        val saved = sessionStore.credentialsFor(session.accountKey) ?: return false
-        return try {
-            login(
-                serverUrl = session.serverUrl,
-                prefix = session.urlPrefix,
-                key = saved.first,
-                user = session.username,
-                password = saved.second,
-                trustAll = session.trustAllCerts,
-            )
-            // 成功即重置尝试标记：同一进程内令牌日后再次过期（如长时间后台）仍可自动重登
-            autoReloginTried.remove(session.accountKey)
-            true
-        } catch (e: ApiException) {
-            sessionStore.clearCredentials(session.accountKey)
-            false
-        } catch (e: Exception) {
-            autoReloginTried.remove(session.accountKey)
-            false
-        }
     }
 
     suspend fun logout() {

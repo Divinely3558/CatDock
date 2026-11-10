@@ -59,38 +59,45 @@ import kotlinx.coroutines.launch
 /**
  * 登录页：服务器完整链接（含 URL 前缀）+ AUTH_KEY + 用户名/密码，
  * 与服务器两层认证（key → user/password）一一对应。
- * 从「我的→添加新账号」进入时带返回。
+ * [blankForm] 为「新用户登录 / 添加新账号」：空表单，不带入已记录账号；
+ * [showBack] 进来时可返回上一页（账号列表或「我的」）。
  */
 @Composable
 fun LoginScreen(
     repository: AppRepository,
     sessionStore: SessionStore,
-    addingAccount: Boolean = false,
-    onCancelAdd: () -> Unit = {},
+    blankForm: Boolean = false,
+    showBack: Boolean = false,
+    backLabel: String = "返回账号列表",
+    onBack: () -> Unit = {},
     onLoggedIn: () -> Unit,
 ) {
     val p = LocalPalette.current
     val spec = LocalSpec.current
     val saved by sessionStore.session.collectAsState(initial = Session())
 
-    var server by remember(saved.accountKey) {
+    var server by remember(saved.accountKey, blankForm) {
         mutableStateOf(
-            if (saved.serverUrl.isEmpty()) ""
-            else saved.serverUrl.trimEnd('/') + "/" + saved.urlPrefix,
+            when {
+                blankForm || saved.serverUrl.isEmpty() -> ""
+                else -> saved.serverUrl.trimEnd('/') + "/" + saved.urlPrefix
+            },
         )
     }
-    var key by remember(saved.accountKey) { mutableStateOf("") }
-    var user by remember(saved.accountKey) { mutableStateOf(saved.username) }
-    var password by remember(saved.accountKey) { mutableStateOf("") }
-    var trustAll by remember(saved.accountKey) { mutableStateOf(saved.trustAllCerts) }
+    var key by remember(saved.accountKey, blankForm) { mutableStateOf("") }
+    var user by remember(saved.accountKey, blankForm) { mutableStateOf(if (blankForm) "" else saved.username) }
+    var password by remember(saved.accountKey, blankForm) { mutableStateOf("") }
+    var trustAll by remember(saved.accountKey, blankForm) {
+        mutableStateOf(!blankForm && saved.trustAllCerts)
+    }
     var showPwd by remember { mutableStateOf(false) }
     var loading by remember { mutableStateOf(false) }
     var error by remember { mutableStateOf<String?>(null) }
     val scope = rememberCoroutineScope()
 
     // 回填本地加密保存的 AUTH_KEY / 密码（令牌过期只需点一次登录，无需重输）
-    LaunchedEffect(saved.accountKey) {
-        if (saved.accountKey.isEmpty()) return@LaunchedEffect
+    LaunchedEffect(saved.accountKey, blankForm) {
+        if (blankForm || saved.accountKey.isEmpty()) return@LaunchedEffect
         val cred = sessionStore.credentialsFor(saved.accountKey) ?: return@LaunchedEffect
         if (key.isBlank()) key = cred.first
         if (password.isBlank()) password = cred.second
@@ -130,14 +137,16 @@ fun LoginScreen(
     }
 
     Box(Modifier.fillMaxSize()) {
-        BentoBackdrop()
+        // 登录页没有正文遮挡，光斑抬一档，玻璃才透得出东西
+        BentoBackdrop(blobLift = 1.35f)
         Column(
             Modifier
                 .fillMaxSize()
                 .verticalScroll(rememberScrollState())
                 .statusBarsPadding()
                 .padding(horizontal = spec.screenPadding.dp)
-                .padding(top = spec.topInset.dp, bottom = spec.bottomInset.dp),
+                // 底部多留 96dp：整块内容在剩余空间里居中偏上，不贴着屏幕正中
+                .padding(top = spec.topInset.dp, bottom = spec.bottomInset.dp + 96.dp),
             horizontalAlignment = Alignment.CenterHorizontally,
             verticalArrangement = Arrangement.Center,
         ) {
@@ -154,9 +163,9 @@ fun LoginScreen(
                 ) {
                     Image(
                         painter = painterResource(
-                            if (addingAccount) R.drawable.ic_add_account_logo else R.drawable.ic_login_logo,
+                            if (blankForm) R.drawable.ic_add_account_logo else R.drawable.ic_login_logo,
                         ),
-                        contentDescription = if (addingAccount) "新增" else "登录",
+                        contentDescription = if (blankForm) "新增" else "登录",
                         modifier = Modifier.size(32.dp),
                     )
                 }
@@ -167,14 +176,13 @@ fun LoginScreen(
                         fontWeight = FontWeight.Black,
                         color = p.primary,
                     )
-                    Text("容器下载控制台", fontSize = 13.sp, color = p.text2)
                 }
             }
 
-            if (addingAccount) {
+            if (showBack) {
                 CatButton(
-                    "返回上一个账号",
-                    onCancelAdd,
+                    backLabel,
+                    onBack,
                     modifier = Modifier.fillMaxWidth().padding(top = 16.dp),
                     variant = CatButtonVariant.GHOST,
                     icon = Icons.AutoMirrored.Filled.ArrowBack,

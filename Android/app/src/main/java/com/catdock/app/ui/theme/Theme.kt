@@ -137,6 +137,8 @@ private fun lerpSpec(a: BentoSpec, b: BentoSpec, t: Float): BentoSpec {
     return BentoSpec(
         grid = f(a.grid, b.grid),
         gap = f(a.gap, b.gap),
+        groupGap = f(a.groupGap, b.groupGap),
+        listRowHeight = f(a.listRowHeight, b.listRowHeight),
         screenPadding = f(a.screenPadding, b.screenPadding),
         cardPadding = f(a.cardPadding, b.cardPadding),
         topInset = f(a.topInset, b.topInset),
