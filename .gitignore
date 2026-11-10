@@ -86,3 +86,6 @@ key.py
 build/
 local.properties
 
+
+# ai-design-skills 规范原文导出（由全局 npm 包提供，不入库）
+/ai-design-skills/

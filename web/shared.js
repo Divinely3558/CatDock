@@ -219,7 +219,7 @@
   function init() {
     // 刷新按钮图标/标题（head 阶段执行时按钮可能尚未解析，这里再来一次）；
     // 登录页（data-static-theme）同首屏一样跳过，防止 DOMContentLoaded 后
-    // 会话主题/存储的亮暗模式覆盖固定手绘风
+    // 会话主题/存储的亮暗模式覆盖登录页自身的固定深色
     if (!document.documentElement.hasAttribute("data-static-theme")) {
       applyTheme();
       applyMode();
@@ -248,7 +248,7 @@
   }
 
   /* 尽早把主题/亮暗写到 <html>，避免首屏先闪默认主题（FOUC）。
-     登录页（data-static-theme）外观固定为手绘俏皮风，不参与主题/亮暗切换：
+     登录页（data-static-theme）外观固定为极光玻璃深色风，不参与主题/亮暗切换：
      若仍应用会话主题，pixel/retro 的圆角清零、字体替换会破坏登录页设计 */
   if (!document.documentElement.hasAttribute("data-static-theme")) {
     applyTheme();
@@ -315,7 +315,7 @@
     clearTimeout(toastTimer);
     toastTimer = setTimeout(function () {
       el.className = "toast" + (isErr ? " err" : "");
-    }, 2600);
+    }, 5000);
   }
 
   // ---------- 通用弹层（以 admin 版本为超集：支持 titleExtra 与 checkbox 字段） ----------

@@ -20,8 +20,8 @@
   --mask: rgba(17, 24, 39, 0.45);
   --blue: #2563eb;
   --blue-soft: #eff6ff;
-  --radius: 12px;
-  --shadow: 0 1px 3px rgba(16, 24, 40, 0.08), 0 1px 2px rgba(16, 24, 40, 0.04);
+  --radius: 8px;
+  --shadow: 0 1px 2px rgba(16, 24, 40, 0.06);
   /* 滚动条基础变量兜底（各色板在各自块内覆盖，见「滚动条主题化」段） */
   --sb-size: 8px;
   --sb-thumb: rgba(24, 120, 76, 0.25);
@@ -48,7 +48,8 @@
   --mask: rgba(0, 0, 0, 0.6);
   --blue: #60a5fa;
   --blue-soft: #1e3a8a;
-  --shadow: 0 1px 3px rgba(0, 0, 0, 0.3), 0 1px 2px rgba(0, 0, 0, 0.2);
+  --toast-bg: rgba(30, 41, 59, 0.88);
+  --shadow: 0 1px 2px rgba(0, 0, 0, 0.3);
 }
 
 /* ===== 极简扁平 (Minimal Flat) — 默认主题 ===== */
@@ -68,8 +69,8 @@
   --amber-soft: #fef7e0;
   --red: #d93025;
   --red-soft: #fce8e6;
-  --radius: 12px;
-  --shadow: 0 1px 3px rgba(0,0,0,.08), 0 1px 2px rgba(0,0,0,.04);
+  --radius: 8px; /* flat 圆角纪律：卡片 8px、控件 6px（卡片用 --radius，控件在组件规则写死 6px） */
+  --shadow: 0 1px 2px rgba(0,0,0,.06); /* 扁平：投影只留极轻一档 */
   --sb-size: 8px;
   --sb-thumb: rgba(26,115,232,.2);
   --sb-thumb-hover: rgba(26,115,232,.35);
@@ -96,7 +97,7 @@
   --amber-soft: rgba(251,191,36,.1);
   --red: #f87171;
   --red-soft: rgba(248,113,113,.1);
-  --shadow: 0 1px 3px rgba(0,0,0,.3), 0 1px 2px rgba(0,0,0,.2);
+  --shadow: 0 1px 2px rgba(0,0,0,.3);
   --sb-thumb: rgba(74,158,255,.2);
   --sb-thumb-hover: rgba(74,158,255,.35);
 }
@@ -109,24 +110,24 @@
 }
 :root[data-theme="flat"] .card,
 :root:not([data-theme]) .card {
-  border-radius: 14px;
+  border-radius: 8px;
   border: 1px solid var(--border);
-  box-shadow: 0 1px 3px rgba(0,0,0,.06);
-  transition: box-shadow .2s ease, transform .2s ease;
+  box-shadow: 0 1px 2px rgba(0,0,0,.05);
+  transition: box-shadow .25s ease, transform .25s ease;
 }
 :root[data-theme="flat"] .card:hover,
 :root:not([data-theme]) .card:hover {
-  box-shadow: 0 4px 12px rgba(0,0,0,.08);
+  box-shadow: 0 2px 6px rgba(0,0,0,.08);
   transform: translateY(-1px);
 }
 :root[data-theme="flat"][data-mode="dark"] .card:hover,
 :root:not([data-theme])[data-mode="dark"] .card:hover {
-  box-shadow: 0 4px 16px rgba(0,0,0,.25);
+  box-shadow: 0 2px 8px rgba(0,0,0,.25);
 }
 :root[data-theme="flat"] .btn,
 :root:not([data-theme]) .btn {
-  border-radius: 10px;
-  transition: transform .12s, background .15s, border-color .15s, box-shadow .15s;
+  border-radius: 6px;
+  transition: transform .15s, background .15s, border-color .15s, box-shadow .15s;
 }
 :root[data-theme="flat"] .btn:hover,
 :root:not([data-theme]) .btn:hover {
@@ -138,21 +139,21 @@
 }
 :root[data-theme="flat"] .btn-primary,
 :root:not([data-theme]) .btn-primary {
-  box-shadow: 0 1px 3px rgba(26,115,232,.25);
+  box-shadow: 0 1px 2px rgba(26,115,232,.25);
 }
 :root[data-theme="flat"][data-mode="dark"] .btn-primary,
 :root:not([data-theme])[data-mode="dark"] .btn-primary {
-  box-shadow: 0 1px 4px rgba(74,158,255,.3);
+  box-shadow: 0 1px 2px rgba(74,158,255,.3);
 }
+/* 顶栏实底 + 1px 底边线，不用透明/模糊 */
 :root[data-theme="flat"] .topbar,
 :root:not([data-theme]) .topbar {
-  background: rgba(255,255,255,.88);
-  backdrop-filter: blur(12px);
+  background: var(--card);
   border-bottom: 1px solid var(--border);
 }
 :root[data-theme="flat"][data-mode="dark"] .topbar,
 :root:not([data-theme])[data-mode="dark"] .topbar {
-  background: rgba(17,24,39,.92);
+  background: var(--card);
 }
 :root[data-theme="flat"] .card-title,
 :root:not([data-theme]) .card-title {
@@ -161,7 +162,7 @@
 }
 :root[data-theme="flat"] .task-item,
 :root:not([data-theme]) .task-item {
-  border-radius: 10px;
+  border-radius: 6px;
   border: 1px solid var(--border);
   transition: border-color .15s, box-shadow .15s;
 }
@@ -180,6 +181,9 @@
   --bg: #fdf6e3;
   --card: #fffdf7;
   --border: #2d2a26;
+  /* 对比度纪律 ≥4.5:1：米色底上基础灰字（#6b7280/#9ca3af）不达标，像素风用深一档灰 */
+  --text-2: #5c5648;
+  --text-3: #6e6759;
   --primary-soft: #fff0e0;
   --code-bg: #faf3e8;
   --primary: #e85d04;
@@ -206,6 +210,8 @@
   --bg: #0d0d0d;
   --card: #1a1714;
   --border: #e85d04;
+  /* 暗底灰字对比度：#64748b 在 #0d0d0d 上约 4.4:1 不达标，提到 #7d8ba0（≈5.8:1） */
+  --text-3: #7d8ba0;
   --code-bg: #0a0a08;
   --input-bg: #0a0a08;
   --primary: #ff6b00;
@@ -255,8 +261,8 @@
   font-size: 13px;
   box-shadow: 3px 3px 0px rgba(45, 42, 38, 0.2);
   transition:
-    transform 0.05s,
-    box-shadow 0.05s;
+    transform 0.15s,
+    box-shadow 0.15s;
 }
 :root[data-theme="pixel"] .btn:hover {
   border-color: var(--primary);
@@ -315,6 +321,15 @@
   border-color: var(--primary);
   box-shadow: 3px 3px 0px var(--primary);
 }
+/* 暗色模式：焦点框/主按钮在硬阴影上叠一层 1px 级低透明霓虹橙外发光（cyberpunk 借一点，不过量） */
+:root[data-theme="pixel"][data-mode="dark"] input:focus,
+:root[data-theme="pixel"][data-mode="dark"] textarea:focus,
+:root[data-theme="pixel"][data-mode="dark"] select:focus {
+  box-shadow: 3px 3px 0px var(--primary), 0 0 6px rgba(255, 107, 0, 0.35);
+}
+:root[data-theme="pixel"][data-mode="dark"] .btn-primary {
+  box-shadow: 3px 3px 0px rgba(255, 107, 0, 0.3), 0 0 6px rgba(255, 107, 0, 0.25);
+}
 :root[data-theme="pixel"] .user-chip {
   border: 3px solid var(--primary);
   border-radius: 0px;
@@ -350,10 +365,22 @@
   );
 }
 /* 像素风滚动条由全局 --sb-* 变量驱动（粗轨道 + 描边 + 方块滑块），此处无需额外规则 */
+/* pixel Toast：不透明实底，不用毛玻璃（硬边风格） */
+:root[data-theme="pixel"] .toast {
+  background: var(--card);
+  -webkit-backdrop-filter: none;
+  backdrop-filter: none;
+}
+/* 对比度纪律：米黄软底（#fff0e0）上橙字 #e85d04 仅 ≈3.3:1，改用深橙 #c2410c（≈4.5:1） */
+:root[data-theme="pixel"]:not([data-mode="dark"]) .filter-editor .chips .chip,
+:root[data-theme="pixel"]:not([data-mode="dark"]) .filter-editor .btn.btn-more,
+:root[data-theme="pixel"]:not([data-mode="dark"]) .badge-running {
+  color: #c2410c;
+}
 :root[data-theme="pixel"] .task-item {
   border-radius: 0;
   border: 3px solid #2d2a26;
-  padding: 10px 12px;
+  padding: 14px 16px; /* 垂直 14px：3px 粗边框 -2px 补偿，与锁定块 16px/1px 边框的任务项同高 */
   font-family: "Press Start 2P", monospace;
   font-size: 10px;
 }
@@ -385,7 +412,12 @@
   --red: #d63031;
   --red-soft: rgba(214,48,49,.1);
   --radius: 18px;
+  /* 全站阴影统一为同一组参数（组件 3px / 弹层 6px / 卡片 8px / 悬停 12px 四档，明暗双侧成对） */
   --shadow: 8px 8px 16px rgba(163,177,198,.45), -8px -8px 16px rgba(255,255,255,.85);
+  --shadow-hover: 12px 12px 24px rgba(163,177,198,.5), -12px -12px 24px rgba(255,255,255,.9);
+  --neo-out-sm: 3px 3px 6px rgba(163,177,198,.4), -3px -3px 6px rgba(255,255,255,.7);
+  --neo-out-sm-hover: 4px 4px 8px rgba(163,177,198,.45), -4px -4px 8px rgba(255,255,255,.75);
+  --neo-out-md: 6px 6px 12px rgba(163,177,198,.4), -6px -6px 12px rgba(255,255,255,.7);
   --neo-inset: inset 4px 4px 8px rgba(163,177,198,.45), inset -4px -4px 8px rgba(255,255,255,.85);
   --neo-inset-sm: inset 3px 3px 6px rgba(163,177,198,.4), inset -3px -3px 6px rgba(255,255,255,.7);
   /* 轨道必须透明：新拟态弹窗大圆角，带底色/描边的方形轨道会在圆角处
@@ -415,9 +447,14 @@
   --amber-soft: rgba(250,177,160,.1);
   --red: #ff7675;
   --red-soft: rgba(255,118,117,.1);
-  --shadow: 8px 8px 16px rgba(0,0,0,.35), -8px -8px 16px rgba(255,255,255,.04);
-  --neo-inset: inset 4px 4px 8px rgba(0,0,0,.35), inset -4px -4px 8px rgba(255,255,255,.04);
-  --neo-inset-sm: inset 3px 3px 6px rgba(0,0,0,.3), inset -3px -3px 6px rgba(255,255,255,.03);
+  /* 暗色亮侧阴影 .04→.06（.03→.05 / .05→.07 同档提升），提升浮雕辨识度 */
+  --shadow: 8px 8px 16px rgba(0,0,0,.35), -8px -8px 16px rgba(255,255,255,.06);
+  --shadow-hover: 12px 12px 24px rgba(0,0,0,.4), -12px -12px 24px rgba(255,255,255,.07);
+  --neo-out-sm: 3px 3px 6px rgba(0,0,0,.35), -3px -3px 6px rgba(255,255,255,.06);
+  --neo-out-sm-hover: 4px 4px 8px rgba(0,0,0,.4), -4px -4px 8px rgba(255,255,255,.07);
+  --neo-out-md: 6px 6px 12px rgba(0,0,0,.35), -6px -6px 12px rgba(255,255,255,.06);
+  --neo-inset: inset 4px 4px 8px rgba(0,0,0,.35), inset -4px -4px 8px rgba(255,255,255,.06);
+  --neo-inset-sm: inset 3px 3px 6px rgba(0,0,0,.3), inset -3px -3px 6px rgba(255,255,255,.05);
   --sb-thumb: rgba(162,155,254,.25);
   --sb-thumb-hover: rgba(162,155,254,.4);
   --sb-track-border: none;
@@ -438,26 +475,30 @@
   transition: box-shadow .25s;
 }
 :root[data-theme="neo"] .card:hover {
-  box-shadow: 12px 12px 24px rgba(163,177,198,.5), -12px -12px 24px rgba(255,255,255,.9);
+  box-shadow: var(--shadow-hover);
 }
 :root[data-theme="neo"][data-mode="dark"] .card:hover {
-  box-shadow: 12px 12px 24px rgba(0,0,0,.4), -12px -12px 24px rgba(255,255,255,.05);
+  box-shadow: var(--shadow-hover);
 }
 :root[data-theme="neo"] .btn {
   border-radius: 14px;
   border: none;
-  box-shadow: 3px 3px 6px rgba(163,177,198,.4), -3px -3px 6px rgba(255,255,255,.7);
-  transition: box-shadow .15s, transform .1s;
+  box-shadow: var(--neo-out-sm);
+  transition: box-shadow .25s, transform .15s;
 }
 :root[data-theme="neo"][data-mode="dark"] .btn {
-  box-shadow: 3px 3px 6px rgba(0,0,0,.35), -3px -3px 6px rgba(255,255,255,.04);
+  box-shadow: var(--neo-out-sm);
+}
+/* 凸=可点、凹=按下、平=禁用：禁用态去掉挤出阴影改纯平 */
+:root[data-theme="neo"] .btn:disabled {
+  box-shadow: none;
 }
 :root[data-theme="neo"] .btn:active:not(:disabled) {
   box-shadow: var(--neo-inset-sm);
   transform: none;
 }
 :root[data-theme="neo"] .btn-primary {
-  box-shadow: 3px 3px 6px rgba(163,177,198,.4), -3px -3px 6px rgba(255,255,255,.7);
+  box-shadow: var(--neo-out-sm);
 }
 :root[data-theme="neo"] .btn-primary:active:not(:disabled) {
   box-shadow: var(--neo-inset-sm);
@@ -490,16 +531,16 @@
 :root[data-theme="neo"] .task-item {
   border-radius: 14px;
   border: none;
-  box-shadow: 3px 3px 6px rgba(163,177,198,.3), -3px -3px 6px rgba(255,255,255,.6);
+  box-shadow: var(--neo-out-sm);
 }
 :root[data-theme="neo"][data-mode="dark"] .task-item {
-  box-shadow: 3px 3px 6px rgba(0,0,0,.3), -3px -3px 6px rgba(255,255,255,.03);
+  box-shadow: var(--neo-out-sm);
 }
 :root[data-theme="neo"] .task-item:hover {
-  box-shadow: 4px 4px 8px rgba(163,177,198,.35), -4px -4px 8px rgba(255,255,255,.7);
+  box-shadow: var(--neo-out-sm-hover);
 }
 :root[data-theme="neo"][data-mode="dark"] .task-item:hover {
-  box-shadow: 4px 4px 8px rgba(0,0,0,.35), -4px -4px 8px rgba(255,255,255,.04);
+  box-shadow: var(--neo-out-sm-hover);
 }
 :root[data-theme="neo"] .progress {
   border: none;
@@ -514,13 +555,13 @@
 :root[data-theme="neo"] .alert,
 :root[data-theme="neo"] .filter-editor .fe-section {
   border: none;
-  box-shadow: 6px 6px 12px rgba(163,177,198,.4), -6px -6px 12px rgba(255,255,255,.7);
+  box-shadow: var(--neo-out-md);
 }
 :root[data-theme="neo"][data-mode="dark"] .user-menu,
 :root[data-theme="neo"][data-mode="dark"] .toast,
 :root[data-theme="neo"][data-mode="dark"] .alert,
 :root[data-theme="neo"][data-mode="dark"] .filter-editor .fe-section {
-  box-shadow: 6px 6px 12px rgba(0,0,0,.35), -6px -6px 12px rgba(255,255,255,.04);
+  box-shadow: var(--neo-out-md);
 }
 
 /* ===== 复古互联网 (Retro Internet / Web 1.0) ===== */
@@ -567,6 +608,8 @@
   --red: #ff4466;
   --red-soft: rgba(255,68,102,.08);
   --shadow: 2px 2px 0 rgba(0,0,0,.5);
+  /* 暗色斜面色：深色底上 outset/inset 需要比 --border 更亮的边色才能看出浮雕 */
+  --bevel: #2d4a6f;
   --sb-thumb: #0f3460;
   --sb-thumb-hover: #00d4aa;
   --sb-track: #1a1a2e;
@@ -589,7 +632,7 @@
   box-shadow: 2px 2px 0 #808080;
 }
 :root[data-theme="retro"][data-mode="dark"] .card {
-  border: 2px solid var(--border);
+  border: 2px outset var(--bevel);
   box-shadow: 2px 2px 0 rgba(0,0,0,.4);
 }
 :root[data-theme="retro"] .card:hover {
@@ -598,6 +641,7 @@
 :root[data-theme="retro"][data-mode="dark"] .card:hover {
   box-shadow: 3px 3px 0 rgba(0,0,0,.5);
 }
+/* outset/inset 纪律：可点一律 outset、按下 inset、禁用纯平 */
 :root[data-theme="retro"] .btn {
   border: 2px outset var(--border);
   box-shadow: 1px 1px 0 #808080;
@@ -608,6 +652,11 @@
 :root[data-theme="retro"] .btn:active:not(:disabled) {
   border-style: inset;
   transform: translate(1px, 1px);
+  box-shadow: none;
+}
+:root[data-theme="retro"] .btn:disabled {
+  border-style: solid;
+  border-color: var(--border);
   box-shadow: none;
 }
 :root[data-theme="retro"] .btn-primary {
@@ -624,21 +673,52 @@
   border: 2px outset #ff4444;
 }
 :root[data-theme="retro"][data-mode="dark"] .btn {
-  border: 2px solid var(--border);
+  border: 2px outset var(--bevel);
   box-shadow: 1px 1px 0 rgba(0,0,0,.4);
 }
+:root[data-theme="retro"][data-mode="dark"] .btn:disabled {
+  border-style: solid;
+  border-color: var(--border);
+}
 :root[data-theme="retro"][data-mode="dark"] .btn-primary {
-  border: 2px solid var(--primary);
+  border: 2px outset var(--primary);
 }
 :root[data-theme="retro"][data-mode="dark"] .btn-danger {
   background: var(--red);
   color: #fff;
-  border: 2px solid var(--red);
+  border: 2px outset var(--red);
 }
+/* Win95 窗口标题栏：实色横条贯通卡片宽度，与内容区形成窗口层级；
+   行高锁 24px（与 user.html/admin.html 锁定块一致），不加 padding 保持标题区高度 */
 :root[data-theme="retro"] .card-title {
   font-weight: 700;
   font-size: 13px;
-  color: var(--primary);
+  color: #fff;
+  background: var(--primary);
+  line-height: 24px;
+  padding: 0 8px;
+  margin: -16px -24px 16px;
+}
+:root[data-theme="retro"] .card-title .count {
+  background: rgba(255, 255, 255, 0.25);
+  color: inherit;
+}
+:root[data-theme="retro"][data-mode="dark"] .card-title {
+  color: #06251f;
+}
+:root[data-theme="retro"][data-mode="dark"] .card-title .count {
+  background: rgba(0, 0, 0, 0.2);
+}
+/* 功能区之间用 2px groove 凹槽线分隔：弹窗按钮区与内容区之间 */
+:root[data-theme="retro"] .modal .btns,
+:root[data-theme="retro"] .mask .modal .btns {
+  border-top: 2px groove var(--border);
+  padding-top: 16px;
+  margin-top: 16px;
+}
+:root[data-theme="retro"][data-mode="dark"] .modal .btns,
+:root[data-theme="retro"][data-mode="dark"] .mask .modal .btns {
+  border-top-color: var(--bevel);
 }
 :root[data-theme="retro"] .topbar {
   background: linear-gradient(180deg, #d4d0c8, #c0c0c0);
@@ -646,7 +726,7 @@
 }
 :root[data-theme="retro"][data-mode="dark"] .topbar {
   background: linear-gradient(180deg, #16213e, #1a1a2e);
-  border-bottom: 2px solid var(--border);
+  border-bottom: 2px outset var(--bevel);
 }
 :root[data-theme="retro"] input[type="text"],
 :root[data-theme="retro"] input[type="password"],
@@ -687,11 +767,23 @@
 :root[data-theme="retro"][data-mode="dark"] .toast,
 :root[data-theme="retro"][data-mode="dark"] .alert,
 :root[data-theme="retro"][data-mode="dark"] .filter-editor .fe-section {
-  border: 2px solid var(--border);
+  border: 2px outset var(--bevel);
   box-shadow: 2px 2px 0 rgba(0,0,0,.4);
+}
+/* retro Toast：不透明实底，不用毛玻璃（硬边风格） */
+:root[data-theme="retro"] .toast {
+  background: var(--card);
+  -webkit-backdrop-filter: none;
+  backdrop-filter: none;
 }
 :root[data-theme="retro"] .progress {
   border: 1px inset var(--border);
+}
+/* 手机端卡片 padding 收敛为 16px，标题栏负边距同步 */
+@media (max-width: 480px) {
+  :root[data-theme="retro"] .card-title {
+    margin: -16px -16px 16px;
+  }
 }
 
 /* ---------- 基础 ---------- */
@@ -773,14 +865,14 @@ html {
 /* ---------- 表单元素 ---------- */
 label.field {
   display: block;
-  margin-bottom: 14px;
+  margin-bottom: 16px;
 }
 label.field > span {
   display: block;
   font-size: 13px;
   font-weight: 500;
   color: var(--text);
-  margin-bottom: 5px;
+  margin-bottom: 8px;
 }
 label.field > span .req {
   color: var(--red);
@@ -792,9 +884,9 @@ input[type="date"],
 textarea,
 select {
   width: 100%;
-  padding: 9px 12px;
+  padding: 8px 16px;
   border: 1px solid var(--border);
-  border-radius: 10px;
+  border-radius: 6px;
   font-size: 14px;
   font-family: inherit;
   color: var(--text);
@@ -805,6 +897,13 @@ select {
     border-color 0.15s,
     box-shadow 0.15s;
   box-sizing: border-box;
+}
+/* 单行控件高度档：36px（多行 textarea 走 96px 最小高度档） */
+input[type="text"],
+input[type="password"],
+input[type="date"],
+select {
+  height: 36px;
 }
 input:focus,
 textarea:focus,
@@ -831,20 +930,20 @@ input[type="date"]::-webkit-calendar-picker-indicator:hover {
 }
 textarea {
   resize: none;
-  min-height: 42px;
+  min-height: 96px;
 }
 /* 下拉框与输入框风格统一：去除原生方角外观，自绘箭头随主题变色；
    color-scheme 由 :root[data-mode] 设定，暗色下原生选项列表同步变暗 */
 select {
   appearance: none;
   -webkit-appearance: none;
-  padding-right: 34px;
+  padding-right: 40px;
   background-image:
     linear-gradient(45deg, transparent 50%, var(--text-2) 50%),
     linear-gradient(135deg, var(--text-2) 50%, transparent 50%);
   background-position:
-    calc(100% - 19px) calc(50% + 1px),
-    calc(100% - 14px) calc(50% + 1px);
+    calc(100% - 24px) calc(50% + 1px),
+    calc(100% - 19px) calc(50% + 1px);
   background-size:
     5px 5px,
     5px 5px;
@@ -853,15 +952,15 @@ select {
 .hint {
   font-size: 12px;
   color: var(--text-3);
-  margin-top: 4px;
+  margin-top: 8px;
 }
 
 /* ---------- 提示条 ---------- */
 .alert {
   border-radius: 8px;
-  padding: 9px 12px;
+  padding: 8px 16px;
   font-size: 13px;
-  margin-top: 12px;
+  margin-top: 16px;
   display: none;
   word-break: break-all;
 }
@@ -884,10 +983,11 @@ select {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  gap: 6px;
-  padding: 9px 16px;
+  gap: 8px;
+  height: 36px; /* 按钮高度档：默认 36px，小按钮 28px（.btn.small 覆盖） */
+  padding: 0 16px;
   border: 1px solid transparent;
-  border-radius: 10px;
+  border-radius: 6px;
   font-size: 14px;
   font-weight: 500;
   font-family: inherit;
@@ -897,6 +997,7 @@ select {
     border-color 0.15s,
     color 0.15s;
   white-space: nowrap;
+  box-sizing: border-box;
 }
 
 .btn-primary {
@@ -971,10 +1072,11 @@ select {
 .topbar-inner {
   max-width: 1080px;
   margin: 0 auto;
-  padding: 12px 20px;
+  /* 垂直 12px 为顶栏恒高锁定值（与行高锁定块配合），水平 24px 与容器留白档位对齐 */
+  padding: 12px 24px;
   display: flex;
   align-items: center;
-  gap: 12px;
+  gap: 8px;
 }
 
 .brand {
@@ -999,7 +1101,7 @@ select {
 }
 
 .user-chip {
-  padding: 4px 10px;
+  padding: 4px 8px;
   border-radius: 999px;
   font-size: 13px;
   font-weight: 500;
@@ -1034,9 +1136,9 @@ select {
   min-width: 120px;
   background: var(--card);
   border: 1px solid var(--border);
-  border-radius: 10px;
+  border-radius: 8px;
   box-shadow: var(--shadow);
-  padding: 6px;
+  padding: 8px;
   z-index: 30;
 }
 
@@ -1054,9 +1156,9 @@ select {
   display: block;
   width: 100%;
   text-align: left;
-  padding: 8px 12px;
+  padding: 8px 16px;
   border: none;
-  border-radius: 8px;
+  border-radius: 6px;
   background: none;
   font-size: 13px;
   font-family: inherit;
@@ -1089,7 +1191,7 @@ select {
   border: 1px solid var(--border);
   border-radius: var(--radius);
   box-shadow: var(--shadow);
-  padding: 18px 20px;
+  padding: 16px 24px;
   display: flex;
   flex-direction: column;
 }
@@ -1111,30 +1213,34 @@ select {
   align-items: center;
   justify-content: center;
   z-index: 100;
-  padding: 20px;
+  padding: 16px;
 }
 
 .mask.show {
   display: flex;
 }
 
+/* Toast：顶部居中 + 半透明毛玻璃，5 秒自消（JS 计时），不占布局；
+   pixel/retro 主题在各自装饰段覆盖回不透明实底（硬边风格不用毛玻璃） */
 .toast {
   position: fixed;
   left: 50%;
-  bottom: 34px;
-  transform: translateX(-50%) translateY(20px);
-  background: var(--card);
+  top: 24px;
+  transform: translateX(-50%) translateY(-20px);
+  background: var(--toast-bg, rgba(255, 255, 255, 0.88));
+  -webkit-backdrop-filter: blur(12px);
+  backdrop-filter: blur(12px);
   border: 1px solid var(--border);
   color: var(--text);
-  border-radius: 10px;
-  padding: 9px 18px;
+  border-radius: 8px;
+  padding: 8px 16px;
   font-size: 13px;
   box-shadow: var(--shadow);
   opacity: 0;
   pointer-events: none;
   transition:
-    opacity 0.2s,
-    transform 0.2s;
+    opacity 0.35s,
+    transform 0.35s;
   z-index: 200;
   max-width: 90vw;
 }
@@ -1155,21 +1261,21 @@ select {
 }
 .filter-editor .fe-section {
   border: 1px solid var(--border);
-  border-radius: 10px;
-  padding: 12px 14px;
-  margin-bottom: 12px;
+  border-radius: 8px;
+  padding: 16px;
+  margin-bottom: 16px;
 }
 .filter-editor .fe-head {
   display: flex;
   align-items: center;
-  gap: 10px;
+  gap: 8px;
   flex-wrap: wrap;
   margin-bottom: 8px;
 }
 .filter-editor .fe-switch {
   display: inline-flex;
   align-items: center;
-  gap: 6px;
+  gap: 8px;
   font-size: 13px;
   font-weight: 500;
   margin: 0;
@@ -1178,17 +1284,17 @@ select {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
-  gap: 6px;
+  gap: 8px;
   margin-bottom: 8px;
 }
 .filter-editor .chips .chip {
   display: inline-flex;
   align-items: center;
-  gap: 5px;
+  gap: 4px;
   background: var(--primary-soft);
   color: var(--primary);
   border-radius: 999px;
-  padding: 3px 6px 3px 10px;
+  padding: 4px 8px 4px 16px;
   font-size: 12px;
   word-break: break-all;
 }
@@ -1199,7 +1305,7 @@ select {
   cursor: pointer;
   font-size: 13px;
   line-height: 1;
-  padding: 1px 3px;
+  padding: 2px 4px;
   border-radius: 50%;
 }
 .filter-editor .chips .chip button:hover {
@@ -1217,7 +1323,7 @@ select {
   color: var(--primary);
   border: none;
   border-radius: 999px;
-  padding: 3px 12px;
+  padding: 4px 16px;
   font-size: 12px;
   font-weight: normal;
   font-family: inherit;
@@ -1241,7 +1347,7 @@ select {
   display: flex;
   align-items: center;
   gap: 8px;
-  margin-top: 4px;
+  margin-top: 8px;
 }
 .filter-editor .dd-add-row #ddMoreHost {
   margin-left: auto;
@@ -1262,8 +1368,8 @@ select {
 }
 .filter-editor .dd-rule {
   display: flex;
-  gap: 6px;
-  margin-bottom: 6px;
+  gap: 8px;
+  margin-bottom: 8px;
   align-items: center;
 }
 .filter-editor .dd-rule input {
@@ -1286,10 +1392,10 @@ select {
   margin-top: 8px;
 }
 
-/* 保存 / 取消并排：各占一半，取消在右 */
+/* 保存 / 取消并排：各占一半，取消在右（相邻按钮固定 8px 间隙） */
 .filter-actions {
   display: flex;
-  gap: 10px;
+  gap: 8px;
 }
 .filter-actions .btn {
   flex: 1;
@@ -1302,15 +1408,15 @@ select {
   z-index: 150;
   background: var(--card);
   border: 1px solid var(--border);
-  border-radius: 10px;
+  border-radius: 8px;
   box-shadow: var(--shadow);
-  padding: 10px 12px;
+  padding: 8px 16px;
   display: flex;
   align-items: center;
-  gap: 10px;
+  gap: 8px;
   opacity: 0;
   transform: scale(0.9);
-  transition: opacity 0.15s, transform 0.15s;
+  transition: opacity 0.35s, transform 0.35s;
   pointer-events: none;
 }
 .popconfirm.show {
@@ -1319,9 +1425,9 @@ select {
   pointer-events: auto;
 }
 .popconfirm .popconfirm-btn {
-  padding: 5px 14px;
+  padding: 4px 16px;
   font-size: 13px;
-  border-radius: 8px;
+  border-radius: 6px;
   white-space: nowrap;
 }
 .popconfirm .popconfirm-arrow {
@@ -1360,20 +1466,20 @@ select {
   filter: brightness(1.12);
   background: var(--red);
 }
-/* 新拟态：无描边 + 凹凸阴影 */
+/* 新拟态：无描边 + 凹凸阴影（参数统一走 --neo-out-* 组） */
 :root[data-theme="neo"] .popconfirm {
   border: none;
-  box-shadow: 6px 6px 12px rgba(163,177,198,0.4), -6px -6px 12px rgba(255,255,255,0.7);
+  box-shadow: var(--neo-out-md);
 }
 :root[data-theme="neo"][data-mode="dark"] .popconfirm {
-  box-shadow: 6px 6px 12px rgba(0,0,0,0.35), -6px -6px 12px rgba(255,255,255,0.04);
+  box-shadow: var(--neo-out-md);
 }
 :root[data-theme="neo"] .popconfirm .popconfirm-btn {
   border: none;
-  box-shadow: 2px 2px 4px rgba(163,177,198,0.3), -2px -2px 4px rgba(255,255,255,0.6);
+  box-shadow: var(--neo-out-sm);
 }
 :root[data-theme="neo"][data-mode="dark"] .popconfirm .popconfirm-btn {
-  box-shadow: 2px 2px 4px rgba(0,0,0,0.3), -2px -2px 4px rgba(255,255,255,0.03);
+  box-shadow: var(--neo-out-sm);
 }
 /* 复古互联网：outset 描边 */
 :root[data-theme="retro"] .popconfirm {
@@ -1381,7 +1487,7 @@ select {
   box-shadow: 2px 2px 0 #808080;
 }
 :root[data-theme="retro"][data-mode="dark"] .popconfirm {
-  border: 2px solid var(--border);
+  border: 2px outset var(--bevel);
   box-shadow: 2px 2px 0 rgba(0,0,0,0.4);
 }
 :root[data-theme="retro"] .popconfirm .popconfirm-btn {
@@ -1392,5 +1498,5 @@ select {
 :root[data-theme="retro"][data-mode="dark"] .popconfirm .popconfirm-btn {
   background: var(--red);
   color: #fff;
-  border: 2px solid var(--red);
+  border: 2px outset var(--red);
 }

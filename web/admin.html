@@ -12,7 +12,7 @@
       .health {
         display: inline-flex;
         align-items: center;
-        gap: 6px;
+        gap: 8px;
         font-size: 13px;
         color: var(--text-2);
         cursor: pointer;
@@ -40,14 +40,14 @@
         color: var(--amber);
         background: var(--amber-soft);
         border-radius: 6px;
-        padding: 1px 7px;
+        padding: 2px 8px;
         margin-left: 8px;
       }
       .brand-version {
         font-size: 11px;
         font-weight: 500;
         color: var(--text-3);
-        margin-left: 6px;
+        margin-left: 8px;
         letter-spacing: 0.3px;
       }
       /* 主题收藏星（两控制台一致）：未点亮=跟随文字色的空心描边星，
@@ -56,7 +56,7 @@
         display: inline-flex;
         align-items: center;
         justify-content: center;
-        margin-left: 10px;
+        margin-left: 8px;
         padding: 0;
         border: 0;
         background: none;
@@ -126,7 +126,7 @@
       .container {
         max-width: 1080px;
         margin: 0 auto;
-        padding: 20px;
+        padding: 24px;
         display: grid;
         grid-template-columns: minmax(0, 1fr);
         gap: 16px;
@@ -134,7 +134,7 @@
       .card-title {
         font-size: 15px;
         font-weight: 600;
-        margin-bottom: 14px;
+        margin-bottom: 16px;
         display: flex;
         align-items: center;
         gap: 8px;
@@ -142,7 +142,7 @@
       .card .sub {
         color: var(--text-2);
         font-size: 12px;
-        margin-bottom: 14px;
+        margin-bottom: 16px;
       }
 
       /* ---------- 服务器配置 + 日志导出：宽屏并排，手机竖屏垂直 ---------- */
@@ -169,7 +169,7 @@
       .cmd-row {
         display: grid;
         grid-template-columns: repeat(4, minmax(0, 1fr));
-        gap: 12px;
+        gap: 16px;
       }
       .cmd-group {
         display: flex;
@@ -179,12 +179,12 @@
         font-size: 13px;
         font-weight: 600;
         color: var(--text);
-        margin-bottom: 6px;
+        margin-bottom: 8px;
       }
       .cmd-list {
         background: var(--code-bg);
         border-radius: 8px;
-        padding: 10px 12px;
+        padding: 8px 16px;
         display: flex;
         flex-direction: column;
         gap: 4px;
@@ -205,7 +205,7 @@
         font-size: 12px;
         color: var(--primary);
         background: var(--card);
-        padding: 1px 5px;
+        padding: 2px 4px;
         border-radius: 4px;
         border: 1px solid var(--border);
         white-space: nowrap;
@@ -218,9 +218,10 @@
 
       /* ---------- 按钮（与下载控制台一致） ---------- */
       .btn.small {
-        padding: 5px 10px;
+        height: 28px; /* 小按钮高度档 */
+        padding: 0 8px;
         font-size: 12px;
-        border-radius: 8px;
+        border-radius: 6px;
       }
 
       /* ---------- 表格 ---------- */
@@ -235,7 +236,7 @@
       th,
       td {
         text-align: left;
-        padding: 9px 10px;
+        padding: 8px;
         border-bottom: 1px solid var(--border);
         white-space: nowrap;
         vertical-align: middle;
@@ -248,7 +249,7 @@
       /* 操作列按钮组：用内层 div 做 flex，避免 td 设 display:flex 破坏表格行边框对齐 */
       td.actions .action-btns {
         display: flex;
-        gap: 6px;
+        gap: 8px;
         align-items: center;
         flex-wrap: nowrap;
       }
@@ -259,7 +260,7 @@
       }
       .badge {
         display: inline-block;
-        padding: 1px 8px;
+        padding: 2px 8px;
         border-radius: 999px;
         font-size: 11px;
         font-weight: 600;
@@ -293,8 +294,8 @@
       .date-range-row {
         display: flex;
         align-items: flex-end;
-        gap: 10px;
-        margin-bottom: 12px;
+        gap: 8px;
+        margin-bottom: 16px;
       }
       .date-range-row .field {
         flex: 1;
@@ -305,12 +306,12 @@
         flex: none;
         font-size: 13px;
         color: var(--text-2);
-        padding-bottom: 10px;
+        padding-bottom: 8px;
       }
       @media (max-width: 480px) {
         /* 手机端起止日期保持并排一行，仅收紧间距 */
         .date-range-row {
-          gap: 6px;
+          gap: 8px;
         }
       }
 
@@ -323,7 +324,7 @@
         border: 1px solid var(--border);
         border-radius: var(--radius);
         box-shadow: var(--shadow);
-        padding: 10px;
+        padding: 8px;
         display: none;
       }
       .cal-panel.show {
@@ -333,7 +334,7 @@
         display: flex;
         align-items: center;
         justify-content: space-between;
-        margin-bottom: 6px;
+        margin-bottom: 8px;
       }
       .cal-title {
         font-size: 13px;
@@ -344,7 +345,7 @@
         width: 26px;
         height: 26px;
         border: 1px solid var(--border);
-        border-radius: 8px;
+        border-radius: 6px;
         background: var(--ghost-bg);
         color: var(--text-2);
         font-size: 14px;
@@ -375,7 +376,7 @@
       .cal-day {
         height: 30px;
         border: none;
-        border-radius: 8px;
+        border-radius: 6px;
         background: none;
         font-size: 12.5px;
         font-family: inherit;
@@ -402,10 +403,10 @@
       .warn-box {
         background: var(--amber-soft);
         color: var(--amber);
-        border-radius: 10px;
-        padding: 10px 13px;
+        border-radius: 8px;
+        padding: 8px 16px;
         font-size: 12px;
-        margin-bottom: 13px;
+        margin-bottom: 16px;
       }
 
       /* ---------- 弹层 ---------- */
@@ -416,7 +417,7 @@
         box-shadow: var(--shadow);
         width: 100%;
         max-width: 400px;
-        padding: 22px 20px;
+        padding: 24px;
       }
       .modal h3 {
         font-size: 15px;
@@ -429,7 +430,7 @@
         align-items: center;
         justify-content: space-between;
         margin-bottom: 8px;
-        gap: 12px;
+        gap: 8px;
       }
       .modal-title-extra {
         font-size: 13px;
@@ -437,7 +438,7 @@
         color: var(--text-2);
         display: inline-flex;
         align-items: center;
-        gap: 6px;
+        gap: 8px;
         cursor: pointer;
         user-select: none;
         white-space: nowrap;
@@ -455,8 +456,8 @@
       .modal .btns {
         display: flex;
         justify-content: flex-end;
-        gap: 9px;
-        margin-top: 6px;
+        gap: 8px;
+        margin-top: 8px;
       }
 
       /* ---------- 状态灯彩蛋：聊天室弹窗（与下载控制台一致） ---------- */
@@ -466,9 +467,9 @@
         border-radius: 8px;
         height: 280px;
         overflow-y: auto;
-        padding: 12px;
+        padding: 16px;
         font-size: 13px;
-        margin-bottom: 10px;
+        margin-bottom: 8px;
         display: flex;
         flex-direction: column;
       }
@@ -476,12 +477,12 @@
         text-align: center;
         color: var(--text-3);
         font-size: 12px;
-        margin: 4px 0 10px;
+        margin: 4px 0 8px;
       }
       .chat-msg {
         max-width: 85%;
         align-self: flex-start;
-        margin-bottom: 10px;
+        margin-bottom: 8px;
       }
       /* 自己的消息靠右（微信式布局），头部与正文右对齐 */
       .chat-msg.self {
@@ -513,16 +514,16 @@
         text-align: center;
         color: var(--text-3);
         font-size: 13px;
-        padding: 48px 12px;
+        padding: 48px 16px;
       }
       .chat-tools {
         display: flex;
         justify-content: flex-start;
-        gap: 10px;
-        margin-bottom: 10px;
+        gap: 8px;
+        margin-bottom: 8px;
       }
       .chat-input-row {
-        margin-bottom: 14px;
+        margin-bottom: 16px;
       }
       @media (max-width: 480px) {
         .chat-box {
@@ -533,7 +534,7 @@
       /* ---------- 响应式适配（与下载控制台一致） ---------- */
       @media (max-width: 860px) {
         .btn {
-          padding: 11px 16px;
+          height: 44px; /* 触控高度档 */
         }
         input[type="text"],
         input[type="password"],
@@ -549,8 +550,8 @@
       @media (max-width: 600px) {
         /* 顶栏单行：brand + 健康状态（仅圆点）靠左，账号胶囊（仅图标）靠右 */
         .topbar-inner {
-          padding: 10px 12px;
-          gap: 6px;
+          padding: 8px 16px;
+          gap: 8px;
         }
         .brand {
           font-size: 16px;
@@ -565,20 +566,20 @@
         /* 手机端表格紧凑：缩小内边距与字号，降低横向溢出幅度 */
         th,
         td {
-          padding: 7px 6px;
+          padding: 8px 4px;
           font-size: 12px;
         }
       }
       @media (max-width: 480px) {
         .container {
-          padding: 12px;
-          gap: 12px;
+          padding: 16px;
+          gap: 16px;
         }
         .card {
-          padding: 14px;
+          padding: 16px;
         }
         .dual-card-row {
-          gap: 12px;
+          gap: 16px;
         }
         .key-row {
           flex-direction: column;
@@ -1065,10 +1066,10 @@
         </div>
         <div
           style="
-            margin-bottom: 12px;
+            margin-bottom: 16px;
             display: flex;
             align-items: center;
-            gap: 10px;
+            gap: 8px;
             flex-wrap: wrap;
           "
         >
@@ -1108,7 +1109,7 @@
           分钟，再犯永久）。误封时在容器内执行
           <code>banip del &lt;IP&gt;</code> 解封。
         </div>
-        <div style="margin-bottom: 12px">
+        <div style="margin-bottom: 16px">
           <button class="btn btn-primary" id="btnAddBan">
             <svg class="i" aria-hidden="true"><use href="#ic-add"></use></svg
             >封禁 IP
@@ -1325,7 +1326,7 @@
 
     <!-- ================= 过滤规则模板弹窗 ================= -->
     <div class="mask" id="filterMask">
-      <div class="modal" style="max-width: 520px; max-height: 85vh; overflow-y: auto">
+      <div class="modal" style="max-width: 560px; max-height: 85vh; overflow-y: auto">
         <h3>过滤规则模板</h3>
         <div class="msg">作为新用户首次登录的初始规则</div>
         <div class="filter-editor">
@@ -1422,7 +1423,7 @@
 
     <!-- ================= 状态灯彩蛋：聊天室弹窗（结构与下载控制台一致） ================= -->
     <div class="mask" id="chatMask">
-      <div class="modal" style="max-width: 520px">
+      <div class="modal" style="max-width: 560px">
         <h3>聊天室</h3>
         <div class="chat-box" id="chatBox"></div>
         <div class="chat-tools">
@@ -1626,7 +1627,7 @@
           title: "添加用户",
           // 标题右侧附加：添加为管理员复选框（字号小于标题）
           titleExtra:
-            '<label for="mf_isAdmin" style="display:inline-flex;align-items:center;gap:6px;cursor:pointer">' +
+            '<label for="mf_isAdmin" style="display:inline-flex;align-items:center;gap:8px;cursor:pointer">' +
             '<input type="checkbox" id="mf_isAdmin" /> 添加为管理员</label>',
           fields: [
             {

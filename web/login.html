@@ -1,200 +1,575 @@
 <!doctype html>
-<html lang="zh-CN" data-theme="flat" data-mode="light" data-static-theme>
+<html lang="zh-CN" data-theme="flat" data-mode="dark" data-static-theme>
   <head>
     <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+    <meta name="theme-color" content="#06060f" />
     <link rel="icon" href="favicon.ico" />
     <title>CatDock 登录</title>
     <style>
-      @import url('https://fonts.googleapis.com/css2?family=Patrick+Hand&display=swap');
-
       /*__SHARED_CSS__*/
 
-      /* ========== 登录页：手绘俏皮风（统一外观，无主题/亮暗切换） ========== */
+      /* ========== 登录页：极光 + 玻璃（固定深色，移动优先） ==========
+         共享层的 :root[data-theme="flat"] body 特异度高于本文件的裸 body 选择器，
+         因此字体/行高挂在 .stage 上靠继承覆盖，页面底色交给 .aurora 固定层绘制；
+         .alert 的 display 交由共享层 .alert / .alert.show 控制，此处只改配色与间距，
+         避免同特异度靠后声明把错误提示永久隐藏（CD.showAlert 只重写 className） */
+      :root {
+        --au-bg: #06060f;
+        --au-ink: #edf1ff;
+        --au-ink-2: rgba(237, 241, 255, 0.76);
+        --au-ink-3: rgba(237, 241, 255, 0.54);
+        --au-cyan: #43e6d2;
+        --au-violet: #8b6cff;
+        --au-pink: #ff6bd6;
+        --au-green: #5ef0a6;
+        --glass-brd: rgba(255, 255, 255, 0.15);
+        --r-card: 24px;
+        --r-ctl: 12px;
+        --font-ui: "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC",
+          "Hiragino Sans GB", "Microsoft YaHei", sans-serif;
+        /* Orbitron 无中文字形，中文按栈自动回落，只用在拉丁字母标签上 */
+        --font-display: "Orbitron", "Inter", "PingFang SC", "Microsoft YaHei", sans-serif;
+        --ease-out: cubic-bezier(0.16, 0.84, 0.3, 1);
+      }
+
+      html {
+        background: var(--au-bg);
+      }
+
       body {
-        background-color: #f0e6fb;
-        background-image: radial-gradient(#d4c8e8 7.2%, transparent 0);
-        background-size: 25px 25px;
         min-height: 100vh;
-        padding: 1rem;
+        min-height: 100svh;
         display: flex;
-        justify-content: center;
-        align-items: center;
-        color: #4a4658;
-        font-family: 'Patrick Hand', 'Hiragino Sans GB', 'Microsoft YaHei', system-ui, -apple-system, sans-serif;
-        text-align: center;
-        font-size: 110%;
-      }
-
-      .login-wrap {
-        min-height: auto;
-        display: block;
-        padding: 0;
-        align-items: unset;
-        justify-content: unset;
-      }
-
-      .login-card {
-        width: 100%;
-        max-width: 420px;
-        min-height: 480px;
-        margin: 0 auto;
-        background: #f8f6ff;
-        border-radius: 24px;
-        box-shadow: 4px 4px 12px 2px rgba(80, 60, 120, 0.15);
-        padding: 40px 32px 32px;
         box-sizing: border-box;
-        animation: cardIn 0.5s cubic-bezier(0.175, 0.885, 0.32, 1.275);
+        /* 移动端留安全区，刘海与全面屏手势条不压住表单 */
+        padding: calc(16px + env(safe-area-inset-top)) 13px
+          calc(18px + env(safe-area-inset-bottom));
+        color: var(--au-ink);
+        text-align: left;
       }
-      @keyframes cardIn {
-        from { opacity: 0; transform: translateY(20px) scale(0.96); }
+
+      /* ---------- 极光背景：4 层色带 + 双层粒子 + 暗角（transform 动画，只动合成层） ---------- */
+      .aurora {
+        position: fixed;
+        inset: 0;
+        z-index: 0;
+        overflow: hidden;
+        pointer-events: none;
+        background: radial-gradient(125% 92% at 50% -12%, #16204a 0%, #0a0a1d 46%, var(--au-bg) 100%),
+          var(--au-bg);
+      }
+      .aurora i {
+        position: absolute;
+        display: block;
+        will-change: transform;
+      }
+      .band {
+        width: 74vmax;
+        height: 46vmax;
+        border-radius: 46% 54% 40% 60% / 55% 45% 62% 38%;
+        filter: blur(72px);
+        mix-blend-mode: screen;
+        opacity: 0.5;
+      }
+      .band-1 {
+        top: -18vmax;
+        left: -14vmax;
+        background: radial-gradient(closest-side, var(--au-cyan), transparent 72%);
+        animation: drift-1 24s ease-in-out infinite alternate;
+      }
+      .band-2 {
+        top: -10vmax;
+        right: -18vmax;
+        background: radial-gradient(closest-side, var(--au-violet), transparent 70%);
+        animation: drift-2 30s ease-in-out infinite alternate;
+      }
+      .band-3 {
+        bottom: -22vmax;
+        left: -8vmax;
+        background: radial-gradient(closest-side, var(--au-pink), transparent 74%);
+        animation: drift-3 19s ease-in-out infinite alternate;
+      }
+      .band-4 {
+        bottom: -14vmax;
+        right: -10vmax;
+        background: radial-gradient(closest-side, var(--au-green), transparent 76%);
+        opacity: 0.34;
+        animation: drift-4 27s ease-in-out infinite alternate;
+      }
+      @keyframes drift-1 {
+        from { transform: translate3d(-3%, 2%, 0) rotate(-8deg) scale(1); }
+        to   { transform: translate3d(14%, 8%, 0) rotate(9deg) scale(1.16); }
+      }
+      @keyframes drift-2 {
+        from { transform: translate3d(6%, -4%, 0) rotate(10deg) scale(1.1); }
+        to   { transform: translate3d(-12%, 10%, 0) rotate(-7deg) scale(0.94); }
+      }
+      @keyframes drift-3 {
+        from { transform: translate3d(-8%, -6%, 0) rotate(6deg) scale(0.96); }
+        to   { transform: translate3d(10%, 4%, 0) rotate(-11deg) scale(1.2); }
+      }
+      @keyframes drift-4 {
+        from { transform: translate3d(4%, 6%, 0) rotate(-5deg) scale(1.05); }
+        to   { transform: translate3d(-10%, -2%, 0) rotate(8deg) scale(0.92); }
+      }
+      /* 粒子：多层小圆点合成一张背景图，整层缓慢上移，比逐个 DOM 元素省得多 */
+      .dust {
+        inset: -30% 0 0 0;
+        height: 160%;
+        background-repeat: repeat;
+      }
+      .dust-1 {
+        opacity: 0.5;
+        background-image: radial-gradient(1.6px 1.6px at 8% 12%, #fff, transparent 62%),
+          radial-gradient(1.4px 1.4px at 23% 34%, rgba(255, 255, 255, 0.85), transparent 62%),
+          radial-gradient(1.8px 1.8px at 39% 8%, rgba(190, 240, 255, 0.9), transparent 62%),
+          radial-gradient(1.3px 1.3px at 54% 46%, #fff, transparent 62%),
+          radial-gradient(1.7px 1.7px at 68% 22%, rgba(255, 214, 246, 0.9), transparent 62%),
+          radial-gradient(1.4px 1.4px at 81% 58%, #fff, transparent 62%),
+          radial-gradient(1.6px 1.6px at 92% 16%, rgba(190, 240, 255, 0.85), transparent 62%),
+          radial-gradient(1.3px 1.3px at 15% 66%, rgba(255, 255, 255, 0.8), transparent 62%),
+          radial-gradient(1.5px 1.5px at 46% 74%, rgba(255, 255, 255, 0.75), transparent 62%),
+          radial-gradient(1.4px 1.4px at 74% 84%, rgba(214, 232, 255, 0.8), transparent 62%);
+        animation: rise-1 38s linear infinite;
+      }
+      .dust-2 {
+        opacity: 0.34;
+        background-image: radial-gradient(2.4px 2.4px at 12% 48%, rgba(255, 255, 255, 0.7), transparent 60%),
+          radial-gradient(2.2px 2.2px at 34% 88%, rgba(180, 255, 240, 0.6), transparent 60%),
+          radial-gradient(2.6px 2.6px at 62% 38%, rgba(255, 255, 255, 0.65), transparent 60%),
+          radial-gradient(2.2px 2.2px at 86% 72%, rgba(210, 190, 255, 0.6), transparent 60%),
+          radial-gradient(2.4px 2.4px at 50% 14%, rgba(255, 255, 255, 0.55), transparent 60%),
+          radial-gradient(2.2px 2.2px at 26% 24%, rgba(255, 210, 240, 0.55), transparent 60%);
+        animation: rise-2 54s linear infinite;
+      }
+      @keyframes rise-1 {
+        from { transform: translate3d(0, 0, 0); }
+        to   { transform: translate3d(0, -16vmax, 0); }
+      }
+      @keyframes rise-2 {
+        from { transform: translate3d(0, 0, 0); }
+        to   { transform: translate3d(-4vmax, -22vmax, 0); }
+      }
+      .veil {
+        inset: 0;
+        background: radial-gradient(112% 78% at 50% 44%, transparent 42%, rgba(4, 4, 12, 0.62) 100%);
+      }
+
+      /* ---------- 舞台：单列居中，宽屏只放宽卡片内边距 ---------- */
+      .stage {
+        position: relative;
+        z-index: 1;
+        flex: 1 1 auto;
+        min-width: 0;
+        margin: auto;
+        width: 100%;
+        max-width: 440px;
+        box-sizing: border-box;
+        font-family: var(--font-ui);
+        font-size: 15px;
+        line-height: 1.5;
+        letter-spacing: 0;
+        /* 深色玻璃上的文字走灰度抗锯齿，避免子像素边缘在合成层里发虚 */
+        -webkit-font-smoothing: antialiased;
+      }
+      .login-panel {
+        min-width: 0;
+      }
+
+      /* ---------- 卡内品牌：只留 logo 图形，不加外框 ---------- */
+      .card-brand {
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        padding-bottom: 16px;
+        margin-bottom: 18px;
+        border-bottom: 1px solid rgba(255, 255, 255, 0.09);
+      }
+      .brand-text {
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+      }
+      .brand-logo {
+        width: 54px;
+        height: 54px;
+        color: #7c6cf3;
+        filter: drop-shadow(0 0 12px rgba(126, 108, 255, 0.55));
+        animation: mark-float 6s ease-in-out infinite;
+      }
+      @keyframes mark-float {
+        0%, 100% { transform: translateY(0); }
+        50% { transform: translateY(-4px); }
+      }
+      .brand-name {
+        margin: 9px 0 0;
+        font-family: var(--font-display);
+        font-size: 24px;
+        font-weight: 700;
+        letter-spacing: 0.07em;
+        line-height: 1.2;
+      }
+      .brand-sub {
+        margin: 3px 0 0;
+        font-size: 12.5px;
+        letter-spacing: 0.2em;
+        color: var(--au-ink-3);
+      }
+      /* ---------- 玻璃层：模糊放在 ::before，文字留在未合成的父层 ----------
+         backdrop-filter 会把元素连同子树提升为合成层，Windows 125%/150% 缩放
+         倍率下该层按 CSS 像素栅格化，卡里的中文会整体发虚；伪元素只合成自己 */
+      .glass {
+        position: relative;
+      }
+      .glass::before {
+        content: "";
+        position: absolute;
+        inset: 0;
+        z-index: 0;
+        border-radius: inherit;
+        -webkit-backdrop-filter: blur(20px) saturate(150%);
+        backdrop-filter: blur(20px) saturate(150%);
+      }
+      .glass > * {
+        position: relative;
+        z-index: 1;
+      }
+      @supports not ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {
+        .login-card {
+          background-color: rgba(15, 17, 36, 0.92);
+        }
+      }
+
+      /* ---------- 登录卡 ---------- */
+      .login-card {
+        box-sizing: border-box;
+        padding: 24px 18px 20px;
+        border-radius: var(--r-card);
+        border: 1px solid var(--glass-brd);
+        background: linear-gradient(168deg, rgba(255, 255, 255, 0.115), rgba(255, 255, 255, 0.045) 48%, rgba(255, 255, 255, 0.08));
+        box-shadow: 0 32px 72px -30px rgba(0, 0, 0, 0.8), 0 0 96px -44px rgba(139, 108, 255, 0.6),
+          inset 0 1px 0 rgba(255, 255, 255, 0.17);
+        /* backwards：入场结束后不保留 fill 状态，transform 层随即释放，文字回到主层栅格化 */
+        animation: fade-up 0.55s var(--ease-out) 0.06s backwards;
+      }
+      .login-card:focus-within {
+        border-color: rgba(67, 230, 210, 0.38);
+        box-shadow: 0 32px 72px -30px rgba(0, 0, 0, 0.8), 0 0 120px -40px rgba(67, 230, 210, 0.45),
+          inset 0 1px 0 rgba(255, 255, 255, 0.2);
+      }
+
+      /* ---------- 字段 ---------- */
+      .field {
+        margin-bottom: 13px;
+      }
+      .field-label {
+        display: flex;
+        align-items: baseline;
+        gap: 5px;
+        margin-bottom: 6px;
+        font-size: 14px;
+        color: var(--au-ink-2);
+      }
+      .field-label .req {
+        color: var(--au-pink);
+      }
+      .field-label .tag {
+        margin-left: auto;
+        font-family: var(--font-display);
+        font-size: 10px;
+        letter-spacing: 0.14em;
+        color: var(--au-ink-3);
+      }
+      .field-box {
+        position: relative;
+      }
+      /* input.login-input：与共享层 input[type=…] 同特异度并靠后声明，
+         覆盖共享层的 36px 实框输入框（含 .login-card 前缀再抬一级） */
+      .login-card input.login-input {
+        display: block;
+        width: 100%;
+        height: 52px; /* 移动端触摸目标 ≥44px */
+        box-sizing: border-box;
+        padding: 0 50px 0 44px;
+        border: 1px solid rgba(255, 255, 255, 0.14);
+        border-radius: var(--r-ctl);
+        background: rgba(255, 255, 255, 0.05);
+        font-family: var(--font-ui);
+        font-size: 16px; /* iOS 聚焦不自动放大 */
+        color: var(--au-ink);
+        outline: none;
+        -webkit-appearance: none;
+        appearance: none;
+        transition: border-color 0.2s, background 0.2s, box-shadow 0.2s;
+      }
+      .login-input::placeholder {
+        color: rgba(237, 241, 255, 0.44);
+      }
+      .login-card input.login-input:hover {
+        background: rgba(255, 255, 255, 0.08);
+      }
+      .login-card input.login-input:focus {
+        border-color: rgba(67, 230, 210, 0.72);
+        background: rgba(255, 255, 255, 0.09);
+        box-shadow: 0 0 0 3px rgba(67, 230, 210, 0.16), 0 0 26px -8px rgba(67, 230, 210, 0.55);
+      }
+      /* 浏览器自动填充会把底色刷成不透明白，用等宽 inset 阴影压回玻璃色 */
+      .login-card input.login-input:-webkit-autofill {
+        -webkit-box-shadow: 0 0 0 600px rgba(23, 26, 54, 0.96) inset;
+        -webkit-text-fill-color: var(--au-ink);
+        caret-color: var(--au-ink);
+        border-color: rgba(139, 108, 255, 0.55);
+      }
+      .field-box .fi {
+        position: absolute;
+        top: 50%;
+        left: 15px;
+        width: 18px;
+        height: 18px;
+        transform: translateY(-50%);
+        color: rgba(237, 241, 255, 0.42);
+        pointer-events: none;
+        transition: color 0.2s;
+      }
+      .field-box:focus-within .fi {
+        color: var(--au-cyan);
+      }
+      .peek {
+        position: absolute;
+        top: 50%;
+        right: 5px;
+        width: 44px;
+        height: 44px;
+        transform: translateY(-50%);
+        display: grid;
+        place-items: center;
+        border: 0;
+        border-radius: 10px;
+        background: transparent;
+        color: rgba(237, 241, 255, 0.45);
+        cursor: pointer;
+        -webkit-tap-highlight-color: transparent;
+        transition: color 0.2s, background 0.2s;
+      }
+      .peek svg {
+        width: 20px;
+        height: 20px;
+      }
+      .peek:hover {
+        color: var(--au-ink);
+        background: rgba(255, 255, 255, 0.09);
+      }
+      .peek:focus-visible {
+        outline: 2px solid rgba(67, 230, 210, 0.8);
+        outline-offset: 1px;
+      }
+      .peek .ic-off {
+        display: none;
+      }
+      .peek[aria-pressed="true"] .ic-on {
+        display: none;
+      }
+      .peek[aria-pressed="true"] .ic-off {
+        display: block;
+      }
+
+      /* ---------- 提交按钮 ---------- */
+      .btn-login {
+        position: relative;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        gap: 9px;
+        width: 100%;
+        height: 54px;
+        margin-top: 6px;
+        border: 1px solid rgba(255, 255, 255, 0.24);
+        border-radius: 14px;
+        background: linear-gradient(96deg, var(--au-cyan), #a7ecff 24%, var(--au-violet) 64%, var(--au-pink));
+        background-size: 190% 100%;
+        box-shadow: 0 16px 36px -16px rgba(110, 120, 255, 0.75), inset 0 1px 0 rgba(255, 255, 255, 0.5);
+        font-family: var(--font-ui);
+        font-size: 17px;
+        font-weight: 600;
+        letter-spacing: 0.08em;
+        color: #07080f;
+        cursor: pointer;
+        -webkit-tap-highlight-color: transparent;
+        user-select: none;
+        transition: transform 0.16s var(--ease-out), box-shadow 0.25s, background-position 0.55s var(--ease-out),
+          filter 0.2s;
+      }
+      .btn-login:hover {
+        background-position: 100% 0;
+        filter: brightness(1.06);
+        box-shadow: 0 20px 46px -16px rgba(140, 110, 255, 0.85), inset 0 1px 0 rgba(255, 255, 255, 0.55);
+      }
+      .btn-login:active {
+        transform: translateY(2px) scale(0.995);
+        box-shadow: 0 8px 22px -12px rgba(110, 120, 255, 0.8), inset 0 1px 0 rgba(255, 255, 255, 0.4);
+      }
+      .btn-login:focus-visible {
+        outline: 2px solid rgba(67, 230, 210, 0.85);
+        outline-offset: 3px;
+      }
+      .btn-login:disabled {
+        cursor: progress;
+        filter: saturate(0.65) brightness(0.92);
+      }
+      .btn-spin {
+        width: 17px;
+        height: 17px;
+        border-radius: 50%;
+        border: 2px solid rgba(7, 8, 15, 0.3);
+        border-top-color: #07080f;
+        opacity: 0;
+        animation: spin 0.8s linear infinite;
+      }
+      .btn-login:disabled .btn-spin {
+        opacity: 1;
+      }
+      @keyframes spin {
+        to { transform: rotate(360deg); }
+      }
+
+      /* ---------- 错误/成功提示（只改配色，display 走共享层 .alert/.alert.show） ---------- */
+      .login-card .alert {
+        margin-top: 13px;
+        padding: 10px 13px;
+        border-radius: 12px;
+        font-size: 14px;
+        line-height: 1.45;
+      }
+      .login-card .alert-error {
+        border: 1px solid rgba(255, 116, 140, 0.55);
+        background: rgba(255, 84, 118, 0.14);
+        color: #ffb6c4;
+        box-shadow: 0 0 26px -10px rgba(255, 84, 118, 0.65);
+      }
+      .login-card .alert-success {
+        border: 1px solid rgba(94, 240, 166, 0.5);
+        background: rgba(94, 240, 166, 0.12);
+        color: #b6f5d3;
+      }
+
+      @keyframes fade-up {
+        from { opacity: 0; transform: translateY(16px) scale(0.985); }
         to   { opacity: 1; transform: translateY(0) scale(1); }
       }
 
-      /* ---------- logo ---------- */
-      .login-logo {
-        margin-bottom: 12px;
-      }
-      .login-logo svg.i {
-        width: 72px;
-        height: 72px;
-        display: inline-block;
-        animation: logoFloat 3s ease-in-out infinite;
-      }
-      @keyframes logoFloat {
-        0%, 100% { transform: translateY(0); }
-        50%      { transform: translateY(-6px); }
-      }
-
-      /* ---------- 标题徽章（倾斜 + 不规则圆角 + 高亮底色） ---------- */
-      .login-title {
-        display: inline-block;
-        transform: rotate(-2deg);
-        padding: 4px 20px;
-        border-radius: 20% 5% 20% 5% / 5% 20% 25% 20%;
-        background-color: rgba(255, 151, 171, 0.65);
-        font-size: 22px;
-        font-weight: 600;
-        color: #4a4658;
-        margin-bottom: 6px;
-      }
-      .login-version {
-        display: block;
-        font-size: 13px;
-        color: #9b95a8;
-        margin-bottom: 28px;
-      }
-
-      /* ---------- 表单 ---------- */
-      .login-form {
-        text-align: left;
-      }
-      .login-label {
-        display: block;
-        margin-bottom: 6px;
-        font-size: 15px;
-        color: #6b6580;
-      }
-      .login-label .req {
-        color: #ff6b8a;
-        margin-left: 2px;
-      }
-      .login-input {
-        display: block;
-        width: 100%;
-        box-sizing: border-box;
-        background-color: transparent;
-        padding: 10px 8px;
-        border: none;
-        border-bottom: dashed 3px #e090d8;
-        border-bottom-right-radius: 15px 3px;
-        border-bottom-left-radius: 3px 15px;
-        font-family: 'Patrick Hand', 'Hiragino Sans GB', 'Microsoft YaHei', system-ui, sans-serif;
-        font-size: 16px;
-        color: #4a4658;
-        margin-bottom: 20px;
-        transition: border-color 0.2s, box-shadow 0.2s;
-        outline: none;
-      }
-      .login-input::placeholder {
-        color: #c0b8d0;
-      }
-      .login-input:focus {
-        border-bottom: solid 3px #e090d8;
-        border-bottom-right-radius: 15px 3px;
-        border-bottom-left-radius: 3px 15px;
-      }
-      /* iOS >= 16px 防聚焦自动放大 */
-      @media (max-width: 860px) {
-        .login-input { font-size: 16px; }
-      }
-
-      /* ---------- 3D 按压按钮 ---------- */
-      .login-btn {
-        display: block;
-        width: 100%;
-        padding: 0;
-        border: none;
-        transform: rotate(1.5deg);
-        transform-origin: center;
-        font-family: 'Patrick Hand', 'Hiragino Sans GB', 'Microsoft YaHei', system-ui, sans-serif;
-        font-size: 20px;
-        font-weight: 600;
-        text-decoration: none;
-        border-radius: 8px;
-        box-shadow: 0 4px 0 #4a4658;
-        cursor: pointer;
-        transition: all 0.15s cubic-bezier(0.175, 0.885, 0.32, 1.275);
-        background-color: #ff6b8a;
-        margin-top: 8px;
-        -webkit-tap-highlight-color: transparent;
-        user-select: none;
-      }
-      .login-btn span {
-        display: block;
-        background: #f8f6ff;
-        padding: 12px 1rem;
-        border-radius: 8px;
-        border: 2.5px solid #4a4658;
-        color: #4a4658;
-        transition: background 0.15s;
-      }
-      .login-btn:hover {
-        filter: brightness(1.06);
-      }
-      .login-btn:active:not(:disabled) {
-        transform: translateY(4px) rotate(1.5deg);
-        box-shadow: 0 0 0 #4a4658;
-      }
-      .login-btn:disabled {
-        opacity: 0.6;
-        cursor: not-allowed;
-        transform: none;
-        box-shadow: 0 2px 0 #4a4658;
-      }
-
-      /* ---------- 错误提示（虚线边框保持风格统一） ---------- */
-      .login-form .alert {
-        border-radius: 12px;
-        font-family: 'Patrick Hand', 'Hiragino Sans GB', 'Microsoft YaHei', system-ui, sans-serif;
-        font-size: 15px;
-        border: 2px dashed #f5a0b0 !important;
-        background: #fff0f3 !important;
-        color: #d63355 !important;
-      }
-
-      /* ---------- 隐藏主题按钮残留（shared.js 不会创建，以防万一） ---------- */
-      .theme-btns-login { display: none !important; }
-
-      /* ---------- 响应式 ---------- */
-      @media (max-width: 480px) {
-        body { padding: 0.5rem; font-size: 100%; }
-        .login-card {
-          padding: 28px 20px 24px;
-          min-height: auto;
-          border-radius: 18px;
+      /* ---------- 断点：移动优先逐级增强 ---------- */
+      @media (min-width: 560px) {
+        body {
+          padding: calc(24px + env(safe-area-inset-top)) 22px calc(28px + env(safe-area-inset-bottom));
         }
-        .login-title { font-size: 19px; }
+        .stage {
+          max-width: 460px;
+        }
+        .login-card {
+          padding: 30px 30px 26px;
+        }
+        .brand-logo {
+          width: 62px;
+          height: 62px;
+        }
+        .brand-name {
+          font-size: 26px;
+        }
+      }
+
+      @media (min-width: 900px) {
+        .stage {
+          max-width: 480px;
+        }
+        .login-card {
+          padding: 34px 36px 30px;
+        }
+        .brand-logo {
+          width: 68px;
+          height: 68px;
+        }
+        .brand-name {
+          font-size: 28px;
+        }
+      }
+
+      /* 低动效偏好：色带与粒子定格为静态渐变，入场动画关闭 */
+      @media (prefers-reduced-motion: reduce) {
+        .band,
+        .dust,
+        .brand-logo,
+        .login-card,
+        .btn-spin {
+          animation: none !important;
+        }
+        .login-card {
+          opacity: 1 !important;
+          transform: none !important;
+        }
+      }
+
+      /* 触屏窄屏：减一层色带与模糊半径，避免低端机掉帧 */
+      @media (max-width: 640px) {
+        .band {
+          filter: blur(48px);
+          opacity: 0.46;
+        }
+        .band-4 {
+          display: none;
+        }
+        .glass::before {
+          -webkit-backdrop-filter: blur(14px) saturate(135%);
+          backdrop-filter: blur(14px) saturate(135%);
+        }
+      }
+
+      /* 横屏矮屏（如 844×390）：品牌改横排、压缩字段间距，让整卡落进首屏拇指区 */
+      @media (max-height: 560px) {
+        body {
+          padding-top: calc(10px + env(safe-area-inset-top));
+          padding-bottom: calc(12px + env(safe-area-inset-bottom));
+        }
+        .card-brand {
+          flex-direction: row;
+          justify-content: center;
+          gap: 12px;
+          padding-bottom: 11px;
+          margin-bottom: 13px;
+        }
+        .brand-text {
+          align-items: flex-start;
+        }
+        .brand-logo {
+          width: 38px;
+          height: 38px;
+        }
+        .brand-name {
+          margin: 0;
+          font-size: 20px;
+        }
+        .brand-sub {
+          margin: 1px 0 0;
+          font-size: 11.5px;
+        }
+        .login-card {
+          padding: 16px 20px;
+        }
+        .field {
+          margin-bottom: 9px;
+        }
+        .field-label {
+          margin-bottom: 4px;
+          font-size: 13px;
+        }
+        .login-card input.login-input {
+          height: 46px; /* 仍高于 44px 触摸目标下限 */
+        }
+        .btn-login {
+          height: 48px;
+          margin-top: 3px;
+          font-size: 16px;
+        }
       }
     </style>
     <script>
@@ -223,38 +598,131 @@
         <path d="M182.075077 190.700308c-18.274462-20.007385-38.360615-29.932308-51.160615-29.932308a14.257231 14.257231 0 0 0-9.846154 3.150769c-4.529231 4.135385-5.356308 12.721231-2.363077 23.552 3.623385 12.918154 11.972923 26.978462 23.552 39.660308 24.260923 26.466462 51.633231 35.367385 61.046154 26.781538 4.529231-4.135385 5.316923-12.721231 2.323692-23.591384-3.584-12.878769-11.972923-26.939077-23.552-39.620923z" fill="#FF97AB"></path>
         <path d="M220.947692 226.067692c-4.253538-15.241846-13.902769-31.625846-27.175384-46.08-29.065846-31.822769-65.772308-44.032-83.495385-27.805538-9.176615 8.428308-11.657846 22.449231-6.892308 39.581538 4.253538 15.241846 13.902769 31.625846 27.175385 46.08 20.361846 22.291692 44.504615 34.973538 63.172923 34.973539 7.995077 0 15.005538-2.323692 20.322462-7.168 9.176615-8.428308 11.657846-22.449231 6.892307-39.581539z m-17.644307 27.805539c-9.412923 8.625231-36.824615-0.275692-61.046154-26.781539-11.579077-12.642462-19.928615-26.702769-23.512616-39.620923-3.032615-10.830769-2.166154-19.416615 2.284308-23.552a14.296615 14.296615 0 0 1 9.885539-3.150769c12.8 0 32.886154 9.924923 51.2 29.932308 11.579077 12.681846 19.928615 26.742154 23.512615 39.620923 2.993231 10.870154 2.166154 19.456-2.323692 23.552z" style="fill:#f8f6ff"></path>
       </symbol>
+      <symbol id="ic-key" viewBox="0 0 24 24">
+        <g fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">
+          <circle cx="12" cy="7.6" r="3.6" />
+          <path d="M12 11.2v9.2" />
+          <path d="M12 15.6h3.6" />
+          <path d="M12 18.8h2.5" />
+        </g>
+      </symbol>
+      <symbol id="ic-user" viewBox="0 0 24 24">
+        <g fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">
+          <circle cx="12" cy="8.4" r="3.7" />
+          <path d="M4.8 19.8c1.4-3.3 4-5 7.2-5s5.8 1.7 7.2 5" />
+        </g>
+      </symbol>
+      <symbol id="ic-lock" viewBox="0 0 24 24">
+        <g fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">
+          <rect x="4.6" y="10.4" width="14.8" height="9.6" rx="2.8" />
+          <path d="M8.2 10.4V7.9a3.8 3.8 0 0 1 7.6 0v2.5" />
+        </g>
+      </symbol>
+      <symbol id="ic-eye" viewBox="0 0 24 24">
+        <g fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M2.6 12S6 6.4 12 6.4 21.4 12 21.4 12 18 17.6 12 17.6 2.6 12 2.6 12z" />
+          <circle cx="12" cy="12" r="2.7" />
+        </g>
+      </symbol>
+      <symbol id="ic-eye-off" viewBox="0 0 24 24">
+        <g fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M3.4 3.4l17.2 17.2" />
+          <path d="M10.2 6.8a9.9 9.9 0 0 1 1.8-.2c6 0 9.4 5.4 9.4 5.4a17.4 17.4 0 0 1-2.8 3.4" />
+          <path d="M6.1 8.3A16.9 16.9 0 0 0 2.6 12s3.4 5.4 9.4 5.4c1.5 0 2.8-.3 3.9-.9" />
+          <path d="M9.6 10.2a3 3 0 0 0 4.3 4.2" />
+        </g>
+      </symbol>
     </svg>
 
-    <!-- ================= 登录视图 ================= -->
-    <div class="login-wrap" id="loginView">
-      <div class="login-card">
-        <div class="login-logo">
-          <svg class="i logo-svg" aria-hidden="true"><use href="#ic-logo"></use></svg>
-        </div>
-        <div class="login-title">CatDock 网页控制台</div>
-        <div class="login-version">v __VERSION__</div>
-
-        <form id="loginForm" class="login-form" autocomplete="off">
-          <label class="login-label" for="loginKey">认证密钥 (AUTH_KEY)<i class="req">*</i></label>
-          <input class="login-input" type="password" id="loginKey" placeholder="~ 请输入认证密钥 ~" required />
-
-          <label class="login-label" for="loginUser">用户名<i class="req">*</i></label>
-          <input class="login-input" type="text" id="loginUser" placeholder="~ 请输入用户名 ~" autocomplete="username" required />
-
-          <label class="login-label" for="loginPwd">密码<i class="req">*</i></label>
-          <input class="login-input" type="password" id="loginPwd" placeholder="~ 请输入密码 ~" autocomplete="current-password" required />
-
-          <button type="submit" class="login-btn" id="loginBtn">
-            <span>登 录</span>
-          </button>
-          <div class="alert alert-error" id="loginAlert"></div>
-        </form>
-      </div>
+    <!-- ================= 极光背景层（纯装饰，对读屏隐藏） ================= -->
+    <div class="aurora" aria-hidden="true">
+      <i class="band band-1"></i>
+      <i class="band band-2"></i>
+      <i class="band band-3"></i>
+      <i class="band band-4"></i>
+      <i class="dust dust-1"></i>
+      <i class="dust dust-2"></i>
+      <i class="veil"></i>
     </div>
 
-    <!-- ================= 主视图 ================= -->
-    <!-- 登录页无主视图 -->
-    <div id="appView" style="display: none"></div>
+    <!-- ================= 登录视图 ================= -->
+    <main class="stage" id="loginView">
+      <section class="login-panel">
+        <div class="login-card glass">
+          <header class="card-brand">
+            <svg class="brand-logo" aria-hidden="true"><use href="#ic-logo"></use></svg>
+            <div class="brand-text">
+              <h1 class="brand-name">CatDock</h1>
+              <p class="brand-sub">控制台</p>
+            </div>
+          </header>
+
+          <form id="loginForm" autocomplete="off">
+            <div class="field">
+              <label class="field-label" for="loginKey">认证密钥<i class="req">*</i><span class="tag">AUTH_KEY</span></label>
+              <div class="field-box">
+                <svg class="fi" aria-hidden="true"><use href="#ic-key"></use></svg>
+                <input
+                  class="login-input"
+                  type="password"
+                  id="loginKey"
+                  placeholder="管理员分发的密钥"
+                  autocomplete="off"
+                  autocapitalize="none"
+                  spellcheck="false"
+                  required
+                />
+                <button type="button" class="peek" data-target="loginKey" aria-pressed="false" aria-label="显示认证密钥">
+                  <svg class="ic-on" aria-hidden="true"><use href="#ic-eye"></use></svg>
+                  <svg class="ic-off" aria-hidden="true"><use href="#ic-eye-off"></use></svg>
+                </button>
+              </div>
+            </div>
+
+            <div class="field">
+              <label class="field-label" for="loginUser">用户名<i class="req">*</i></label>
+              <div class="field-box">
+                <svg class="fi" aria-hidden="true"><use href="#ic-user"></use></svg>
+                <input
+                  class="login-input"
+                  type="text"
+                  id="loginUser"
+                  placeholder="你的登录用户名"
+                  autocomplete="username"
+                  autocapitalize="none"
+                  spellcheck="false"
+                  required
+                />
+              </div>
+            </div>
+
+            <div class="field">
+              <label class="field-label" for="loginPwd">密码<i class="req">*</i></label>
+              <div class="field-box">
+                <svg class="fi" aria-hidden="true"><use href="#ic-lock"></use></svg>
+                <input
+                  class="login-input"
+                  type="password"
+                  id="loginPwd"
+                  placeholder="登录密码"
+                  autocomplete="current-password"
+                  required
+                />
+                <button type="button" class="peek" data-target="loginPwd" aria-pressed="false" aria-label="显示密码">
+                  <svg class="ic-on" aria-hidden="true"><use href="#ic-eye"></use></svg>
+                  <svg class="ic-off" aria-hidden="true"><use href="#ic-eye-off"></use></svg>
+                </button>
+              </div>
+            </div>
+
+            <button type="submit" class="btn-login" id="loginBtn">
+              <i class="btn-spin" aria-hidden="true"></i><span>登 录</span>
+            </button>
+            <div class="alert" id="loginAlert" role="alert" aria-live="assertive"></div>
+          </form>
+        </div>
+      </section>
+    </main>
 
     <script>
       (function () {
@@ -270,6 +738,26 @@
         var $ = function (id) {
           return document.getElementById(id);
         };
+
+        // ---------- 明文切换：密钥与密码都是长串，手机上必须先看清再提交 ----------
+        var peeks = document.querySelectorAll(".peek");
+        for (var i = 0; i < peeks.length; i++) {
+          peeks[i].addEventListener("click", function () {
+            var input = $(this.getAttribute("data-target"));
+            if (!input) return;
+            var shown = input.type !== "password";
+            input.type = shown ? "password" : "text";
+            this.setAttribute("aria-pressed", shown ? "false" : "true");
+            // type 切换会清空选区与光标，手动复位到行尾
+            var pos = input.value.length;
+            input.focus();
+            try {
+              input.setSelectionRange(pos, pos);
+            } catch (e) {
+              /* 部分浏览器对 password 不提供 setSelectionRange */
+            }
+          });
+        }
 
         // ---------- 登录 ----------
         $("loginForm").addEventListener("submit", function (e) {
