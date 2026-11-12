@@ -1,6 +1,9 @@
 package com.catdock.app.ui.profile
 
+import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -10,6 +13,7 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
@@ -31,6 +35,7 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
@@ -61,14 +66,12 @@ import com.catdock.app.ui.components.bentoEnter
 import com.catdock.app.ui.components.bentoPress
 import com.catdock.app.ui.components.catNumeric
 import com.catdock.app.ui.filters.FiltersEditor
-import com.catdock.app.ui.theme.Appearance
 import com.catdock.app.ui.theme.LocalPalette
 import com.catdock.app.ui.theme.LocalSpec
-import com.catdock.app.ui.theme.ModePreference
 import kotlinx.coroutines.launch
 
 /**
- * 「我的」页：账号 / 外观 / 服务信息 / 本人过滤规则 / 修改密码 / 切换账号 / 退出。
+ * 「我的」页：账号 / 服务信息 / 本人过滤规则 / 修改密码 / 切换账号 / 退出。
  * 范围对齐网页端——顶栏用户菜单只有 修改密码·切换用户·过滤规则·退出，
  * user.html 另有一张服务信息卡，此外不再展示任何统计项。
  */
@@ -84,7 +87,6 @@ fun ProfileScreen(
     val spec = LocalSpec.current
     val app = LocalContext.current.applicationContext as CatdockApp
     val scope = rememberCoroutineScope()
-    val appearance by app.appearanceStore.appearance.collectAsState(initial = Appearance())
     val accounts by sessionStore.accounts.collectAsState(initial = emptyList())
     // 按账号 keying：切号后不残留上一账号的服务端数据与提示
     var config by remember(session.accountKey) { mutableStateOf<ServerConfig?>(null) }
@@ -113,7 +115,7 @@ fun ProfileScreen(
         // 组与组之间按 16dp 档，比卡内栅格 gap 大一档，分组读得出来
         verticalArrangement = Arrangement.spacedBy(spec.groupGap.dp),
     ) {
-        // 首屏左上黄金区放最高权重信息：当前账号与角色
+        // 首屏左上黄金区放最高权重信息：当前账号与角色；头像带极光渐变光环（glow 记忆点）
         CatCard(
             Modifier
                 .fillMaxWidth()
@@ -121,8 +123,24 @@ fun ProfileScreen(
         ) {
             Row(
                 verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                horizontalArrangement = Arrangement.spacedBy(12.dp),
             ) {
+                // 外圈 2dp 极光渐变环 = 头像光环；内圈主色浅底 + 首字母
+                Box(
+                    Modifier
+                        .size(60.dp)
+                        .border(2.dp, Brush.linearGradient(p.primaryGradient), CircleShape)
+                        .padding(4.dp)
+                        .background(p.primarySoft, CircleShape),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Text(
+                        session.username.take(1).uppercase(),
+                        fontSize = 22.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = p.primary,
+                    )
+                }
                 Column(Modifier.weight(1f)) {
                     Text(
                         session.username,
@@ -149,26 +167,6 @@ fun ProfileScreen(
             Modifier
                 .fillMaxWidth()
                 .bentoEnter(1),
-        ) {
-            CatCardTitle("外观", modifier = Modifier.padding(bottom = 4.dp))
-            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(spec.gap.dp)) {
-                ModePreference.entries.forEach { m ->
-                    CatButton(
-                        text = m.label,
-                        onClick = { scope.launch { app.appearanceStore.setMode(m) } },
-                        modifier = Modifier.weight(1f),
-                        variant = if (appearance.mode == m) CatButtonVariant.PRIMARY else CatButtonVariant.GHOST,
-                        small = true,
-                    )
-                }
-            }
-            Text("柔黄浅蓝 / 乌木鎏金两套配色，这里只切亮暗", fontSize = 12.sp, color = p.text3)
-        }
-
-        CatCard(
-            Modifier
-                .fillMaxWidth()
-                .bentoEnter(2),
             verticalArrangement = Arrangement.spacedBy(2.dp),
         ) {
             CatCardTitle("服务信息", modifier = Modifier.padding(bottom = 8.dp))
@@ -194,7 +192,7 @@ fun ProfileScreen(
             CatCard(
                 Modifier
                     .fillMaxWidth()
-                    .bentoEnter(3),
+                    .bentoEnter(2),
                 verticalArrangement = Arrangement.spacedBy(8.dp),
             ) {
                 CatButton(
@@ -223,7 +221,7 @@ fun ProfileScreen(
         CatCard(
             Modifier
                 .fillMaxWidth()
-                .bentoEnter(4),
+                .bentoEnter(3),
         ) {
             CatCardTitle("登录与安全", modifier = Modifier.padding(bottom = 4.dp))
             CatButton(
@@ -241,7 +239,14 @@ fun ProfileScreen(
                 variant = CatButtonVariant.GHOST,
                 icon = Icons.Filled.SwitchAccount,
             )
-            Spacer(Modifier.height(4.dp))
+        }
+
+        // 退出登录独立成格：危险操作不与常规入口同卡，防误触
+        CatCard(
+            Modifier
+                .fillMaxWidth()
+                .bentoEnter(4),
+        ) {
             CatConfirmButton(
                 text = "退出登录",
                 confirmText = "退出后需重新登录",

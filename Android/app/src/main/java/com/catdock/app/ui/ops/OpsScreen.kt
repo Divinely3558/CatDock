@@ -10,12 +10,21 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
 import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.Block
+import androidx.compose.material.icons.filled.Download
+import androidx.compose.material.icons.filled.Lock
+import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.Refresh
+import androidx.compose.material.icons.filled.Tune
+import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -27,6 +36,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
@@ -56,11 +66,14 @@ import com.catdock.app.ui.components.CatTone
 import com.catdock.app.ui.components.TrackBentoScroll
 import com.catdock.app.ui.components.bentoEnter
 import com.catdock.app.ui.components.bentoSurface
+import com.catdock.app.ui.components.catNumeric
+import com.catdock.app.ui.components.catTap
 import com.catdock.app.ui.filters.FiltersEditor
 import com.catdock.app.ui.shareTextFile
 import com.catdock.app.ui.theme.LocalPalette
 import com.catdock.app.ui.theme.LocalSpec
 import com.catdock.app.ui.theme.catCardShape
+import com.catdock.app.ui.theme.catControlShape
 import java.security.SecureRandom
 import java.text.SimpleDateFormat
 import java.util.Date
@@ -192,8 +205,8 @@ class OpsModel(private val repo: AppRepository) : ScreenModel() {
     }
 }
 
-private enum class OpsTab(val label: String) {
-    USERS("用户"), BANS("封禁"), KEY("密钥"), FILTERS("过滤"), LOGS("日志")
+private enum class OpsSection(val label: String) {
+    USERS("用户管理"), BANS("IP 封禁"), KEY("服务器配置"), FILTERS("过滤规则"), LOGS("日志导出")
 }
 
 @Composable
@@ -208,49 +221,89 @@ fun OpsScreen(repository: AppRepository, session: Session, onAuthExpired: (Strin
     val notice by model.notice.collectAsState()
     val auth by model.authEvent.collectAsState()
 
-    var tab by remember(session.accountKey) { mutableStateOf(OpsTab.USERS) }
+    // null = 仪表盘首页；非空 = 对应子功能页（返回栈自然，不再需要次级 TabRow）
+    var section by remember(session.accountKey) { mutableStateOf<OpsSection?>(null) }
     var addOpen by remember { mutableStateOf(false) }
     var banOpen by remember { mutableStateOf(false) }
     var pwdFor by remember { mutableStateOf<String?>(null) }
 
     LaunchedEffect(auth) { auth?.let { onAuthExpired(it); model.clearAuth() } }
-    LaunchedEffect(tab) { model.clearError() }
+    LaunchedEffect(section) { model.clearError() }
 
     Column(Modifier.fillMaxSize().padding(horizontal = spec.screenPadding.dp)) {
-        // 五段做成一整条玻璃分段控件：选中段自身上玻璃，不靠分割线切区
-        Row(
-            Modifier
-                .fillMaxWidth()
-                .padding(top = 10.dp, bottom = spec.gap.dp)
-                .bentoSurface(strong = true)
-                .padding(5.dp),
-            horizontalArrangement = Arrangement.spacedBy(5.dp),
-        ) {
-            OpsTab.entries.forEach { t ->
-                CatButton(
-                    text = t.label,
-                    onClick = { tab = t },
-                    modifier = Modifier.weight(1f),
-                    variant = if (tab == t) CatButtonVariant.PRIMARY else CatButtonVariant.GHOST,
-                    small = true,
-                )
+        when (val s = section) {
+            // ---- bento 仪表盘：2x2 统计格 + 通栏入口格 ----
+            null -> SectionScroll {
+                InlineMsg(error, notice)
+                // 统计全部来自现有 users / bans 快照（服务端无在线/全量任务接口，不虚构）
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(spec.gap.dp)) {
+                    OpsStat("用户", users.size, enterIndex = 0, modifier = Modifier.weight(1f))
+                    OpsStat("正常", users.count { !it.disabled }, enterIndex = 1, modifier = Modifier.weight(1f))
+                }
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(spec.gap.dp)) {
+                    OpsStat("已禁用", users.count { it.disabled }, enterIndex = 2, modifier = Modifier.weight(1f))
+                    OpsStat("IP 封禁", bans.size, enterIndex = 3, modifier = Modifier.weight(1f))
+                }
+                OpsEntry("用户管理", "新增 / 改密 / 禁用 / 删除下载用户", Icons.Filled.Person, enterIndex = 4) {
+                    section = OpsSection.USERS
+                }
+                OpsEntry("IP 封禁", "查看与解封命中风控的地址", Icons.Filled.Block, enterIndex = 5) {
+                    section = OpsSection.BANS
+                }
+                OpsEntry("服务器配置", "更换 AUTH_KEY 并强制全员下线", Icons.Filled.Lock, enterIndex = 6) {
+                    section = OpsSection.KEY
+                }
+                OpsEntry("过滤规则", "广告关键字 / 文件名过滤 / 去重模板", Icons.Filled.Tune, enterIndex = 7) {
+                    section = OpsSection.FILTERS
+                }
+                OpsEntry("日志导出", "按日期范围导出服务日志", Icons.Filled.Download, enterIndex = 8) {
+                    section = OpsSection.LOGS
+                }
             }
-        }
 
-        Box(Modifier.weight(1f).fillMaxWidth()) {
-            when (tab) {
-                OpsTab.FILTERS -> FiltersEditor(isAdmin = true, repository, onAuthExpired)
-                else -> SectionScroll {
-                    InlineMsg(error, notice)
-                    when (tab) {
-                        OpsTab.USERS -> UsersSection(users, model,
-                            onAdd = { addOpen = true },
-                            onPassword = { pwdFor = it },
+            // ---- 子功能页：顶部返回条 + 原功能区 ----
+            else -> {
+                Row(
+                    Modifier
+                        .fillMaxWidth()
+                        .padding(top = 10.dp, bottom = spec.gap.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(10.dp),
+                ) {
+                    Box(
+                        Modifier
+                            .size(spec.minTouch.dp)
+                            .catTap(onClick = { section = null }, shape = catControlShape(), ripple = true),
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        Icon(
+                            Icons.AutoMirrored.Filled.ArrowBack,
+                            contentDescription = "返回运维仪表盘",
+                            tint = LocalPalette.current.text,
+                            modifier = Modifier.size(20.dp),
                         )
-                        OpsTab.BANS -> BansSection(bans, model, onBan = { banOpen = true })
-                        OpsTab.KEY -> KeySection(model)
-                        OpsTab.LOGS -> LogsSection(model, context)
-                        OpsTab.FILTERS -> {}
+                    }
+                    Text(
+                        s.label,
+                        fontSize = 17.sp,
+                        fontWeight = FontWeight.SemiBold,
+                        color = LocalPalette.current.text,
+                    )
+                }
+                Box(Modifier.weight(1f).fillMaxWidth()) {
+                    // FILTERS 不再单列分支：编辑器自身已不是 LazyColumn，滚动统一由 SectionScroll 给
+                    SectionScroll {
+                        InlineMsg(error, notice)
+                        when (s) {
+                            OpsSection.USERS -> UsersSection(users, model,
+                                onAdd = { addOpen = true },
+                                onPassword = { pwdFor = it },
+                            )
+                            OpsSection.BANS -> BansSection(bans, model, onBan = { banOpen = true })
+                            OpsSection.KEY -> KeySection(model)
+                            OpsSection.LOGS -> LogsSection(model, context)
+                            OpsSection.FILTERS -> FiltersEditor(isAdmin = true, repository, onAuthExpired)
+                        }
                     }
                 }
             }
@@ -289,6 +342,66 @@ private fun InlineMsg(error: String?, notice: String?) {
     val p = LocalPalette.current
     error?.let { Text(it, fontSize = 12.sp, color = p.red) }
     notice?.let { Text(it, fontSize = 12.sp, color = p.green) }
+}
+
+/** 仪表盘 1x1 统计格：大数字（等宽防跳动）+ 小标签 */
+@Composable
+private fun OpsStat(label: String, value: Int, enterIndex: Int, modifier: Modifier = Modifier) {
+    val p = LocalPalette.current
+    Column(
+        modifier
+            .bentoEnter(enterIndex)
+            .bentoSurface(shape = catCardShape())
+            .padding(horizontal = 10.dp, vertical = 14.dp),
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.spacedBy(2.dp),
+    ) {
+        Text("$value", style = catNumeric(24, p.text, FontWeight.Bold))
+        Text(label, fontSize = 12.sp, color = p.text3, maxLines = 1)
+    }
+}
+
+/** 仪表盘入口格：图标玻璃块 + 标题/说明 + 右箭头，整格可点 */
+@Composable
+private fun OpsEntry(
+    title: String,
+    desc: String,
+    icon: ImageVector,
+    enterIndex: Int,
+    onClick: () -> Unit,
+) {
+    val p = LocalPalette.current
+    CatCard(
+        Modifier
+            .fillMaxWidth()
+            .bentoEnter(enterIndex),
+        onClick = onClick,
+    ) {
+        Row(
+            Modifier.fillMaxWidth(),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(12.dp),
+        ) {
+            Box(
+                Modifier
+                    .size(40.dp)
+                    .background(p.primarySoft, catControlShape()),
+                contentAlignment = Alignment.Center,
+            ) {
+                Icon(icon, contentDescription = null, tint = p.primary, modifier = Modifier.size(20.dp))
+            }
+            Column(Modifier.weight(1f)) {
+                Text(title, fontSize = 15.sp, fontWeight = FontWeight.SemiBold, color = p.text)
+                Text(desc, fontSize = 12.sp, color = p.text3)
+            }
+            Icon(
+                Icons.AutoMirrored.Filled.KeyboardArrowRight,
+                contentDescription = null,
+                tint = p.text3,
+                modifier = Modifier.size(18.dp),
+            )
+        }
+    }
 }
 
 @Composable

@@ -5,13 +5,11 @@ import android.os.Build
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.tween
-import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.shape.CornerBasedShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Shapes
 import androidx.compose.material3.Typography
-import androidx.compose.material3.darkColorScheme
 import androidx.compose.material3.lightColorScheme
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
@@ -35,29 +33,28 @@ import androidx.compose.ui.unit.sp
 import androidx.core.view.WindowCompat
 
 /**
- * 唯一渲染入口：Bento 双主题。
- * 主题切换不把色板与配置表直接换成新值，而是整体按 420ms ease-in-out 插值，
- * 于是颜色、渐变、发光、模糊、栅格间距一起平滑过渡，不会一刀切跳变。
+ * 唯一渲染入口：晨雾极光单主题。
+ * 色板与配置表插值架构保留（420ms ease-in-out），
+ * 颜色、渐变、发光、模糊、栅格间距一起平滑过渡，不会一刀切跳变。
  */
 @Composable
 fun CatdockTheme(
-    darkTheme: Boolean = isSystemInDarkTheme(),
     content: @Composable () -> Unit,
 ) {
-    val spec = rememberBentoSpec(specOf(darkTheme))
-    val palette = rememberBentoPalette(paletteOf(darkTheme), spec.themeMillis)
+    val spec = rememberBentoSpec(specOf())
+    val palette = rememberBentoPalette(paletteOf(), spec.themeMillis)
     val window = bentoWindowOf(
         screenDp = LocalConfiguration.current.screenWidthDp.toFloat(),
         baseGap = spec.gap,
     )
-    val scheme = colorSchemeOf(palette, darkTheme)
+    val scheme = colorSchemeOf(palette)
     val view = LocalView.current
     val activityWindow = (LocalContext.current as? Activity)?.window
 
     if (!view.isInEditMode && activityWindow != null) {
         SideEffect {
-            // 暗色是低亮度乌木底，状态栏图标反白；亮色通透底用深色图标
-            WindowCompat.getInsetsController(activityWindow, view).isAppearanceLightStatusBars = !darkTheme
+            // 晨雾浅底：状态栏图标用深色
+            WindowCompat.getInsetsController(activityWindow, view).isAppearanceLightStatusBars = true
         }
     }
 
@@ -145,6 +142,7 @@ private fun lerpSpec(a: BentoSpec, b: BentoSpec, t: Float): BentoSpec {
         bottomInset = f(a.bottomInset, b.bottomInset),
         cardRadius = f(a.cardRadius, b.cardRadius),
         controlRadius = f(a.controlRadius, b.controlRadius),
+        sheetRadius = f(a.sheetRadius, b.sheetRadius),
         badgeRadius = f(a.badgeRadius, b.badgeRadius),
         stroke = f(a.stroke, b.stroke),
         buttonStroke = f(a.buttonStroke, b.buttonStroke),
@@ -155,6 +153,7 @@ private fun lerpSpec(a: BentoSpec, b: BentoSpec, t: Float): BentoSpec {
         pressScale = f(a.pressScale, b.pressScale),
         minTouch = f(a.minTouch, b.minTouch),
         dialogMaxWidth = f(a.dialogMaxWidth, b.dialogMaxWidth),
+        navFloatMargin = f(a.navFloatMargin, b.navFloatMargin),
         themeMillis = a.themeMillis,
         enterMillis = a.enterMillis,
         staggerMillis = a.staggerMillis,
@@ -169,9 +168,10 @@ private fun lerpPalette(a: CatPalette, b: CatPalette, t: Float): CatPalette {
         bg = c(a.bg, b.bg),
         bgTop = c(a.bgTop, b.bgTop),
         bgBottom = c(a.bgBottom, b.bgBottom),
-        blobA = c(a.blobA, b.blobA),
-        blobB = c(a.blobB, b.blobB),
-        blobC = c(a.blobC, b.blobC),
+        auroraA = c(a.auroraA, b.auroraA),
+        auroraB = c(a.auroraB, b.auroraB),
+        auroraC = c(a.auroraC, b.auroraC),
+        auroraD = c(a.auroraD, b.auroraD),
         glassCard = c(a.glassCard, b.glassCard),
         glassStrong = c(a.glassStrong, b.glassStrong),
         card = c(a.card, b.card),
@@ -185,6 +185,7 @@ private fun lerpPalette(a: CatPalette, b: CatPalette, t: Float): CatPalette {
         primary = c(a.primary, b.primary),
         primaryHover = c(a.primaryHover, b.primaryHover),
         primarySoft = c(a.primarySoft, b.primarySoft),
+        primaryGradient = a.primaryGradient.zip(b.primaryGradient).map { (x, y) -> c(x, y) },
         green = c(a.green, b.green),
         greenSoft = c(a.greenSoft, b.greenSoft),
         amber = c(a.amber, b.amber),
@@ -207,8 +208,8 @@ private fun lerpPalette(a: CatPalette, b: CatPalette, t: Float): CatPalette {
 
 private fun radiusShape(radius: Float): CornerBasedShape = RoundedCornerShape(radius.dp)
 
-private fun colorSchemeOf(p: CatPalette, dark: Boolean) =
-    (if (dark) darkColorScheme() else lightColorScheme()).copy(
+private fun colorSchemeOf(p: CatPalette) =
+    lightColorScheme().copy(
         primary = p.primary,
         onPrimary = p.onPrimary,
         primaryContainer = p.primarySoft,

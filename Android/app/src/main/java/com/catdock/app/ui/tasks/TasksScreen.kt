@@ -16,7 +16,6 @@ import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Download
@@ -25,7 +24,10 @@ import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.PlayCircle
 import androidx.compose.material.icons.filled.PushPin
 import androidx.compose.material.icons.filled.TrendingUp
+import androidx.compose.material.icons.filled.Tune
 import androidx.compose.material3.Icon
+import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
@@ -37,6 +39,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -201,6 +204,7 @@ fun TasksScreen(
     val tasks by vm.tasks.collectAsState()
     val loading by vm.loading.collectAsState()
     var showNewTask by remember { mutableStateOf(false) }
+    var dialogUrl by remember { mutableStateOf("") }
     val toast = rememberCatToastState()
 
     DisposableEffect(Unit) {
@@ -221,28 +225,17 @@ fun TasksScreen(
             .padding(horizontal = spec.screenPadding.dp)
     ) {
         Column(Modifier.fillMaxSize()) {
-            // bento 视觉锚点：主操作做成 2x1 通栏大卡钉在顶部，替掉原先压在卡片上的悬浮 FAB
-            CatCard(
-                Modifier
+            // 任务页只保留快捷输入 + 列表：首屏可见任务数最大化
+            QuickAddCard(
+                onSubmit = { url -> vm.submit(DownloadReq(url = url, format = "mp4")) },
+                onMore = { url ->
+                    dialogUrl = url
+                    showNewTask = true
+                },
+                modifier = Modifier
                     .fillMaxWidth()
-                    .bentoEnter(0),
-            ) {
-                Row(
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(8.dp),
-                ) {
-                    val p = LocalPalette.current
-                    Column(Modifier.weight(1f)) {
-                        Text("新建下载", fontSize = 15.sp, fontWeight = FontWeight.SemiBold, color = p.text)
-                        Text("粘贴 m3u8 或视频直链，提交后立即进队列", fontSize = 12.sp, color = p.text3)
-                    }
-                    CatButton(
-                        text = "粘贴链接",
-                        icon = Icons.Filled.Add,
-                        onClick = { showNewTask = true },
-                    )
-                }
-            }
+                    .padding(top = spec.gap.dp),
+            )
 
             Box(Modifier.weight(1f).fillMaxWidth()) {
                 when {
@@ -252,13 +245,14 @@ fun TasksScreen(
                     )
 
                     tasks.isEmpty() -> Box(
-                        Modifier.fillMaxSize().padding(vertical = 24.dp, horizontal = 8.dp),
-                        contentAlignment = Alignment.Center,
+                        // 空态贴着输入格往下排：居中会让首屏裂成上下两段空白
+                        Modifier.fillMaxSize().padding(horizontal = 8.dp).padding(top = spec.gap.dp),
+                        contentAlignment = Alignment.TopCenter,
                     ) {
                         CatEmptyState(
                             icon = Icons.Filled.Download,
                             text = "暂无任务",
-                            hint = "点上方「粘贴链接」新建下载任务",
+                            hint = "在上方粘贴链接即可新建下载任务",
                         )
                     }
 
@@ -287,6 +281,7 @@ fun TasksScreen(
 
     if (showNewTask) {
         NewTaskDialog(
+            initialUrl = dialogUrl,
             onDismiss = { showNewTask = false },
             onSubmit = { req ->
                 showNewTask = false
@@ -335,6 +330,8 @@ private fun TaskCard(
                 CatProgress(
                     fraction = (task.progress.toFloat() / 100f).coerceIn(0f, 1f),
                     modifier = Modifier.weight(1f),
+                    // 流动动画只给 running：暂停/完成静止， queued 不渲染进度条
+                    flowing = task.status == "running",
                 )
                 // 网页 .pct：min-width 38px + 右对齐 + 等宽数字，轮询刷新时不左右跳
                 Text(
@@ -405,11 +402,11 @@ private fun TaskCard(
     }
 }
 
-/** 新建下载任务：URL 必填，高级选项（Referer / Cookie / UA）折叠 */
+/** 新建下载任务：URL 必填，高级选项（Referer / Cookie / UA）折叠；[initialUrl] 由快捷输入格带入 */
 @Composable
-private fun NewTaskDialog(onDismiss: () -> Unit, onSubmit: (DownloadReq) -> Unit) {
+private fun NewTaskDialog(initialUrl: String = "", onDismiss: () -> Unit, onSubmit: (DownloadReq) -> Unit) {
     val p = LocalPalette.current
-    var url by remember { mutableStateOf("") }
+    var url by remember { mutableStateOf(initialUrl) }
     var saveName by remember { mutableStateOf("") }
     var referer by remember { mutableStateOf("") }
     var cookie by remember { mutableStateOf("") }
@@ -476,5 +473,73 @@ private fun NewTaskDialog(onDismiss: () -> Unit, onSubmit: (DownloadReq) -> Unit
             onDismiss = onDismiss,
             confirmEnabled = url.isNotBlank(),
         )
+    }
+}
+
+// ---------- 任务页 bento 单元 ----------
+
+/**
+ * 快捷输入格（单行扁平）：粘贴链接 + 渐变发送钮，直接以默认 mp4 提交；
+ * 右侧「更多」打开完整新建任务弹窗（高级选项在弹窗里，保持本格单行干净）。
+ */
+@Composable
+private fun QuickAddCard(
+    onSubmit: (String) -> Unit,
+    onMore: (String) -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    val p = LocalPalette.current
+    var url by remember { mutableStateOf("") }
+    // 不写死高度：M3 OutlinedTextField 内部固定 16dp 上下留白，56dp 是它的最小可用高度，
+    // 用 height() 压到 56 以下会把占位文案裁掉（heightIn(min) 不会，所以别用 height）
+    CatCard(modifier.bentoEnter(0), contentPadding = 6.dp, verticalArrangement = Arrangement.spacedBy(0.dp)) {
+        Row(
+            Modifier.fillMaxWidth(),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(6.dp),
+        ) {
+            OutlinedTextField(
+                value = url,
+                onValueChange = { url = it },
+                // 占位文案压到一行：过长会换行把整格撑厚
+                placeholder = { Text("粘贴链接…", fontSize = 14.sp, color = p.text3) },
+                singleLine = true,
+                textStyle = TextStyle(fontSize = 14.sp, color = p.text),
+                shape = catControlShape(),
+                colors = OutlinedTextFieldDefaults.colors(
+                    focusedTextColor = p.text,
+                    unfocusedTextColor = p.text,
+                    focusedContainerColor = p.inputBg,
+                    unfocusedContainerColor = p.inputBg.copy(alpha = p.inputBg.alpha * 0.75f),
+                    cursorColor = p.primary,
+                    focusedBorderColor = p.primary,
+                    unfocusedBorderColor = p.border,
+                ),
+                modifier = Modifier.weight(1f),
+            )
+            Box(
+                Modifier
+                    .size(44.dp)
+                    .catTap(onClick = { onMore(url.trim()) }, shape = catControlShape(), ripple = true),
+                contentAlignment = Alignment.Center,
+            ) {
+                Icon(
+                    Icons.Filled.Tune,
+                    contentDescription = "更多选项",
+                    tint = p.text2,
+                    modifier = Modifier.size(20.dp),
+                )
+            }
+            CatButton(
+                text = "下载",
+                onClick = {
+                    onSubmit(url.trim())
+                    url = ""
+                },
+                enabled = url.isNotBlank(),
+                icon = Icons.Filled.Download,
+                small = true,
+            )
+        }
     }
 }

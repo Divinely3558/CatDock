@@ -12,6 +12,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.verticalScroll
@@ -172,6 +173,8 @@ fun AccountPickerScreen(
             CatCard(
                 Modifier
                     .fillMaxWidth()
+                    // 与登录卡同宽：两页来回跳时不产生宽度跳变
+                    .widthIn(max = 420.dp)
                     .padding(top = 16.dp)
                     .bentoEnter(0),
                 verticalArrangement = Arrangement.spacedBy(2.dp),
@@ -197,7 +200,7 @@ fun AccountPickerScreen(
             }
 
             CatButton(
-                text = "新用户登录",
+                text = "使用其他账号",
                 onClick = onNewLogin,
                 modifier = Modifier.fillMaxWidth().padding(top = 16.dp),
                 variant = CatButtonVariant.GHOST,

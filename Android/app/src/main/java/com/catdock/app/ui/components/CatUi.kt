@@ -2,7 +2,12 @@ package com.catdock.app.ui.components
 
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.animateColorAsState
+import androidx.compose.animation.core.LinearEasing
+import androidx.compose.animation.core.RepeatMode
+import androidx.compose.animation.core.animateFloat
 import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.infiniteRepeatable
+import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
@@ -48,11 +53,18 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.draw.scale
 import androidx.compose.ui.draw.shadow
+import androidx.compose.ui.draw.drawWithContent
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.graphics.BlendMode
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.CompositingStrategy
 import androidx.compose.ui.graphics.Shape
+import androidx.compose.ui.graphics.TileMode
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.lerp
 import androidx.compose.ui.text.TextStyle
@@ -105,6 +117,25 @@ fun Modifier.catTap(
         )
 }
 
+// ---------- 渐变着色 ----------
+
+/**
+ * 极光渐变着色：把图标等可见像素用渐变重着色（离屏合成 + SrcIn）。
+ * 选中态导航图标用；on = false 时原样返回，零成本。
+ * 注意：被着色的 Icon 必须给一个不透明 tint（像素先存在，SrcIn 才有东西可染）。
+ */
+fun Modifier.auroraTint(brush: Brush, on: Boolean = true): Modifier =
+    if (!on) {
+        this
+    } else {
+        this
+            .graphicsLayer { compositingStrategy = CompositingStrategy.Offscreen }
+            .drawWithContent {
+                drawContent()
+                drawRect(brush = brush, blendMode = BlendMode.SrcIn)
+            }
+    }
+
 // ---------- 卡片 ----------
 
 /** 玻璃卡片面：12dp 圆角 + 半透基底 + 上沿反光 + 软阴影/边缘微光 */
@@ -150,10 +181,10 @@ enum class CatButtonVariant { PRIMARY, GHOST, DANGER }
 
 /**
  * 玻璃拟态按钮：
- *   PRIMARY 主色磨砂底 + 细描边；亮色用炭黑描边且关闭发光通道，暗色用同色鎏金描边并打开外发光
+ *   PRIMARY 极光渐变底（青→紫→品红 135°）+ 细描边；发光通道亮 0.35 / 暗 1，按下光晕收敛 30%
  *   GHOST   半透玻璃底 + 描边 + 正文色文字
  *   DANGER  红底，用于删除 / 全员下线
- * 按下：微缩 + 水波纹 + 暗色光晕短暂提亮。
+ * 按下：微缩 + 水波纹 + 光晕收敛。
  */
 @Composable
 fun CatButton(
@@ -176,8 +207,10 @@ fun CatButton(
         label = "btnPress",
     )
 
-    // 只有主按钮铺实心色块；危险按钮用色槽底 + 红字红边，免得整屏多一块饱和色
+    // 只有主按钮铺实心色块（极光渐变）；危险按钮用色槽底 + 红字红边，免得整屏多一块饱和色
     val solid = variant == CatButtonVariant.PRIMARY
+    // 启用态主按钮走极光渐变，禁用态回落到中性浅底（渐变打折后白字会糊住）
+    val useGradient = variant == CatButtonVariant.PRIMARY && enabled
     val baseColor = when (variant) {
         CatButtonVariant.PRIMARY -> p.primary
         CatButtonVariant.DANGER -> p.redSoft
@@ -210,10 +243,10 @@ fun CatButton(
     val glowColor = if (variant == CatButtonVariant.DANGER) p.red.copy(alpha = 0.28f) else p.glow
     // 只有主/危险按钮走发光通道，次级按钮留中性投影，免得满屏光晕
     val glowing = variant != CatButtonVariant.GHOST
-    // 亮色 buttonGlow=0（只有炭黑细描边），暗色打开；按下再短暂提亮
+    // 发光通道由 buttonGlow 开关（亮 0.35 / 暗 1）；按下时光晕收敛 30%，配合微缩形成「压实」感
     val glow by animateFloatAsState(
         if (!enabled || !glowing) 0f
-        else spec.buttonGlow * (spec.glowRadius + if (pressed) 6f else 2f),
+        else spec.buttonGlow * spec.glowRadius * (if (pressed) 0.7f else 1f),
         tween(150),
         label = "btnGlow",
     )
@@ -224,7 +257,21 @@ fun CatButton(
             .scale(scale)
             // 阴影走 glassHalo 而非 shadow()：后者强制离屏合成，半透底会被挤出直角边
             .glassHalo((spec.elevation / 2f + glow).dp, haloColor, shape)
-            .background(fill, shape)
+            .then(
+                if (useGradient) {
+                    Modifier.background(Brush.linearGradient(p.primaryGradient), shape)
+                } else {
+                    Modifier.background(fill, shape)
+                },
+            )
+            // 渐变按钮按下不切换色值，叠一层黑纱压暗，视觉更平滑
+            .then(
+                if (useGradient && pressed) {
+                    Modifier.background(Color.Black.copy(alpha = 0.12f), shape)
+                } else {
+                    Modifier
+                },
+            )
             // 悬浮/常态表面高光：只在实心按钮上出现，玻璃按钮靠卡片层的反光
             .then(
                 if (solid && enabled) {
@@ -389,23 +436,35 @@ fun CatField(
 
 // ---------- 进度条 ----------
 
-/** 凹槽 + 实色条：轨道用描边色压暗读出未走完的部分，进度走主色，两端圆头 */
+/** 凹槽 + 极光渐变条：轨道用描边色压暗，进度为青→紫渐变；running 态 2.4s 流动循环 */
 @Composable
-fun CatProgress(fraction: Float, modifier: Modifier = Modifier) {
+fun CatProgress(fraction: Float, modifier: Modifier = Modifier, flowing: Boolean = false) {
     val p = LocalPalette.current
-    val height = 8.dp
+    val spec = LocalSpec.current
+    val height = 6.dp
     val shape = CircleShape
     val width by animateFloatAsState(
         targetValue = if (fraction.isNaN()) 0f else fraction.coerceIn(0f, 1f),
         animationSpec = tween(400, easing = androidx.compose.animation.core.FastOutSlowInEasing),
         label = "progress",
     )
+    // 流动只在 running 且动效开启时运行；读取发生在 draw 阶段，不触发重组
+    val flow = if (flowing && spec.motion) {
+        val transition = rememberInfiniteTransition(label = "progressFlow")
+        transition.animateFloat(
+            initialValue = 0f,
+            targetValue = 1f,
+            animationSpec = infiniteRepeatable(tween(2400, easing = LinearEasing), RepeatMode.Restart),
+            label = "flow",
+        )
+    } else {
+        null
+    }
     Box(
         modifier = modifier
             .height(height)
             .fillMaxWidth()
-            // 规范第 97 行写「轨道用 glassCard」，但两个玻璃档都是白底，铺在白卡上等于没画，
-            // 轨道仍用描边色压暗，靠 1dp 描边收边
+            // 轨道用描边色压暗读出未走完的部分，靠 1dp 描边收边
             .background(p.border.copy(alpha = 0.55f), shape)
             .border(1.dp, p.border, shape),
     ) {
@@ -413,7 +472,26 @@ fun CatProgress(fraction: Float, modifier: Modifier = Modifier) {
             modifier = Modifier
                 .fillMaxWidth(width)
                 .height(height)
-                .background(p.primary, shape),
+                .clip(shape)
+                .drawBehind {
+                    val w = size.width
+                    if (w <= 0f) return@drawBehind
+                    val colors = p.primaryGradient
+                    val f = flow?.value
+                    if (f != null) {
+                        // 一个条宽的渐变窗随 f 平移，Mirror 平铺补齐两端，视觉上青紫循环流动
+                        drawRect(
+                            Brush.linearGradient(
+                                colors,
+                                start = Offset((f - 1f) * w, 0f),
+                                end = Offset(f * w, 0f),
+                                tileMode = TileMode.Mirror,
+                            ),
+                        )
+                    } else {
+                        drawRect(Brush.linearGradient(colors))
+                    }
+                },
         )
     }
 }
@@ -444,7 +522,14 @@ fun CatSwitch(checked: Boolean, onCheckedChange: (Boolean) -> Unit, modifier: Mo
         Box(
             Modifier
                 .size(width = 46.dp, height = 26.dp)
-                .background(track, pill)
+                // 选中态轨道铺极光渐变，未选中回落中性灰
+                .then(
+                    if (checked) {
+                        Modifier.background(Brush.linearGradient(p.primaryGradient), pill)
+                    } else {
+                        Modifier.background(track, pill)
+                    },
+                )
                 .border(spec.stroke.dp, p.border, pill),
             contentAlignment = Alignment.CenterStart,
         ) {
@@ -485,7 +570,8 @@ fun HealthDot(state: HealthState, modifier: Modifier = Modifier) {
         HealthState.CHECKING -> p.text3
         HealthState.OK -> p.green
         HealthState.BAD -> p.red
-        HealthState.NEW_MESSAGE -> p.blue
+        // 未读点用品红极光色（auroraC），与普通在线状态拉开色相
+        HealthState.NEW_MESSAGE -> p.auroraC
     }
     Box(modifier = modifier.size(12.dp).background(color.copy(alpha = 0.22f), CircleShape),
         contentAlignment = Alignment.Center) {

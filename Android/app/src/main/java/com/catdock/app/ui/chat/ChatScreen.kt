@@ -39,6 +39,8 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.style.TextAlign
@@ -373,13 +375,27 @@ private fun ChatRow(m: ChatMessage, mine: Boolean, prev: ChatMessage?) {
                 Modifier
                     .padding(horizontal = 4.dp)
                     // 气泡不套玻璃：本页信息密度最高，玻璃叠到第三层就压不住正文。
-                    // 用不透明 card 底，自己的那侧再着主色
-                    .background(p.card, catControlShape())
-                    .then(if (mine) Modifier.background(p.primarySoft, catControlShape()) else Modifier)
-                    .border(1.dp, if (mine) p.primary.copy(alpha = 0.45f) else p.border, catControlShape())
+                    // 自己 = 极光渐变底白字靠右；他人 = 不透明 card 底靠左
+                    .then(
+                        if (mine) {
+                            Modifier.background(Brush.linearGradient(p.primaryGradient), catControlShape())
+                        } else {
+                            Modifier.background(p.card, catControlShape())
+                        },
+                    )
+                    .border(
+                        1.dp,
+                        if (mine) Color.White.copy(alpha = 0.24f) else p.border,
+                        catControlShape(),
+                    )
                     .padding(horizontal = 12.dp, vertical = 9.dp),
             ) {
-                Text(m.msg, fontSize = 14.sp, color = p.text, lineHeight = 21.sp)
+                Text(
+                    m.msg,
+                    fontSize = 14.sp,
+                    color = if (mine) p.onPrimary else p.text,
+                    lineHeight = 21.sp,
+                )
             }
         }
     }

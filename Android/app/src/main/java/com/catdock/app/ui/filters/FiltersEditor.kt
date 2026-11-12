@@ -3,13 +3,10 @@ package com.catdock.app.ui.filters
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.heightIn
-import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
@@ -110,135 +107,127 @@ fun FiltersEditor(
 
     LaunchedEffect(cfg) { notice = null }
 
-    val listState = rememberLazyListState()
-    TrackBentoScroll(listState)
+    val scroll = rememberScrollState()
+    TrackBentoScroll(scroll)
 
-    LazyColumn(
-        state = listState,
-        modifier = Modifier.fillMaxSize(),
-        // 左右不留内缩：外层页面已经给了 spec.screenPadding，这里再缩一次会让卡片贴不进栅格宽度
-        contentPadding = PaddingValues(top = 4.dp, bottom = spec.bottomInset.dp + 20.dp),
+    // 用普通 Column：本编辑器会嵌进 verticalScroll 的页面（我的页展开过滤规则），
+    // 那种父级给不出高度上限，LazyColumn 会因无限最大高度直接抛 IllegalStateException
+    Column(
+        Modifier
+            .fillMaxWidth()
+            // 左右不留内缩：外层页面已经给了 spec.screenPadding，这里再缩一次会让卡片贴不进栅格宽度
+            .padding(top = 4.dp, bottom = spec.bottomInset.dp + 20.dp),
         // 三段规则之间按 16dp 组档，卡内栅格仍用 gap
         verticalArrangement = Arrangement.spacedBy(spec.groupGap.dp),
     ) {
         if (loading) {
-            item { BentoSkeleton(rows = 3, cellHeight = 120.dp) }
-            return@LazyColumn
+            BentoSkeleton(rows = 3, cellHeight = 120.dp)
+            return@Column
         }
 
-        item {
-            ChipSection(
-                enterIndex = 0,
-                title = "拦截广告关键字",
-                hint = "链接或文件名含关键字即拦截",
-                enabled = cfg.keywords.enabled,
-                items = cfg.keywords.list,
-                onToggle = { vm.config.value = cfg.copy(keywords = cfg.keywords.copy(enabled = it)) },
-                onAdd = { added ->
-                    val merged = (cfg.keywords.list + added).distinct()
-                    vm.config.value = cfg.copy(keywords = cfg.keywords.copy(list = merged))
-                },
-                onRemove = { kw ->
-                    vm.config.value = cfg.copy(keywords = cfg.keywords.copy(list = cfg.keywords.list - kw))
-                },
-            )
-        }
+        ChipSection(
+            enterIndex = 0,
+            title = "拦截广告关键字",
+            hint = "链接或文件名含关键字即拦截",
+            enabled = cfg.keywords.enabled,
+            items = cfg.keywords.list,
+            onToggle = { vm.config.value = cfg.copy(keywords = cfg.keywords.copy(enabled = it)) },
+            onAdd = { added ->
+                val merged = (cfg.keywords.list + added).distinct()
+                vm.config.value = cfg.copy(keywords = cfg.keywords.copy(list = merged))
+            },
+            onRemove = { kw ->
+                vm.config.value = cfg.copy(keywords = cfg.keywords.copy(list = cfg.keywords.list - kw))
+            },
+        )
 
-        item {
-            ChipSection(
-                enterIndex = 1,
-                title = "文件名过滤",
-                hint = "从文件名中删除这些关键字",
-                enabled = cfg.filenameFilter.enabled,
-                items = cfg.filenameFilter.list,
-                onToggle = { vm.config.value = cfg.copy(filenameFilter = cfg.filenameFilter.copy(enabled = it)) },
-                onAdd = { added ->
-                    val merged = (cfg.filenameFilter.list + added).distinct()
-                    vm.config.value = cfg.copy(filenameFilter = cfg.filenameFilter.copy(list = merged))
-                },
-                onRemove = { kw ->
-                    vm.config.value =
-                        cfg.copy(filenameFilter = cfg.filenameFilter.copy(list = cfg.filenameFilter.list - kw))
-                },
-            )
-        }
+        ChipSection(
+            enterIndex = 1,
+            title = "文件名过滤",
+            hint = "从文件名中删除这些关键字",
+            enabled = cfg.filenameFilter.enabled,
+            items = cfg.filenameFilter.list,
+            onToggle = { vm.config.value = cfg.copy(filenameFilter = cfg.filenameFilter.copy(enabled = it)) },
+            onAdd = { added ->
+                val merged = (cfg.filenameFilter.list + added).distinct()
+                vm.config.value = cfg.copy(filenameFilter = cfg.filenameFilter.copy(list = merged))
+            },
+            onRemove = { kw ->
+                vm.config.value =
+                    cfg.copy(filenameFilter = cfg.filenameFilter.copy(list = cfg.filenameFilter.list - kw))
+            },
+        )
 
-        item {
-            CatCard(
-                Modifier
-                    .fillMaxWidth()
-                    .bentoEnter(2),
-                verticalArrangement = Arrangement.spacedBy(10.dp),
-            ) {
-                SectionHead(
-                    "文件名去重",
-                    "按顺序应用正则替换",
-                    cfg.filenameDedup.enabled,
-                    cfg.filenameDedup.rules.size,
-                ) { vm.config.value = cfg.copy(filenameDedup = cfg.filenameDedup.copy(enabled = it)) }
+        CatCard(
+            Modifier
+                .fillMaxWidth()
+                .bentoEnter(2),
+            verticalArrangement = Arrangement.spacedBy(10.dp),
+        ) {
+            SectionHead(
+                "文件名去重",
+                "按顺序应用正则替换",
+                cfg.filenameDedup.enabled,
+                cfg.filenameDedup.rules.size,
+            ) { vm.config.value = cfg.copy(filenameDedup = cfg.filenameDedup.copy(enabled = it)) }
 
-                cfg.filenameDedup.rules.forEachIndexed { index, rule ->
-                    Row(
-                        Modifier.fillMaxWidth(),
-                        verticalAlignment = Alignment.Bottom,
-                        horizontalArrangement = Arrangement.spacedBy(8.dp),
-                    ) {
-                        CatField(
-                            rule.pattern,
-                            { v -> setRule(vm, cfg, index) { it.copy(pattern = v) } },
-                            "查找（正则）",
-                            modifier = Modifier.weight(1f),
-                        )
-                        CatField(
-                            rule.replacement,
-                            { v -> setRule(vm, cfg, index) { it.copy(replacement = v) } },
-                            "替换为",
-                            modifier = Modifier.weight(1f),
-                        )
-                        CatConfirmButton(
-                            text = "删",
-                            confirmText = "删除该规则？",
-                            detail = "只是从编辑中的列表里移除这条规则，点保存前不会写到服务器。",
-                            onConfirm = {
-                                vm.config.value = cfg.copy(
-                                    filenameDedup = cfg.filenameDedup.copy(
-                                        rules = cfg.filenameDedup.rules.toMutableList().also { it.removeAt(index) },
-                                    ),
-                                )
-                            },
-                            small = true,
-                        )
-                    }
+            cfg.filenameDedup.rules.forEachIndexed { index, rule ->
+                Row(
+                    Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.Bottom,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    CatField(
+                        rule.pattern,
+                        { v -> setRule(vm, cfg, index) { it.copy(pattern = v) } },
+                        "查找（正则）",
+                        modifier = Modifier.weight(1f),
+                    )
+                    CatField(
+                        rule.replacement,
+                        { v -> setRule(vm, cfg, index) { it.copy(replacement = v) } },
+                        "替换为",
+                        modifier = Modifier.weight(1f),
+                    )
+                    CatConfirmButton(
+                        text = "删",
+                        confirmText = "删除该规则？",
+                        detail = "只是从编辑中的列表里移除这条规则，点保存前不会写到服务器。",
+                        onConfirm = {
+                            vm.config.value = cfg.copy(
+                                filenameDedup = cfg.filenameDedup.copy(
+                                    rules = cfg.filenameDedup.rules.toMutableList().also { it.removeAt(index) },
+                                ),
+                            )
+                        },
+                        small = true,
+                    )
                 }
-                CatButton(
-                    "添加规则",
-                    {
-                        vm.config.value = cfg.copy(
-                            filenameDedup = cfg.filenameDedup.copy(rules = cfg.filenameDedup.rules + DedupRule()),
-                        )
-                    },
-                    variant = CatButtonVariant.GHOST,
-                    icon = Icons.Filled.Add,
-                    small = true,
-                )
             }
+            CatButton(
+                "添加规则",
+                {
+                    vm.config.value = cfg.copy(
+                        filenameDedup = cfg.filenameDedup.copy(rules = cfg.filenameDedup.rules + DedupRule()),
+                    )
+                },
+                variant = CatButtonVariant.GHOST,
+                icon = Icons.Filled.Add,
+                small = true,
+            )
         }
 
-        item {
-            Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(spec.gap.dp)) {
-                error?.let { Text(it, fontSize = 12.sp, color = p.red) }
-                notice?.let { Text(it, fontSize = 12.sp, color = p.green) }
-            }
+        Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(spec.gap.dp)) {
+            error?.let { Text(it, fontSize = 12.sp, color = p.red) }
+            notice?.let { Text(it, fontSize = 12.sp, color = p.green) }
         }
 
         // 主操作固定在底部优先操作区，满宽单手可及
-        item {
-            CatButton(
-                "保存过滤规则",
-                onClick = { vm.save(onDone = { notice = it }, onExpired = onAuthExpired) },
-                modifier = Modifier.fillMaxWidth(),
-            )
-        }
+        CatButton(
+            "保存过滤规则",
+            onClick = { vm.save(onDone = { notice = it }, onExpired = onAuthExpired) },
+            modifier = Modifier.fillMaxWidth(),
+        )
     }
 }
 

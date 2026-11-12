@@ -27,7 +27,6 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
-import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontFamily
@@ -37,9 +36,7 @@ import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.catdock.app.data.Session
 import com.catdock.app.ui.AppNav
-import com.catdock.app.ui.theme.Appearance
 import com.catdock.app.ui.theme.CatdockTheme
-import com.catdock.app.ui.theme.ModePreference
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -47,14 +44,7 @@ class MainActivity : ComponentActivity() {
         enableEdgeToEdge()
         val app = application as CatdockApp
         setContent {
-            val appearance by app.appearanceStore.appearance
-                .collectAsStateWithLifecycle(initialValue = Appearance())
-            val dark = when (appearance.mode) {
-                ModePreference.SYSTEM -> isSystemInDarkTheme()
-                ModePreference.LIGHT -> false
-                ModePreference.DARK -> true
-            }
-            CatdockTheme(darkTheme = dark) {
+            CatdockTheme {
                 // 上次运行发生过崩溃：优先展示崩溃报告页（可复制反馈），
                 // 此时不再渲染主界面，避免同一崩溃反复触发
                 var crashReport by remember { mutableStateOf(CrashHandler.read(this)) }

@@ -1,22 +1,24 @@
 package com.catdock.app.ui.main
 
 import android.util.Log
-import androidx.compose.foundation.border
-import androidx.compose.foundation.isSystemInDarkTheme
+import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.isImeVisible
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.Chat
@@ -39,6 +41,7 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
@@ -59,6 +62,7 @@ import com.catdock.app.ui.components.CatTone
 import com.catdock.app.ui.components.HealthDot
 import com.catdock.app.ui.components.HealthState
 import com.catdock.app.ui.components.LocalBentoFx
+import com.catdock.app.ui.components.auroraTint
 import com.catdock.app.ui.components.bentoSurface
 import com.catdock.app.ui.components.catTap
 import com.catdock.app.ui.components.rememberBentoFx
@@ -66,10 +70,8 @@ import com.catdock.app.ui.ops.OpsScreen
 import com.catdock.app.ui.profile.ProfileScreen
 import com.catdock.app.ui.tasks.TasksModel
 import com.catdock.app.ui.tasks.TasksScreen
-import com.catdock.app.ui.theme.Appearance
 import com.catdock.app.ui.theme.LocalPalette
 import com.catdock.app.ui.theme.LocalSpec
-import com.catdock.app.ui.theme.ModePreference
 import com.catdock.app.ui.theme.catBadgeShape
 import com.catdock.app.ui.theme.catControlShape
 import kotlinx.coroutines.delay
@@ -149,7 +151,8 @@ fun MainScreen(
     val dotState = if (chatLast > chatSeen) HealthState.NEW_MESSAGE else health
 
     Box(Modifier.fillMaxSize()) {
-        BentoBackdrop()
+        // 聊天页文字密度最高，极光压暗一半保可读性（aurora-ui 折中条款）
+        BentoBackdrop(blobLift = if (tabs[tab].key == "chat") 0.55f else 1f)
         CompositionLocalProvider(LocalBentoFx provides fx) {
             Column(Modifier.fillMaxSize()) {
                 CatTopBar(
@@ -216,19 +219,24 @@ private fun CatTopBar(
 
 
 /**
- * 底部导航：全宽玻璃贴底条，手势区在框内留白，控件不塞进手势热区。
+ * 底部导航：悬浮玻璃胶囊（左右/下各 16dp），极光背景从胶囊四周透出。
  * 不用 Material NavigationBarItem——它的固定选中块会盖掉 Bento 的层次与微光。
  */
 @Composable
 private fun CatNavBar(tabs: List<NavTab>, selected: Int, onSelect: (Int) -> Unit) {
     val spec = LocalSpec.current
-    Box(Modifier.fillMaxWidth()) {
+    Box(
+        Modifier
+            .fillMaxWidth()
+            // 先让出手势导航区，再铺悬浮外边距
+            .navigationBarsPadding()
+            .padding(horizontal = spec.navFloatMargin.dp, vertical = 8.dp),
+    ) {
         Row(
             Modifier
                 .fillMaxWidth()
-                .bentoSurface(strong = true)
-                .navigationBarsPadding()
-                .padding(horizontal = 8.dp, vertical = 6.dp),
+                .bentoSurface(shape = catBadgeShape(), strong = true)
+                .padding(horizontal = 10.dp, vertical = 6.dp),
             horizontalArrangement = Arrangement.spacedBy(spec.gap.dp),
         ) {
             tabs.forEachIndexed { index, t ->
@@ -242,31 +250,46 @@ private fun CatNavBar(tabs: List<NavTab>, selected: Int, onSelect: (Int) -> Unit
 private fun NavItem(tab: NavTab, on: Boolean, modifier: Modifier = Modifier, onSelect: () -> Unit) {
     val p = LocalPalette.current
     val spec = LocalSpec.current
+    val grad = remember(p.primaryGradient) { Brush.linearGradient(p.primaryGradient) }
     Column(
         modifier
             .padding(horizontal = 4.dp)
-            // 条目本身不再铺玻璃：导航条已经是一层玻璃，再叠就冲破三层纪律
+            // 条目本身不再铺玻璃：导航胶囊已经是一层玻璃，再叠就冲破三层纪律
             .heightIn(min = spec.listRowHeight.dp - 8.dp)
             .catTap(onClick = onSelect, shape = catControlShape(), ripple = true),
         horizontalAlignment = Alignment.CenterHorizontally,
-        verticalArrangement = Arrangement.spacedBy(3.dp, Alignment.CenterVertically),
+        verticalArrangement = Arrangement.spacedBy(2.dp, Alignment.CenterVertically),
     ) {
+        // 选中态：上方 3dp 渐变指示条 + 渐变图标 + 主色文字
+        Box(
+            Modifier
+                .height(3.dp)
+                .width(26.dp)
+                .background(
+                    if (on) {
+                        grad
+                    } else {
+                        Brush.linearGradient(listOf(Color.Transparent, Color.Transparent))
+                    },
+                    catBadgeShape(),
+                ),
+        )
+        Spacer(Modifier.height(1.dp))
         Icon(
             tab.icon,
             contentDescription = tab.label,
-            modifier = Modifier.size(22.dp),
-            tint = if (on) p.primary else p.text3,
+            modifier = Modifier
+                .size(22.dp)
+                .auroraTint(grad, on),
+            // auroraTint 的 SrcIn 需要先有像素，选中态给不透明白底再染色
+            tint = if (on) Color.White else p.text3,
         )
-        // 当前页只描一枚主色胶囊，不铺填充色块，保持通透
         Text(
             tab.label,
             fontSize = 12.sp,
             fontWeight = if (on) FontWeight.SemiBold else FontWeight.Normal,
             color = if (on) p.primary else p.text3,
             maxLines = 1,
-            modifier = Modifier
-                .border(spec.stroke.dp, if (on) p.primary else Color.Transparent, catBadgeShape())
-                .padding(horizontal = 7.dp, vertical = 1.dp),
         )
     }
 }

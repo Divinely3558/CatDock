@@ -10,6 +10,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
@@ -176,6 +177,7 @@ fun LoginScreen(
                         fontWeight = FontWeight.Black,
                         color = p.primary,
                     )
+                    Text("猫抓 m3u8 下载 · 服务器伴侣", fontSize = 12.sp, color = p.text2)
                 }
             }
 
@@ -193,6 +195,8 @@ fun LoginScreen(
             CatCard(
                 Modifier
                     .fillMaxWidth()
+                    // 居中登录大卡 ≤420dp（aurora 规范：宽屏不拉成长条）
+                    .widthIn(max = 420.dp)
                     .padding(top = 16.dp)
                     .bentoEnter(0),
                 verticalArrangement = Arrangement.spacedBy(12.dp),
@@ -237,7 +241,7 @@ fun LoginScreen(
                     horizontalArrangement = Arrangement.spacedBy(10.dp),
                 ) {
                     CatButton(
-                        text = "登录",
+                        text = "连接并登录",
                         onClick = { submit() },
                         modifier = Modifier.weight(1f),
                         enabled = !loading,

@@ -78,6 +78,7 @@ import com.catdock.app.ui.theme.LocalBento
 import com.catdock.app.ui.theme.LocalPalette
 import com.catdock.app.ui.theme.LocalSpec
 import com.catdock.app.ui.theme.catCardShape
+import com.catdock.app.ui.theme.catSheetShape
 import com.catdock.app.ui.theme.supportsSystemBlur
 import kotlinx.coroutines.delay
 
@@ -150,9 +151,10 @@ private fun auroraDrift(durationMillis: Int): State<Float>? {
 }
 
 /**
- * 背景层：45° 线性渐变（柔黄→浅冰蓝 / 乌木→深乌木）+ 三团同色系柔光 + 滚动视差。
- * 透明度压得很低，不抢卡片内容；状态栏与手势区由渐变本身覆盖。
- * blobLift > 1 给登录这类没有正文遮挡的页面用，让光斑在空底上更明显。
+ * 背景层：纵向深空渐变 + 四层流动极光带（青/紫/品红/绿）+ 滚动视差。
+ * 极光带是宽扁椭圆，错速 18/24/30/36s 永不循环对齐，透明度在 0.5~0.8 间脉动；
+ * 压得很淡不抢卡片内容，状态栏与手势区由渐变本身覆盖。
+ * lift > 1 给登录这类没有正文遮挡的页面用，让极光在空底上更明显。
  */
 @Composable
 fun BentoBackdrop(modifier: Modifier = Modifier, blobLift: Float = 1f) {
@@ -164,37 +166,38 @@ fun BentoBackdrop(modifier: Modifier = Modifier, blobLift: Float = 1f) {
 
     fun lift(c: Color) = c.copy(alpha = (c.alpha * blobLift).coerceAtMost(1f))
 
-    // 三团各走各的周期，错开才不像同一块背景在整体平移；13/17/20s 都在规范 10~30s 区间内
-    val driftA = auroraDrift(13_000)
-    val driftB = auroraDrift(17_000)
-    val driftC = auroraDrift(20_000)
+    // 四层各走各的周期，错开才不像同一块背景在整体平移；18/24/30/36s 都在规范 10~30s+ 区间
+    val driftA = auroraDrift(18_000)
+    val driftB = auroraDrift(24_000)
+    val driftC = auroraDrift(30_000)
+    val driftD = auroraDrift(36_000)
 
     Box(modifier.fillMaxSize()) {
         Box(
             Modifier
                 .fillMaxSize()
                 .background(
-                    Brush.linearGradient(
+                    Brush.verticalGradient(
                         colors = listOf(p.bgTop, p.bg, p.bgBottom),
-                        start = Offset.Zero,
-                        end = Offset.Infinite,
                     ),
                 ),
         )
         Box(Modifier.fillMaxSize().graphicsLayer { translationY = parallax }) {
-            SoftBlob(Alignment.TopStart, offsetX = (-56).dp, offsetY = (-32).dp, diameter = 300.dp, color = lift(p.blobA), blur = blur, drift = driftA)
-            SoftBlob(Alignment.TopEnd, offsetX = (-24).dp, offsetY = 84.dp, diameter = 220.dp, color = lift(p.blobB), blur = blur, drift = driftB)
-            SoftBlob(Alignment.BottomStart, offsetX = 44.dp, offsetY = (-160).dp, diameter = 260.dp, color = lift(p.blobC), blur = blur, drift = driftC)
+            AuroraBand(Alignment.TopStart, offsetX = (-90).dp, offsetY = (-70).dp, width = 430.dp, height = 250.dp, color = lift(p.auroraA), blur = blur, drift = driftA)
+            AuroraBand(Alignment.TopEnd, offsetX = (-70).dp, offsetY = 60.dp, width = 380.dp, height = 230.dp, color = lift(p.auroraB), blur = blur, drift = driftB)
+            AuroraBand(Alignment.BottomStart, offsetX = 30.dp, offsetY = (-140).dp, width = 400.dp, height = 240.dp, color = lift(p.auroraC), blur = blur, drift = driftC)
+            AuroraBand(Alignment.BottomEnd, offsetX = (-40).dp, offsetY = (-60).dp, width = 340.dp, height = 210.dp, color = lift(p.auroraD), blur = blur, drift = driftD)
         }
     }
 }
 
 @Composable
-private fun BoxScope.SoftBlob(
+private fun BoxScope.AuroraBand(
     align: Alignment,
     offsetX: Dp,
     offsetY: Dp,
-    diameter: Dp,
+    width: Dp,
+    height: Dp,
     color: Color,
     blur: Dp,
     drift: State<Float>?,
@@ -203,20 +206,23 @@ private fun BoxScope.SoftBlob(
         Modifier
             .align(align)
             .offset(x = offsetX, y = offsetY)
-            .size(diameter)
+            .size(width = width, height = height)
             .softBlur(blur)
             .background(
-                Brush.radialGradient(colors = listOf(color, color.copy(alpha = 0f))),
+                Brush.radialGradient(
+                    colors = listOf(color, color.copy(alpha = 0f)),
+                    radius = width.value * 1.6f,
+                ),
                 CircleShape,
             )
             // 位移与透明度都只在 graphicsLayer 里改：读 drift.value 不触发重组，掉不到主线程上
-            // 幅度上限 5%（规范「呼吸感但不能抢内容」），透明度只在 0.95~1.0 之间起伏
+            // 位移幅度上限 6%，透明度脉动 0.5~0.8（规范「呼吸感但不能抢内容」）
             .graphicsLayer {
                 drift?.value?.let { d ->
                     val r = size.minDimension
-                    translationX = d * 0.05f * r
-                    translationY = -d * 0.04f * r
-                    alpha = 0.95f + 0.05f * (d + 1f) / 2f
+                    translationX = d * 0.06f * r
+                    translationY = -d * 0.05f * r
+                    alpha = 0.65f + 0.15f * d
                 }
             },
     )
@@ -279,7 +285,7 @@ fun Modifier.bentoSurface(
         label = "glassHalo",
     )
 
-    // 亮色是低透明软投影，暗色是鎏金边缘微光：同一通道由色板给值，切换时一起插值
+    // 亮色是低透明软投影，暗色是极光紫边缘微光：同一通道由色板给值，切换时一起插值
     val haloColor = lerp(p.shadow, p.glow, spec.buttonGlow)
     var m = this
         .glassHalo(halo.dp, haloColor, shape)
@@ -478,8 +484,8 @@ fun BentoDialog(
                 modifier
                     .widthIn(max = spec.dialogMaxWidth.dp)
                     // 弹窗底下先垫一层近实色：只靠玻璃基底会透出页面正文，两层文字叠在一起读不了
-                    .background(p.dialog, catCardShape())
-                    .bentoSurface(shape = catCardShape(), strong = true)
+                    .background(p.dialog, catSheetShape())
+                    .bentoSurface(shape = catSheetShape(), strong = true)
                     .bentoEnter(0)
                     .padding(16.dp),
                 verticalArrangement = Arrangement.spacedBy(12.dp),

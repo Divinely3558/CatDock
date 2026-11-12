@@ -7,18 +7,30 @@ import android.content.pm.ActivityInfo
 import android.view.WindowManager
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.detectHorizontalDragGestures
+import androidx.compose.foundation.gestures.detectTapGestures
+import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Fullscreen
+import androidx.compose.material.icons.filled.FullscreenExit
+import androidx.compose.material.icons.filled.Pause
+import androidx.compose.material.icons.filled.PlayArrow
+import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
@@ -30,7 +42,9 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
@@ -55,11 +69,13 @@ import com.catdock.app.data.AuthExpiredException
 import com.catdock.app.data.Session
 import com.catdock.app.data.Task
 import com.catdock.app.ui.ScreenModel
-import com.catdock.app.ui.components.CatButton
-import com.catdock.app.ui.components.CatButtonVariant
+import com.catdock.app.ui.components.bentoSurface
+import com.catdock.app.ui.components.catNumeric
+import com.catdock.app.ui.components.glassHalo
 import com.catdock.app.ui.rememberScreenModel
 import com.catdock.app.ui.theme.LocalPalette
 import com.catdock.app.ui.theme.LocalSpec
+import com.catdock.app.ui.theme.catControlShape
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -134,6 +150,13 @@ fun PlayerScreen(
     var playerError by remember { mutableStateOf<String?>(null) }
     var fullscreen by remember { mutableStateOf(false) }
     var prepared by remember { mutableStateOf(false) }
+    // 自绘控制层状态：播放中 / 进度 / 控制条可见性（nonce 重置 3s 自动隐藏计时）
+    var playing by remember { mutableStateOf(true) }
+    var buffering by remember { mutableStateOf(true) }
+    var posMs by remember { mutableStateOf(0L) }
+    var durMs by remember { mutableStateOf(0L) }
+    var controlsVisible by remember { mutableStateOf(true) }
+    var controlsNonce by remember { mutableStateOf(0) }
 
     val exoPlayer = remember(session.accountKey, taskId) {
         ExoPlayer.Builder(context).build().apply { playWhenReady = true }
@@ -156,11 +179,38 @@ fun PlayerScreen(
             override fun onPlayerError(err: PlaybackException) {
                 playerError = "播放失败：${err.errorCodeName}"
             }
+
+            override fun onIsPlayingChanged(isPlaying: Boolean) {
+                playing = isPlaying
+            }
+
+            override fun onPlaybackStateChanged(playbackState: Int) {
+                buffering = playbackState == Player.STATE_BUFFERING
+                if (playbackState == Player.STATE_READY) durMs = exoPlayer.duration.coerceAtLeast(0L)
+            }
         })
         onDispose {
             vm.saveResumeTime(exoPlayer.currentPosition)
             exoPlayer.stop()
             exoPlayer.release()
+        }
+    }
+
+    // 进度轮询 500ms：驱动自绘进度条与时间文本（ExoPlayer 不推进度事件）
+    LaunchedEffect(exoPlayer) {
+        while (true) {
+            posMs = exoPlayer.currentPosition.coerceAtLeast(0L)
+            val d = exoPlayer.duration
+            if (d > 0) durMs = d
+            delay(500)
+        }
+    }
+
+    // 横屏全屏下 3s 无操作自动隐藏控制层；任何交互经 nonce 重置计时
+    LaunchedEffect(fullscreen, controlsVisible, controlsNonce) {
+        if (fullscreen && controlsVisible) {
+            delay(3000)
+            controlsVisible = false
         }
     }
 
@@ -207,86 +257,236 @@ fun PlayerScreen(
         onDispose { activity?.window?.clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON) }
     }
 
-    Column(
+    // 视频全出血：上下各叠一层 glassStrong 控制条；竖屏黑底容纳信箱模式
+    Box(
         Modifier
             .fillMaxSize()
-            .background(if (fullscreen) Color.Black else Color.Transparent),
+            .background(Color.Black),
     ) {
-        if (!fullscreen) {
+        val message = playerError ?: loadError
+        if (message != null) {
+            Text(
+                message,
+                color = p.red,
+                fontSize = 13.sp,
+                modifier = Modifier
+                    .align(Alignment.Center)
+                    .padding(24.dp),
+            )
+        } else {
+            AndroidView(
+                factory = { ctx ->
+                    PlayerView(ctx).apply {
+                        player = exoPlayer
+                        // 控制层全部自绘（玻璃条），关掉 ExoPlayer 原生控制器
+                        useController = false
+                        setShutterBackgroundColor(android.graphics.Color.TRANSPARENT)
+                    }
+                },
+                update = { view ->
+                    view.resizeMode = if (fullscreen) {
+                        AspectRatioFrameLayout.RESIZE_MODE_ZOOM
+                    } else {
+                        AspectRatioFrameLayout.RESIZE_MODE_FIT
+                    }
+                },
+                modifier = Modifier.fillMaxSize(),
+            )
+        }
+
+        // 点击切换控制层显隐（无 ripple 的整屏透明热区）
+        Box(
+            Modifier
+                .fillMaxSize()
+                .clickable(
+                    interactionSource = remember { MutableInteractionSource() },
+                    indication = null,
+                ) {
+                    controlsVisible = !controlsVisible
+                    controlsNonce++
+                },
+        )
+
+        if (buffering && message == null) {
+            CircularProgressIndicator(
+                modifier = Modifier.align(Alignment.Center).size(40.dp),
+                color = p.primary,
+                strokeWidth = 3.dp,
+            )
+        }
+
+        if (controlsVisible) {
+            // 上控制条：返回 + 标题/下载进度 + 全屏开关
             Row(
                 Modifier
+                    .align(Alignment.TopCenter)
                     .fillMaxWidth()
                     .statusBarsPadding()
-                    .padding(horizontal = spec.screenPadding.dp)
-                    .padding(top = 8.dp, bottom = spec.gap.dp),
+                    .padding(horizontal = spec.screenPadding.dp, vertical = 10.dp)
+                    .bentoSurface(shape = catControlShape(), strong = true)
+                    .padding(horizontal = 6.dp, vertical = 4.dp),
                 verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                horizontalArrangement = Arrangement.spacedBy(4.dp),
             ) {
-                CatButton(
-                    "返回",
-                    onBack,
-                    variant = CatButtonVariant.GHOST,
-                    icon = Icons.AutoMirrored.Filled.ArrowBack,
-                    small = true,
-                )
-                Column(Modifier.weight(1f)) {
+                ControlIcon(Icons.AutoMirrored.Filled.ArrowBack, "返回") {
+                    if (fullscreen) fullscreen = false else onBack()
+                }
+                Column(Modifier.weight(1f).padding(start = 4.dp)) {
                     Text(
                         task?.saveName ?: taskId,
-                        fontSize = 15.sp,
+                        fontSize = 14.sp,
                         fontWeight = FontWeight.SemiBold,
                         color = p.text,
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis,
                     )
-                    task?.let { Text("下载进度 ${it.progress.toInt()}%", fontSize = 12.sp, color = p.text3) }
+                    task?.let { Text("下载进度 ${it.progress.toInt()}%", fontSize = 11.sp, color = p.text3) }
                 }
-                CatButton(
-                    "全屏",
-                    { fullscreen = true },
-                    variant = CatButtonVariant.GHOST,
-                    icon = Icons.Filled.Fullscreen,
-                    small = true,
-                )
+                ControlIcon(
+                    if (fullscreen) Icons.Filled.FullscreenExit else Icons.Filled.Fullscreen,
+                    if (fullscreen) "退出全屏" else "全屏",
+                ) {
+                    fullscreen = !fullscreen
+                    controlsNonce++
+                }
             }
-        }
 
-        Box(
-            Modifier
-                .weight(1f)
-                .fillMaxWidth()
-                .then(
-                    if (fullscreen) Modifier
-                    else Modifier
-                        .padding(horizontal = spec.screenPadding.dp)
-                        .navigationBarsPadding()
-                        .padding(bottom = spec.bottomInset.dp)
-                ),
-        ) {
-            val message = playerError ?: loadError
-            if (message != null) {
-                Text(message, color = p.red, fontSize = 13.sp, modifier = Modifier.fillMaxWidth().padding(24.dp))
-            } else {
-                AndroidView(
-                    factory = { ctx ->
-                        PlayerView(ctx).apply {
-                            player = exoPlayer
-                            useController = true
-                            // 单条预览流没有上/下一曲可切，网页端预览条也只有播放+进度+时间
-                            setShowPreviousButton(false)
-                            setShowNextButton(false)
-                            setShutterBackgroundColor(android.graphics.Color.TRANSPARENT)
-                        }
-                    },
-                    update = { view ->
-                        view.resizeMode = if (fullscreen) {
-                            AspectRatioFrameLayout.RESIZE_MODE_ZOOM
-                        } else {
-                            AspectRatioFrameLayout.RESIZE_MODE_FIT
-                        }
-                    },
-                    modifier = Modifier.fillMaxSize(),
-                )
+            // 下控制条：56dp 渐变播放钮 + 44dp 触控进度条 + 时间
+            Row(
+                Modifier
+                    .align(Alignment.BottomCenter)
+                    .fillMaxWidth()
+                    .navigationBarsPadding()
+                    .padding(horizontal = spec.screenPadding.dp, vertical = 10.dp)
+                    .bentoSurface(shape = catControlShape(), strong = true)
+                    .padding(horizontal = 12.dp, vertical = 10.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(12.dp),
+            ) {
+                // 56dp 极光渐变圆形播放钮 + 光晕（aurora CTA 规范）
+                Box(
+                    Modifier
+                        .size(56.dp)
+                        .glassHalo(spec.glowRadius.dp, p.glow, CircleShape)
+                        .background(Brush.linearGradient(p.primaryGradient), CircleShape)
+                        .clickable {
+                            if (playing) exoPlayer.pause() else exoPlayer.play()
+                            controlsNonce++
+                        },
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Icon(
+                        if (playing) Icons.Filled.Pause else Icons.Filled.PlayArrow,
+                        contentDescription = if (playing) "暂停" else "播放",
+                        tint = Color.White,
+                        modifier = Modifier.size(28.dp),
+                    )
+                }
+                Column(Modifier.weight(1f)) {
+                    PlayerSeekBar(
+                        fraction = if (durMs > 0) (posMs.toFloat() / durMs).coerceIn(0f, 1f) else 0f,
+                        onSeek = { f ->
+                            if (durMs > 0) {
+                                val target = (f * durMs).toLong()
+                                exoPlayer.seekTo(target)
+                                posMs = target
+                            }
+                            controlsNonce++
+                        },
+                        modifier = Modifier.fillMaxWidth(),
+                    )
+                    Row(Modifier.fillMaxWidth()) {
+                        Text(formatPlayerTime(posMs), style = catNumeric(11, p.text2))
+                        Text(" / ${formatPlayerTime(durMs)}", style = catNumeric(11, p.text3))
+                    }
+                }
             }
         }
     }
+}
+
+/** 玻璃控制条里的 48dp 图标热区按钮 */
+@Composable
+private fun ControlIcon(
+    icon: androidx.compose.ui.graphics.vector.ImageVector,
+    desc: String,
+    onClick: () -> Unit,
+) {
+    Box(
+        Modifier
+            .size(44.dp)
+            .clickable(onClick = onClick),
+        contentAlignment = Alignment.Center,
+    ) {
+        Icon(icon, contentDescription = desc, tint = LocalPalette.current.text, modifier = Modifier.size(20.dp))
+    }
+}
+
+/** 44dp 触控热区进度条：4dp 视觉轨道 + 极光渐变已播段，点按/拖动都可 seek */
+@Composable
+private fun PlayerSeekBar(
+    fraction: Float,
+    onSeek: (Float) -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    val p = LocalPalette.current
+    var drag by remember { mutableStateOf<Float?>(null) }
+    val shown = drag ?: fraction
+    Box(
+        modifier
+            .height(44.dp)
+            .pointerInput(Unit) {
+                detectTapGestures { offset -> onSeek((offset.x / size.width).coerceIn(0f, 1f)) }
+            }
+            .pointerInput(Unit) {
+                detectHorizontalDragGestures(
+                    onDragStart = { offset -> drag = (offset.x / size.width).coerceIn(0f, 1f) },
+                    onHorizontalDrag = { change, _ ->
+                        change.consume()
+                        drag = (change.position.x / size.width).coerceIn(0f, 1f)
+                    },
+                    onDragEnd = {
+                        drag?.let(onSeek)
+                        drag = null
+                    },
+                    onDragCancel = { drag = null },
+                )
+            },
+        contentAlignment = Alignment.CenterStart,
+    ) {
+        Box(
+            Modifier
+                .fillMaxWidth()
+                .height(4.dp)
+                .background(Color.White.copy(alpha = 0.28f), CircleShape),
+        )
+        Box(
+            Modifier
+                .fillMaxWidth(shown)
+                .height(4.dp)
+                .background(Brush.horizontalGradient(p.primaryGradient), CircleShape),
+        )
+        // 已播段端点小圆点：暗底视频上给手指一个明确落点
+        Box(
+            Modifier
+                .align(Alignment.CenterStart)
+                .fillMaxWidth(shown),
+            contentAlignment = Alignment.CenterEnd,
+        ) {
+            Box(
+                Modifier
+                    .size(10.dp)
+                    .background(Color.White, CircleShape),
+            )
+        }
+    }
+}
+
+private fun formatPlayerTime(ms: Long): String {
+    if (ms <= 0) return "00:00"
+    val totalSec = ms / 1000
+    val h = totalSec / 3600
+    val m = totalSec % 3600 / 60
+    val s = totalSec % 60
+    return if (h > 0) "%d:%02d:%02d".format(h, m, s) else "%02d:%02d".format(m, s)
 }
