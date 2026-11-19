@@ -90,7 +90,13 @@ catdock/
 │   ├── VERSION          # 🏷️ 版本号唯一来源（单行纯文本，无扩展名，如 26.10.24）
 │   ├── favicon.ico      # 🌐 网页图标
 │   ├── vendor/          # 📦 前端第三方库（hls.min.js，构建时内联进 user.html）
-│   └── svg/             # 🎨 主题图标 SVG 素材（供页面内联使用，不随镜像打包）
+│   └── svg/             # 🎨 主题图标 SVG 素材（按用途分类，供页面内联使用，不随镜像打包）
+│       ├── brand/       # 🏷️ 品牌标识（logo）
+│       ├── common/      # 🧩 通用图标（avatar / empty-task）
+│       ├── button/      # 🔘 操作按钮图标（play / pause / resume / delete / pin / star / download / dice / add / refresh）
+│       ├── card/        # 🗂️ 卡片标题图标（用户管理 / IP 封禁 / 服务器配置 / 日志导出 / CLI / 新建任务 / 任务 / 服务信息）
+│       ├── info/        # ℹ️ 服务信息行图标（版本 / 端口 / 前缀 / SSRF / 并发 / 同视频 / 过滤规则 / 用户数 / 健康）
+│       └── status/      # ✅ 状态反馈图标（check / cross / hourglass / user / block / warning）
 ├── Android/             # 📱 Android 客户端（Jetpack Compose，不参与镜像构建）
 │   ├── app/src/main/java/com/catdock/app/
 │   │   ├── data/        # 🔌 Retrofit API 客户端 / 多账号会话 / Keystore 加密凭据
@@ -921,6 +927,7 @@ A: 可以，容器内 `/home/downloader/N_m3u8DL-RE` 为 Linux amd64 版本。
 - 登录页不再显示版本号，也不再参与主题/亮暗切换（`data-static-theme` 固定外观）
 - 玻璃模糊从卡片本体移到 `::before` 伪元素、入场动画不再残留合成层：修掉 Windows 125%/150% 缩放倍率下登录页文字整体发虚
 - 控制台两页统一尺寸档位与留白（顶栏实底、单行控件 36px / 触控 44px / 多行 96px、卡片 16/24 留白、阴影四档），并按 ≥4.5:1 对比度纪律调深像素风与复古风的灰字、橙字
+- 🎨 网页图标统一为内联 SVG：成功 / 失败 / 加载中 / 拦截 / 警告及任务用户名不再使用 emoji，提示条与空状态图标随主题着色；`web/svg` 素材按 brand / common / button / card / info / status 重新分类，并与三页 symbol 一一对应
 
 ### Android 1.1.3
 
