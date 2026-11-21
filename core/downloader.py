@@ -63,6 +63,199 @@ def get_current_user():
     return getattr(_ctx, 'user', None)
 
 
+# ---- 下载暂存区与原子发布 ----
+# 中间产物（合并后的 .ts / .mux.mp4、未完成的 mp4）全部落在
+# <缓存目录>/.staging/<任务名>/（不在下载目录内，避免文件管理器/同步工具
+# 看到中间文件夹）。成品校验通过后用 os.replace 原子改名到下载目录，
+# 外部只会看到"文件不存在"或"完整成品"两种状态，不会拷走半成品。
+STAGING_DIRNAME = '.staging'
+# 供 Emby / Jellyfin / Plex / Android 媒体库识别的忽略标记
+_STAGING_MARKERS = ('.ignore', '.plexignore', '.nomedia')
+
+
+def get_staging_root(download_dir=None, temp_dir=None):
+    """暂存区根目录：优先 <缓存目录>/.staging，避免出现在下载目录列表里。
+
+    缓存目录与下载目录通常位于同一挂载卷（docker-compose 里同为 /youdir
+    的子目录），跨目录 os.replace 仍是原子操作；仅当二者确实位于不同
+    文件系统时，才回退到 <下载目录>/.staging，保证原子发布不失效。
+    """
+    download_dir = download_dir or get_download_dir()
+    temp_dir = temp_dir or get_temp_dir()
+    try:
+        temp_dev = os.stat(temp_dir).st_dev
+    except OSError:
+        temp_dev = None
+    try:
+        download_dev = os.stat(download_dir).st_dev
+    except OSError:
+        download_dev = None
+    if temp_dev is None or download_dev is None or temp_dev == download_dev:
+        return os.path.join(temp_dir, STAGING_DIRNAME)
+    return os.path.join(download_dir, STAGING_DIRNAME)
+
+
+def get_staging_dir(base_name, download_dir=None, temp_dir=None):
+    """单个任务的暂存目录：<暂存区根>/<任务名>"""
+    return os.path.join(get_staging_root(download_dir, temp_dir), base_name)
+
+
+def get_legacy_staging_dir(base_name, download_dir=None):
+    """旧版本暂存目录：<下载目录>/.staging/<任务名>（仅用于兼容恢复与清理）"""
+    root = os.path.join(download_dir or get_download_dir(), STAGING_DIRNAME)
+    return os.path.join(root, base_name)
+
+
+def _is_inside(path, parent):
+    """判断 path 是否位于 parent 目录内"""
+    path = os.path.abspath(path)
+    parent = os.path.abspath(parent)
+    return path == parent or path.startswith(parent + os.sep)
+
+
+def ensure_staging_dir(base_name, download_dir=None, temp_dir=None):
+    """创建任务暂存目录（幂等）；仅当暂存区落在下载目录内才写扫描器忽略标记"""
+    download_dir = download_dir or get_download_dir()
+    staging_dir = get_staging_dir(base_name, download_dir, temp_dir)
+    os.makedirs(staging_dir, exist_ok=True)
+    if _is_inside(staging_dir, download_dir):
+        for marker in _STAGING_MARKERS:
+            marker_path = os.path.join(staging_dir, marker)
+            if not os.path.exists(marker_path):
+                try:
+                    with open(marker_path, 'w', encoding='utf-8'):
+                        pass
+                except OSError:
+                    pass
+    return staging_dir
+
+
+def _cleanup_staging_dir(staging_dir, preserve_source):
+    """清理单个暂存目录：完成后整目录删除，未完成时只删无续传价值的 .part"""
+    if not os.path.isdir(staging_dir):
+        return
+    if not preserve_source:
+        try:
+            shutil.rmtree(staging_dir)
+            debug_print(f"[清理] 已删除暂存目录: {staging_dir}")
+        except Exception as e:
+            log_error(f"清理暂存目录失败: {staging_dir} - {e}")
+        return
+    for item in os.listdir(staging_dir):
+        if not item.lower().endswith('.part'):
+            continue
+        try:
+            os.remove(os.path.join(staging_dir, item))
+        except Exception as e:
+            log_error(f"清理暂存残留失败: {item} - {e}")
+
+
+def _remove_empty_legacy_staging_root(download_dir=None):
+    """旧版 <下载目录>/.staging 为空时删除，让下载目录里不再出现该文件夹"""
+    root = os.path.join(download_dir or get_download_dir(), STAGING_DIRNAME)
+    try:
+        if os.path.isdir(root) and not os.listdir(root):
+            os.rmdir(root)
+    except OSError:
+        pass
+
+
+def _migrate_legacy_staging():
+    """启动迁移：把旧版 <下载目录>/.staging/<任务> 搬到缓存目录暂存区。
+
+    升级后下载目录里不再出现 .staging 文件夹；目标已存在时保留原位，
+    不覆盖、不删除，避免误删正在等待恢复的源文件。
+    """
+    try:
+        entries = os.listdir(cfg.DOWNLOAD_DIR)
+    except OSError:
+        return
+    for user in entries:
+        user_download_dir = os.path.join(cfg.DOWNLOAD_DIR, user)
+        legacy_root = os.path.join(user_download_dir, STAGING_DIRNAME)
+        if not os.path.isdir(legacy_root):
+            continue
+        try:
+            items = os.listdir(legacy_root)
+        except OSError:
+            continue
+        for name in items:
+            src = os.path.join(legacy_root, name)
+            dst = get_staging_dir(name, user_download_dir, cfg.user_temp_dir(user))
+            if os.path.exists(dst):
+                continue
+            try:
+                os.makedirs(os.path.dirname(dst), exist_ok=True)
+                os.replace(src, dst)
+                debug_print(f"[迁移] 旧暂存目录已迁移: {src} -> {dst}")
+            except OSError as e:
+                log_error(f"迁移旧暂存目录失败: {src} - {e}")
+        _remove_empty_legacy_staging_root(user_download_dir)
+
+
+def _list_task_files(directory, base_name):
+    """列出目录中匹配任务名的普通文件（完整路径）"""
+    try:
+        names = os.listdir(directory)
+    except OSError:
+        return []
+    paths = []
+    for name in names:
+        item_path = os.path.join(directory, name)
+        if match_base_name(name, base_name) and os.path.isfile(item_path):
+            paths.append(item_path)
+    return paths
+
+
+def _largest_file(paths):
+    """返回列表中体积最大的文件路径；全部不可读时返回 None"""
+    best_path, best_size = None, -1
+    for path in paths:
+        try:
+            size = os.path.getsize(path)
+        except OSError:
+            continue
+        if size > best_size:
+            best_path, best_size = path, size
+    return best_path
+
+
+def _scan_task_artifacts(base_name):
+    """扫描暂存区与下载目录旧版残留。
+
+    返回 (ts_paths, mux_paths, staging_video_paths, legacy_files)：
+      - ts/mux 源可能来自暂存区，也可能是旧版本留在下载目录的残留；
+      - staging_video_paths 只含暂存区里 N_m3u8DL-RE 直接产出的视频
+        （fMP4 源），下载目录里的成品不算源文件。
+    """
+    download_dir = get_download_dir()
+    staging_dir = get_staging_dir(base_name, download_dir)
+    legacy_staging_dir = get_legacy_staging_dir(base_name, download_dir)
+    staging_files = _list_task_files(staging_dir, base_name)
+    # 旧版本把中间文件放在 downloads/.staging 下，升级后仍需能续合成
+    if os.path.abspath(legacy_staging_dir) != os.path.abspath(staging_dir):
+        staging_files.extend(_list_task_files(legacy_staging_dir, base_name))
+    legacy_files = _list_task_files(download_dir, base_name)
+
+    ts_paths, mux_paths, video_paths = [], [], []
+    for path in staging_files:
+        name = os.path.basename(path)
+        lower = name.lower()
+        if lower.endswith('.ts'):
+            ts_paths.append(path)
+        elif lower.endswith('.mux.mp4'):
+            mux_paths.append(path)
+        elif is_video_file(name) and '.mux.' not in lower:
+            video_paths.append(path)
+    for path in legacy_files:
+        lower = os.path.basename(path).lower()
+        if lower.endswith('.ts'):
+            ts_paths.append(path)
+        elif lower.endswith('.mux.mp4'):
+            mux_paths.append(path)
+    return ts_paths, mux_paths, video_paths, legacy_files
+
+
 def _inherit_task_context(task_id):
     """后台 worker 继承任务的 per-user 上下文（下载目录/缓存目录/用户名）"""
     with cfg.tasks_lock:
@@ -627,25 +820,27 @@ def find_existing_output_file(base_name):
 
 
 def find_existing_source_file(base_name):
-    download_dir = get_download_dir()
-    if not os.path.exists(download_dir):
-        return None
+    """查找可继续合成/改名的最小源文件（暂存区优先，兼容旧版下载目录残留）"""
+    ts_paths, mux_paths, video_paths, legacy_files = _scan_task_artifacts(base_name)
 
     candidates = []
-    for item in os.listdir(download_dir):
-        if not match_base_name(item, base_name):
+    for item_path in ts_paths + mux_paths + video_paths:
+        try:
+            file_size = os.path.getsize(item_path)
+        except OSError:
             continue
-        item_path = os.path.join(download_dir, item)
-        if not os.path.isfile(item_path):
-            continue
-        lower_item = item.lower()
-        if lower_item.endswith(('.ts', '.mux.mp4')) or is_video_file(item):
-            try:
-                file_size = os.path.getsize(item_path)
+        if file_size >= cfg.MIN_FILE_SIZE:
+            candidates.append((file_size, item_path))
+    # 旧版本可能把未改名的直链视频留在下载目录，仅在这些视频不是成品时兜底
+    if not candidates:
+        for item_path in legacy_files:
+            if is_video_file(os.path.basename(item_path)):
+                try:
+                    file_size = os.path.getsize(item_path)
+                except OSError:
+                    continue
                 if file_size >= cfg.MIN_FILE_SIZE:
                     candidates.append((file_size, item_path))
-            except Exception:
-                continue
     if not candidates:
         return None
     candidates.sort(reverse=True, key=lambda x: x[0])
@@ -663,21 +858,12 @@ def find_pending_merge_source(base_name):
     共存的残缺成品往往比 .ts 大，会被误选。这里只扫描 .ts/.mux.mp4。
     返回源文件路径（≥ MIN_FILE_SIZE）或 None。
     """
-    download_dir = get_download_dir()
-    if not os.path.exists(download_dir):
-        return None
+    ts_paths, mux_paths, _video_paths, _legacy = _scan_task_artifacts(base_name)
     candidates = []
-    for item in os.listdir(download_dir):
-        if not match_base_name(item, base_name):
-            continue
-        item_path = os.path.join(download_dir, item)
-        if not os.path.isfile(item_path):
-            continue
-        if not item.lower().endswith(('.ts', '.mux.mp4')):
-            continue
+    for item_path in ts_paths + mux_paths:
         try:
             size = os.path.getsize(item_path)
-        except Exception:
+        except OSError:
             continue
         if size >= cfg.MIN_FILE_SIZE:
             candidates.append((size, item_path))
@@ -688,8 +874,23 @@ def find_pending_merge_source(base_name):
 
 
 def cleanup_residue(base_name, exclude_file=None, preserve_source=True):
-    """清理下载完成后残留的临时文件、文件夹和 .tmp 文件"""
-    for dir_to_clean in [get_download_dir(), get_temp_dir()]:
+    """清理下载完成后残留的临时文件、文件夹和 .tmp 文件。
+
+    暂存区：完成后整目录删除；未完成时只删除无续传价值的 .part，
+    .ts/.mux.mp4 保留供下次直接重新合成。下载目录与缓存目录保留原有
+    清理逻辑，同时兼容旧版本遗留在下载目录的 .ts。
+    """
+    download_dir = get_download_dir()
+    staging_dir = get_staging_dir(base_name, download_dir)
+    legacy_staging_dir = get_legacy_staging_dir(base_name, download_dir)
+
+    _cleanup_staging_dir(staging_dir, preserve_source)
+    # 旧版 downloads/.staging 残留一并清理，避免已完成的中间文件夹长期可见
+    if os.path.abspath(legacy_staging_dir) != os.path.abspath(staging_dir):
+        _cleanup_staging_dir(legacy_staging_dir, preserve_source)
+        _remove_empty_legacy_staging_root(download_dir)
+
+    for dir_to_clean in [download_dir, get_temp_dir()]:
         if not os.path.exists(dir_to_clean):
             continue
         for item in os.listdir(dir_to_clean):
@@ -828,9 +1029,13 @@ def _build_m3u8_cmd(url, base_name, referer=None, cookie=None, user_agent=None,
         temp_dir = get_temp_dir()
     if user is None:
         user = get_current_user()
+    # 合并出的 .ts 落在缓存目录的暂存区（下载目录里不可见），
+    # 成品由后处理原子发布到下载目录。temp_dir 必须显式传入，避免
+    # 队列泵线程误用其他用户的缓存目录。
+    staging_dir = ensure_staging_dir(base_name, download_dir, temp_dir)
     cmd = [cfg.N_M3U8DL, _resolve_m3u8_media_url(url, referer, cookie, user_agent),
            '--tmp-dir', temp_dir,
-           '--save-dir', download_dir,
+           '--save-dir', staging_dir,
            '--ffmpeg-binary-path', cfg.FFMPEG_PATH,
            '--save-name', base_name,
            '--auto-select']
@@ -1177,7 +1382,9 @@ def _do_single_download_attempt(base_name, url, referer, cookie, user_agent, tas
     is_direct_video, video_ext = classify_video_url(url, referer, cookie, user_agent)
 
     if is_direct_video:
-        curl_target = output_file = os.path.join(get_download_dir(), f"{base_name}{video_ext}")
+        output_file = os.path.join(get_download_dir(), f"{base_name}{video_ext}")
+        # curl 先写 .part，完成后原子改名，避免半成品 mp4 被拷走
+        curl_target = output_file + '.part'
     else:
         curl_target, output_file = None, os.path.join(get_download_dir(), f"{base_name}.{fmt}")
 
@@ -1186,7 +1393,7 @@ def _do_single_download_attempt(base_name, url, referer, cookie, user_agent, tas
     pending_src = find_pending_merge_source(base_name)
     if pending_src:
         debug_print(f"[去重] 发现未合成完的源文件，直接重新合成（无需重新下载）: {pending_src}")
-        if _finalize_download_outputs(base_name, output_file, fmt)[0]:
+        if _finalize_download_outputs(base_name, output_file, fmt, task_id=task_id)[0]:
             return True
     has_existing, existing_path = has_existing_video(base_name)
     if has_existing:
@@ -1233,10 +1440,16 @@ def _do_single_download_attempt(base_name, url, referer, cookie, user_agent, tas
                 if os.path.exists(curl_target):
                     file_size = os.path.getsize(curl_target)
                     if file_size >= cfg.MIN_FILE_SIZE:
+                        try:
+                            os.replace(curl_target, output_file)
+                        except OSError as e:
+                            log_error(f"原子发布失败: {curl_target} -> {output_file} - {e}")
+                            break
                         if return_code == 0:
                             debug_print(f"[下载] curl 下载成功: {base_name}")
                         else:
                             debug_print(f"[下载] 返回非零码 {return_code} 但文件有效: {base_name}")
+                        debug_print(f"[下载] 已原子发布成品: {output_file}")
                         success = True
                         break
 
@@ -1288,7 +1501,7 @@ def _do_single_download_attempt(base_name, url, referer, cookie, user_agent, tas
             time.sleep(0.5)
 
             # 后处理：调用共享函数完成 定位/转换/校验/清理
-            ok, _final = _finalize_download_outputs(base_name, output_file, fmt)
+            ok, _final = _finalize_download_outputs(base_name, output_file, fmt, task_id=task_id)
             if ok:
                 success = True
 
@@ -1305,49 +1518,56 @@ def _do_single_download_attempt(base_name, url, referer, cookie, user_agent, tas
         return False
 
 
-def _finalize_download_outputs(base_name, output_file, target_format):
-    """共享后处理：m3u8下载后 或 单链接尝试后的 文件定位/转格式/校验/清理流程。
+def _set_task_stage(task_id, stage):
+    """更新任务的阶段标记（stage='muxing' 表示下载已完成、正在合成 mp4）。
 
-    行为与 _run_worker 原有的 100+ 行 保持等价：
-      1. 列目录找 .ts / .mux.mp4 / video 源文件
-      2. 若 output_file 已完整 → 成功
-      3. 若 source_file 存在 → 需要格式转换时 convert_to_format(最多3次, 间隔2s);
-         否则直接 rename
-      4. 转换后若 output_file 太小 → fallback 用 source_file rename
-      5. 转换失败但 source_file 足够大 → 用 source_file 作为最终输出
-      6. 全流程失败返回 False, 成功返回 True
+    stage 为 None 时清除标记。标记仅供前端展示（下载中 → 合成中），
+    任务结束/暂停/恢复到下载态时都必须清掉，避免状态文案残留。
+    """
+    if not task_id:
+        return
+    with cfg.tasks_lock:
+        task = cfg.tasks.get(task_id)
+        if task is None:
+            return
+        if stage:
+            task['stage'] = stage
+        else:
+            task.pop('stage', None)
+
+
+def _finalize_download_outputs(base_name, output_file, target_format, task_id=None):
+    """共享后处理：定位暂存区源文件 → 转封装为 .part → 校验 → 原子发布。
+
+    中间产物只在 <缓存目录>/.staging/<任务名>/ 内产生（不在下载目录里，
+    文件管理器看不到）；成品先写 <暂存区>/<成品名>.part，大小达标后
+    os.replace 到 output_file。下载目录对拷贝端而言没有半成品窗口：
+    要么没有成品，要么是完整成品。
 
     不操作 tasks, 不调用 _finish_task, 不写 log_info（保持纯后处理）。
     返回: (success: bool, actual_output_file_or_none: str|None)
     """
     download_dir = get_download_dir()
+    staging_dir = ensure_staging_dir(base_name, download_dir)
     try:
-        all_files = [f for f in os.listdir(download_dir) if match_base_name(f, base_name)]
+        ts_paths, mux_paths, video_paths, _legacy = _scan_task_artifacts(base_name)
     except OSError as e:
         # 目录被删/卷异常时按失败返回而非抛异常：调用方（含 _run_worker 的
         # except 分支）若在此时二次异常逃出线程，_finish_task 不会执行，
         # 任务将永久停在 running 占住并发名额
         debug_print(f"[后处理] 列出下载目录失败: {download_dir} - {e}")
         return False, None
-    ts_files = [f for f in all_files if f.lower().endswith('.ts')]
-    mux_files = [f for f in all_files if f.lower().endswith('.mux.mp4')]
-    video_files = [f for f in all_files if is_video_file(f) and '.mux.' not in f.lower()]
 
-    source_file = None
-    # 源文件优先级：.mux.mp4 > .ts > 成品视频。
+    # 源文件优先级：.mux.mp4 > .ts > 暂存区视频。
     # .ts 与成品共存是"转封装中途被打断"的现场，成品残缺，必须以 .ts 为源
     # 重新合成覆盖，不能选残缺成品（否则直接原样返回损坏文件）。
-    if mux_files:
-        source_file = os.path.join(download_dir, mux_files[0])
-    elif ts_files:
-        source_file = os.path.join(download_dir, ts_files[0])
-    elif video_files:
-        source_file = os.path.join(download_dir, video_files[0])
+    source_file = _largest_file(mux_paths) or _largest_file(ts_paths) \
+        or _largest_file(video_paths)
 
     # (A) 输出文件已存在（可能由下载工具直接生成）
     # 注意：.ts/.mux.mp4 源文件仍在时，说明上次转封装中途被打断，
-    # 成品是残缺文件，不能直接认定完整，须继续走 (C) 以 -y 重新合成覆盖。
-    if os.path.exists(output_file) and not ts_files and not mux_files:
+    # 成品是残缺文件，不能直接认定完整，须继续走 (C) 重新合成覆盖。
+    if os.path.exists(output_file) and not ts_paths and not mux_paths:
         file_size = os.path.getsize(output_file)
         if file_size >= cfg.MIN_FILE_SIZE:
             debug_print(f"[后处理] 输出文件已存在且完整: {output_file}")
@@ -1375,17 +1595,43 @@ def _finalize_download_outputs(base_name, output_file, target_format):
         cleanup_residue(base_name, preserve_source=True)
         return False, None
 
-    # (C) 有 source_file → 转换/重命名
+    # (C) 有 source_file → 转封装到暂存区 .part，校验后原子发布
     _conversion_done = False
+    # .part 放暂存区：与成品同一文件系统，rename 原子；且不会出现在被监听目录
+    part_file = os.path.join(staging_dir, os.path.basename(output_file) + '.part')
     if source_file.endswith('.ts') or source_file.lower().endswith('.mux.mp4'):
-        for _ in range(3):
-            if convert_to_format(source_file, output_file, target_format):
-                _conversion_done = True
-                break
-            time.sleep(2)
-    elif source_file != output_file:
+        # 下载已结束、进入转封装阶段：打上 stage=muxing，前端据此显示「合成中」
+        _set_task_stage(task_id, 'muxing')
         try:
-            os.rename(source_file, output_file)
+            for _ in range(3):
+                if not convert_to_format(source_file, part_file, target_format):
+                    time.sleep(2)
+                    continue
+                try:
+                    part_size = os.path.getsize(part_file)
+                except OSError:
+                    part_size = 0
+                if part_size < cfg.MIN_FILE_SIZE:
+                    debug_print(f"[后处理] 转封装产物过小 ({part_size} bytes)，重试: {part_file}")
+                    try:
+                        os.remove(part_file)
+                    except OSError:
+                        pass
+                    time.sleep(2)
+                    continue
+                try:
+                    os.replace(part_file, output_file)
+                    _conversion_done = True
+                    debug_print(f"[后处理] 已原子发布成品: {output_file}")
+                    break
+                except OSError as e:
+                    log_error(f"原子发布失败: {part_file} -> {output_file} - {e}")
+                    time.sleep(2)
+        finally:
+            _set_task_stage(task_id, None)
+    elif os.path.abspath(source_file) != os.path.abspath(output_file):
+        try:
+            os.replace(source_file, output_file)
             _conversion_done = True
         except Exception:
             _conversion_done = False
@@ -1394,7 +1640,7 @@ def _finalize_download_outputs(base_name, output_file, target_format):
     # 残缺成品（ts 与成品共存 ⇒ 成品残缺），绝不能误判为成功——明确删除残缺
     # 文件、保留源文件，返回失败。后续恢复/重试会再次命中"直接重新合成"捷径，
     # 无需重新下载。
-    if not _conversion_done and (ts_files or mux_files):
+    if not _conversion_done and (ts_paths or mux_paths):
         if os.path.exists(output_file):
             try:
                 os.remove(output_file)
@@ -1416,7 +1662,7 @@ def _finalize_download_outputs(base_name, output_file, target_format):
             if source_size >= cfg.MIN_FILE_SIZE:
                 debug_print(f"[后处理] 输出文件太小，使用源文件代替: {source_file}")
                 try:
-                    os.rename(source_file, output_file)
+                    os.replace(source_file, output_file)
                 except Exception:
                     pass
                 if os.path.exists(output_file) or os.path.exists(source_file):
@@ -1432,7 +1678,7 @@ def _finalize_download_outputs(base_name, output_file, target_format):
         if source_size >= cfg.MIN_FILE_SIZE:
             debug_print(f"[后处理] 转换未生成输出，使用源文件作最终输出: {source_file}")
             try:
-                os.rename(source_file, output_file)
+                os.replace(source_file, output_file)
             except Exception:
                 pass
             final = output_file if os.path.exists(output_file) else source_file
@@ -1650,6 +1896,8 @@ def _run_same_video_group_worker(task_id, base_name, output_format=None):
 
     # 继承 per-user 上下文（后台线程 thread-local 默认为空）
     _inherit_task_context(task_id)
+    # 清理上次中断残留的合成阶段标记（重新下载应显示「下载中」）
+    _set_task_stage(task_id, None)
 
     with cfg.video_groups_lock:
         group = cfg.video_groups.get(base_name)
@@ -1821,11 +2069,24 @@ def _run_same_video_group_worker(task_id, base_name, output_format=None):
 
 def _run_direct_download_worker(task_id, url, output_file, referer, cookie, user_agent,
                                 initial_retry_count=0):
-    """直链下载 worker（curl + 断点续传）。output_file 为 curl 下载目标即成品。"""
+    """直链下载 worker（curl + 断点续传）。
+
+    curl 写入 <output_file>.part，下载达标后 os.replace 原子改名为成品，
+    下载目录不会暴露未完成的 mp4。
+    """
     # 继承 per-user 上下文（后台线程 thread-local 默认为空）
     _inherit_task_context(task_id)
     try:
         base_name = os.path.basename(output_file)
+        part_file = output_file + '.part'
+        # 旧版可能把半成品直接写在成品名，迁移到 .part 继续断点续传
+        if not os.path.exists(part_file) and os.path.exists(output_file):
+            try:
+                if os.path.getsize(output_file) < cfg.MIN_FILE_SIZE:
+                    os.replace(output_file, part_file)
+                    debug_print(f"[下载] 半成品迁移为 .part 继续续传: {part_file}")
+            except OSError:
+                pass
         max_retries = 5
         retry_count = initial_retry_count
         # dl_url 可能在检测到 CDN 调度 JSON（爱奇艺 pcw-data 等）后切换为真实地址，
@@ -1841,10 +2102,10 @@ def _run_direct_download_worker(task_id, url, output_file, referer, cookie, user
                 debug_print(f"[下载] 任务已暂停，停止尝试: {base_name} (ID: {task_id})")
                 return
 
-            cmd = _build_curl_cmd(dl_url, output_file, referer, cookie, user_agent)
+            cmd = _build_curl_cmd(dl_url, part_file, referer, cookie, user_agent)
 
             debug_print(f"[下载] 第 {retry_count + 1}/{max_retries} 次尝试: {base_name} (ID: {task_id})，"
-                        f"目标 {output_file}")
+                        f"目标 {part_file}")
 
             process = subprocess.Popen(
                 cmd,
@@ -1877,25 +2138,30 @@ def _run_direct_download_worker(task_id, url, output_file, referer, cookie, user
                 debug_print(f"[下载] 任务已暂停，停止尝试: {base_name} (ID: {task_id})")
                 return
 
-            if os.path.exists(output_file):
-                file_size = os.path.getsize(output_file)
+            if os.path.exists(part_file):
+                file_size = os.path.getsize(part_file)
                 if file_size >= cfg.MIN_FILE_SIZE:
-                    if return_code != 0:
-                        debug_print(f"[下载] 返回非零码 {return_code}，但检测到有效输出文件 "
-                                    f"(大小 {file_size} bytes): {base_name}")
-                    debug_print(f"[下载] 直链下载成功: {base_name}")
-                    _finish_task(task_id, True)
-                    return
+                    try:
+                        os.replace(part_file, output_file)
+                    except OSError as e:
+                        log_error(f"原子发布失败: {part_file} -> {output_file} - {e}")
+                    else:
+                        if return_code != 0:
+                            debug_print(f"[下载] 返回非零码 {return_code}，但检测到有效输出文件 "
+                                        f"(大小 {file_size} bytes): {base_name}")
+                        debug_print(f"[下载] 直链下载成功并原子发布: {output_file}")
+                        _finish_task(task_id, True)
+                        return
                 else:
                     debug_print(f"[下载] 下载文件太小 ({file_size} bytes)，可能是错误页面: {base_name}")
                     # 小文件可能是 CDN 调度 JSON（如爱奇艺 pcw-data 返回 {"l": "真实地址"}）
-                    resolved = _extract_dispatch_url(output_file)
+                    resolved = _extract_dispatch_url(part_file)
                     if resolved and resolved not in seen_urls and len(seen_urls) < 4:
                         seen_urls.add(resolved)
                         debug_print(f"[调度] 检测到 CDN 调度响应，转向真实地址: "
                                     f"{sanitize_url_for_log(resolved)[:120]}")
                         try:
-                            os.remove(output_file)
+                            os.remove(part_file)
                         except Exception:
                             pass
                         dl_url = resolved
@@ -1937,11 +2203,13 @@ def _run_direct_download_worker(task_id, url, output_file, referer, cookie, user
 def _run_worker(task_id, cmd, base_name, output_file, target_format, initial_retry_count=0):
     # 继承 per-user 上下文（后台线程 thread-local 默认为空）
     _inherit_task_context(task_id)
+    # 清理上次中断残留的合成阶段标记（重新下载应显示「下载中」）
+    _set_task_stage(task_id, None)
     try:
         # .ts 源文件仍在（上次合成被打断）时优先直接重新合成，避免整段重新下载
         if find_pending_merge_source(base_name):
             debug_print(f"[下载] 发现未合成完的源文件，直接重新合成（无需重新下载）: {base_name}")
-            if _finalize_download_outputs(base_name, output_file, target_format)[0]:
+            if _finalize_download_outputs(base_name, output_file, target_format, task_id=task_id)[0]:
                 _finish_task(task_id, True)
                 return
         dl_result = _run_download_with_retry(cmd, task_id, max_retries=5, initial_retry_count=initial_retry_count, base_name=base_name)
@@ -1963,18 +2231,20 @@ def _run_worker(task_id, cmd, base_name, output_file, target_format, initial_ret
                     cfg.tasks[task_id]['progress'] = 90
             save_tasks()
 
-        ok, _final = _finalize_download_outputs(base_name, output_file, target_format)
+        ok, _final = _finalize_download_outputs(base_name, output_file, target_format, task_id=task_id)
         _finish_task(task_id, ok)
 
     except Exception as e:
         log_error(f"工作线程异常: {e}")
         # 异常时尝试共享后处理：若 output_file/source_file 还在，直接视为成功
-        ok, _ = _finalize_download_outputs(base_name, output_file, target_format)
+        ok, _ = _finalize_download_outputs(base_name, output_file, target_format, task_id=task_id)
         _finish_task(task_id, ok)
 
 
 def resume_tasks():
     global _resume_guard
+    # 启动时把旧版 downloads/.staging 迁移到缓存目录（升级后下载目录不再显示它）
+    _migrate_legacy_staging()
     # 暂停中的任务重启后自动继续；排队中的任务保留其队列位置。
     # 统一按排队序号升序处理（FIFO），全部回到 queued 后由队列泵按名额拉起
     with cfg.tasks_lock:
@@ -2017,6 +2287,8 @@ def _resume_single_task(task):
     """恢复单个任务：文件体检 + 重建启动计划并回到排队（resume_tasks 与网页端"继续"共用）"""
     task_id = task['id']
     url = task['url']
+    # 恢复到下载/重新规划流程前先清除合成阶段标记，避免文案停在「合成中」
+    _set_task_stage(task_id, None)
     save_name = task.get('save_name')
     referer = task.get('_referer')
     cookie = task.get('_cookie')
@@ -2070,7 +2342,7 @@ def _resume_single_task(task):
     if pending_src:
         debug_print(f"[恢复] 发现未合成完的源文件，直接重新合成（无需重新下载）: {pending_src}")
         output_file = os.path.join(get_download_dir(), f"{base_name}.{fmt}")
-        ok, _ = _finalize_download_outputs(base_name, output_file, fmt)
+        ok, _ = _finalize_download_outputs(base_name, output_file, fmt, task_id=task_id)
         _finish_task(task_id, ok)
         return
 
@@ -2115,7 +2387,14 @@ def _resume_single_task(task):
                 _finish_task(task_id, True)
                 return
             else:
-                debug_print(f"[恢复] 文件已存在但过小 ({file_size} bytes)，继续断点续传: {output_file}")
+                # 旧版半成品直接写在成品名，迁移为 .part 供 curl 断点续传
+                part_file = output_file + '.part'
+                if not os.path.exists(part_file):
+                    try:
+                        os.replace(output_file, part_file)
+                    except OSError:
+                        pass
+                debug_print(f"[恢复] 文件已存在但过小 ({file_size} bytes)，继续断点续传: {part_file}")
         else:
             # m3u8 下载经 ffmpeg 转封装，输出文件已存在时仍需检查完整性：
             # 转封装中途被打断会留下体积不达标的残缺文件
@@ -2244,6 +2523,25 @@ def delete_task(task_id, owner=None):
     # 删除已下载文件：该用户的下载目录 + 缓存目录（temp/<用户>）
     user = task.get('user') or 'default'
     removed = 0
+    # 暂存目录按任务名独立存放，直接整目录删除（含旧版 downloads/.staging 残留）
+    user_download_dir = os.path.join(cfg.DOWNLOAD_DIR, user)
+    staging_dirs = [
+        get_staging_dir(base_name, user_download_dir, cfg.user_temp_dir(user)),
+        get_legacy_staging_dir(base_name, user_download_dir),
+    ]
+    seen_staging = set()
+    for staging_dir in staging_dirs:
+        abs_dir = os.path.abspath(staging_dir)
+        if abs_dir in seen_staging or not os.path.isdir(staging_dir):
+            continue
+        seen_staging.add(abs_dir)
+        try:
+            shutil.rmtree(staging_dir)
+            removed += 1
+        except Exception as e:
+            log_error(f"删除暂存目录失败: {staging_dir} - {e}")
+    _remove_empty_legacy_staging_root(user_download_dir)
+
     for target_dir in [os.path.join(cfg.DOWNLOAD_DIR, user), cfg.user_temp_dir(user)]:
         if not os.path.exists(target_dir):
             continue

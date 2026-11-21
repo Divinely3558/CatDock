@@ -320,7 +320,11 @@ private fun TaskCard(
                 overflow = TextOverflow.Ellipsis,
                 modifier = Modifier.weight(1f),
             )
-            CatBadge(STATUS_LABEL[task.status] ?: task.status, tone)
+            // 下载结束进入转封装时显示「合成中」，与网页端保持一致
+            val label =
+                if (task.status == "running" && task.stage == "muxing") "合成中"
+                else STATUS_LABEL[task.status] ?: task.status
+            CatBadge(label, tone)
         }
 
         if (task.status == "queued" && task.queuePos != null) {

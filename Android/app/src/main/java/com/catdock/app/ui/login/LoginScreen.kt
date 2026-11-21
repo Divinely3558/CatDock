@@ -39,6 +39,7 @@ import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.catdock.app.BuildConfig
 import com.catdock.app.R
 import com.catdock.app.data.ApiException
 import com.catdock.app.data.AppRepository
@@ -178,6 +179,7 @@ fun LoginScreen(
                         color = p.primary,
                     )
                     Text("猫抓 m3u8 下载 · 服务器伴侣", fontSize = 12.sp, color = p.text2)
+                    Text("Android v${BuildConfig.VERSION_NAME}", fontSize = 11.sp, color = p.text3)
                 }
             }
 

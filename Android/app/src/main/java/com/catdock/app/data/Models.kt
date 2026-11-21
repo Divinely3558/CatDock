@@ -50,6 +50,8 @@ data class Task(
     val urls: List<String>? = null,
     @SerialName("save_name") val saveName: String? = null,
     val status: String = "queued",
+    // 阶段标记：stage="muxing" 表示下载已完成、正在合成 mp4
+    val stage: String? = null,
     // Double 防御：服务端进度可能带小数，Int 会导致整包解析失败
     val progress: Double = 0.0,
     val user: String? = null,

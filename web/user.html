@@ -2220,10 +2220,14 @@
         // 兜底 status 与 queue_pos 仍过 CD.esc：与全页转义纪律保持一致
         function statusBadge(t) {
           var st = STATUS_MAP[t.status] || [CD.esc(t.status), "badge-running"];
-          var label =
-            t.status === "queued" && t.queue_pos
-              ? "排队中 · 第 " + CD.esc(t.queue_pos) + " 位"
-              : st[0];
+          var label = st[0];
+          // 下载已结束、进入转封装合成阶段：状态文案由「下载中」变为「合成中」
+          if (t.status === "running" && t.stage === "muxing") {
+            st = ["合成中", "badge-running"];
+            label = st[0];
+          } else if (t.status === "queued" && t.queue_pos) {
+            label = "排队中 · 第 " + CD.esc(t.queue_pos) + " 位";
+          }
           return '<span class="badge ' + st[1] + '">' + label + "</span>";
         }
 

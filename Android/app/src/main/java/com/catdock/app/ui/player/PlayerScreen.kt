@@ -4,13 +4,16 @@ import android.app.Activity
 import android.content.Context
 import android.content.ContextWrapper
 import android.content.pm.ActivityInfo
+import android.media.AudioManager
+import android.provider.Settings
 import android.view.WindowManager
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.awaitEachGesture
+import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.gestures.detectHorizontalDragGestures
 import androidx.compose.foundation.gestures.detectTapGestures
-import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -39,6 +42,7 @@ import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -79,11 +83,14 @@ import com.catdock.app.ui.theme.catControlShape
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
+import kotlin.math.abs
+import kotlin.math.roundToInt
 
 /**
  * 预览页模型：任务信息 10s 刷新（供进度行与断点续看用）。
@@ -129,7 +136,7 @@ private tailrec fun Context.findActivity(): Activity? = when (this) {
 /**
  * m3u8 边下边看预览（对齐网页端行为）：仅 running/paused 可预览，地址
  * {prefix}/tasks/{id}/preview.m3u8 需 Bearer 头，进入 seek 到 preview_resume_time、
- * 退出上报 /task/resume_time。全屏＝横屏 + 沉浸系统栏 + 画面撑满（BUG-2）。
+ * 退出上报 /task/resume_time。全屏＝横屏 + 沉浸系统栏 + 画面完整适应（不裁剪）。
  */
 @UnstableApi
 @Composable
@@ -157,6 +164,21 @@ fun PlayerScreen(
     var durMs by remember { mutableStateOf(0L) }
     var controlsVisible by remember { mutableStateOf(true) }
     var controlsNonce by remember { mutableStateOf(0) }
+    // 倍速 / 长按快进 / 手势 HUD：speed 为用户选择值，boosting 为长按临时 2x 状态
+    var playbackSpeed by remember { mutableStateOf(1.0f) }
+    var speedMenuVisible by remember { mutableStateOf(false) }
+    var boosting by remember { mutableStateOf(false) }
+    var hud by remember { mutableStateOf<String?>(null) }
+    var hudNonce by remember { mutableStateOf(0) }
+    // 手势协程不随重组重建，用 updatedState 读取最新值，避免闭包拿到旧状态
+    val playingNow by rememberUpdatedState(playing)
+    val speedNow by rememberUpdatedState(playbackSpeed)
+    val menuNow by rememberUpdatedState(speedMenuVisible)
+
+    fun showHud(text: String) {
+        hud = text
+        hudNonce++
+    }
 
     val exoPlayer = remember(session.accountKey, taskId) {
         ExoPlayer.Builder(context).build().apply { playWhenReady = true }
@@ -168,6 +190,13 @@ fun PlayerScreen(
             .setReadTimeoutMs(30_000)
     }
     val dataSourceFactory = remember(httpFactory) { DefaultDataSource.Factory(context, httpFactory) }
+    val audioManager = remember(context) { context.getSystemService(Context.AUDIO_SERVICE) as AudioManager }
+    // 手势首次调亮度时以系统亮度为基准（window 覆盖值为 -1 表示未覆盖）
+    val systemBrightness = remember(context) {
+        runCatching {
+            Settings.System.getInt(context.contentResolver, Settings.System.SCREEN_BRIGHTNESS, 128)
+        }.getOrDefault(128) / 255f
+    }
 
     // 令牌续期只换请求头，不重建播放器：后续分片请求自然带新令牌
     LaunchedEffect(session.token) {
@@ -206,11 +235,25 @@ fun PlayerScreen(
         }
     }
 
+    // 倍速：长按临时 2x，松开恢复用户选择值
+    LaunchedEffect(exoPlayer, playbackSpeed, boosting) {
+        exoPlayer.setPlaybackSpeed(if (boosting) 2.0f else playbackSpeed)
+    }
+
+    // 手势 HUD 短暂展示后自动消失（长按快进状态另有常驻提示）
+    LaunchedEffect(hudNonce) {
+        if (hud != null) {
+            delay(900)
+            hud = null
+        }
+    }
+
     // 横屏全屏下 3s 无操作自动隐藏控制层；任何交互经 nonce 重置计时
     LaunchedEffect(fullscreen, controlsVisible, controlsNonce) {
         if (fullscreen && controlsVisible) {
             delay(3000)
             controlsVisible = false
+            speedMenuVisible = false
         }
     }
 
@@ -254,7 +297,17 @@ fun PlayerScreen(
 
     DisposableEffect(activity) {
         activity?.window?.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
-        onDispose { activity?.window?.clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON) }
+        onDispose {
+            activity?.window?.clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+            // 离开播放页还原亮度覆盖，避免整个应用窗口停留在手势调暗的值
+            activity?.window?.let { win ->
+                if (win.attributes.screenBrightness >= 0f) {
+                    val lp = win.attributes
+                    lp.screenBrightness = WindowManager.LayoutParams.BRIGHTNESS_OVERRIDE_NONE
+                    win.attributes = lp
+                }
+            }
+        }
     }
 
     // 视频全出血：上下各叠一层 glassStrong 控制条；竖屏黑底容纳信箱模式
@@ -284,26 +337,129 @@ fun PlayerScreen(
                     }
                 },
                 update = { view ->
-                    view.resizeMode = if (fullscreen) {
-                        AspectRatioFrameLayout.RESIZE_MODE_ZOOM
-                    } else {
-                        AspectRatioFrameLayout.RESIZE_MODE_FIT
-                    }
+                    // 始终适应画面：全屏也不放大裁剪，保证上下边缘完整可见
+                    view.resizeMode = AspectRatioFrameLayout.RESIZE_MODE_FIT
                 },
                 modifier = Modifier.fillMaxSize(),
             )
         }
 
-        // 点击切换控制层显隐（无 ripple 的整屏透明热区）
+        // 整屏手势热区：点按显隐控制层，长按 2x 快进，
+        // 左半屏上下滑调亮度、右半屏上下滑调音量（上滑增大）
         Box(
             Modifier
                 .fillMaxSize()
-                .clickable(
-                    interactionSource = remember { MutableInteractionSource() },
-                    indication = null,
-                ) {
-                    controlsVisible = !controlsVisible
-                    controlsNonce++
+                .pointerInput(fullscreen) {
+                    coroutineScope {
+                        val gestureScope = this
+                        awaitEachGesture {
+                            val down = awaitFirstDown(requireUnconsumed = false)
+                            val isLeft = down.position.x < size.width / 2f
+                            var lastY = down.position.y
+                            var boostingHere = false
+                            var sliding = false
+                            var slideValue = 0f
+                            var horizontal = false
+                            var seekStartMs = 0L
+                            var seekTargetMs = 0L
+                            var seekSpanMs = 0L
+                            // 按住 350ms 未滑动 → 临时 2x；一旦滑动或抬手立即取消计时
+                            val boostTimer = gestureScope.launch {
+                                delay(350)
+                                if (!sliding && !horizontal && playingNow) {
+                                    boostingHere = true
+                                    boosting = true
+                                }
+                            }
+                            try {
+                                while (true) {
+                                    val event = awaitPointerEvent()
+                                    val change = event.changes.firstOrNull { it.id == down.id } ?: break
+                                    if (!change.pressed) break
+                                    val dy = change.position.y - lastY
+                                    lastY = change.position.y
+                                    val dxTotal = change.position.x - down.position.x
+                                    val dyTotal = change.position.y - down.position.y
+                                    if (!boostingHere && !sliding && !horizontal) {
+                                        if (dxTotal * dxTotal + dyTotal * dyTotal >
+                                            viewConfiguration.touchSlop * viewConfiguration.touchSlop
+                                        ) {
+                                            boostTimer.cancel()
+                                            // 横向为主的滑动 → 进度粗定位；纵向 → 亮度 / 音量
+                                            if (abs(dxTotal) > abs(dyTotal) && durMs > 0) {
+                                                horizontal = true
+                                                seekStartMs = exoPlayer.currentPosition.coerceAtLeast(0L)
+                                                seekSpanMs = playerSeekSpanMs(durMs)
+                                                seekTargetMs = seekStartMs
+                                            } else {
+                                                sliding = true
+                                                slideValue = if (isLeft) {
+                                                    activity?.window?.attributes?.screenBrightness
+                                                        ?.takeIf { it >= 0f } ?: systemBrightness
+                                                } else {
+                                                    val max = audioManager.getStreamMaxVolume(AudioManager.STREAM_MUSIC)
+                                                    if (max > 0) {
+                                                        audioManager.getStreamVolume(AudioManager.STREAM_MUSIC).toFloat() / max
+                                                    } else 0.5f
+                                                }
+                                            }
+                                        }
+                                    }
+                                    if (horizontal) {
+                                        // 全屏宽度约覆盖 seekSpanMs，拖动期间只预览目标时间，松手才跳转
+                                        val deltaMs = (dxTotal / size.width) * seekSpanMs
+                                        seekTargetMs = (seekStartMs + deltaMs.toLong()).coerceIn(0L, durMs)
+                                        val diff = seekTargetMs - seekStartMs
+                                        val sign = if (diff >= 0) "+" else "-"
+                                        showHud("目标 ${formatPlayerTime(seekTargetMs)}（$sign${formatPlayerTime(abs(diff))}）")
+                                        change.consume()
+                                    } else if (sliding) {
+                                        slideValue = (slideValue - dy / size.height).coerceIn(0f, 1f)
+                                        if (isLeft) {
+                                            activity?.window?.let { win ->
+                                                val lp = win.attributes
+                                                lp.screenBrightness = slideValue.coerceAtLeast(0.02f)
+                                                win.attributes = lp
+                                            }
+                                            showHud("亮度 ${(slideValue * 100).roundToInt()}%")
+                                        } else {
+                                            val max = audioManager.getStreamMaxVolume(AudioManager.STREAM_MUSIC)
+                                            runCatching {
+                                                audioManager.setStreamVolume(
+                                                    AudioManager.STREAM_MUSIC,
+                                                    (slideValue * max).roundToInt().coerceIn(0, max),
+                                                    0,
+                                                )
+                                            }
+                                            showHud("音量 ${(slideValue * 100).roundToInt()}%")
+                                        }
+                                        change.consume()
+                                    } else if (boostingHere) {
+                                        change.consume()
+                                    }
+                                }
+                            } finally {
+                                // 手势被系统取消（来电 / 切后台）时也要退出临时倍速
+                                boostTimer.cancel()
+                                if (boostingHere) boosting = false
+                            }
+                            if (boostingHere) {
+                                showHud("已恢复 ${formatSpeed(speedNow)}")
+                            } else if (horizontal) {
+                                exoPlayer.seekTo(seekTargetMs)
+                                posMs = seekTargetMs
+                                showHud("已跳转 ${formatPlayerTime(seekTargetMs)}")
+                                controlsNonce++
+                            } else if (!sliding) {
+                                if (menuNow) {
+                                    speedMenuVisible = false
+                                } else {
+                                    controlsVisible = !controlsVisible
+                                }
+                                controlsNonce++
+                            }
+                        }
+                    }
                 },
         )
 
@@ -342,12 +498,61 @@ fun PlayerScreen(
                     )
                     task?.let { Text("下载进度 ${it.progress.toInt()}%", fontSize = 11.sp, color = p.text3) }
                 }
+                // 倍速入口：点按展开 1.0x / 1.25x / 1.5x / 2.0x
+                Box(
+                    Modifier
+                        .size(44.dp)
+                        .clickable {
+                            speedMenuVisible = !speedMenuVisible
+                            controlsNonce++
+                        },
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Text(
+                        formatSpeed(playbackSpeed),
+                        fontSize = 12.sp,
+                        fontWeight = FontWeight.SemiBold,
+                        color = p.text,
+                    )
+                }
                 ControlIcon(
                     if (fullscreen) Icons.Filled.FullscreenExit else Icons.Filled.Fullscreen,
                     if (fullscreen) "退出全屏" else "全屏",
                 ) {
                     fullscreen = !fullscreen
                     controlsNonce++
+                }
+            }
+
+            // 倍速选项：展开在顶栏下方，选中项高亮
+            if (speedMenuVisible) {
+                Row(
+                    Modifier
+                        .align(Alignment.TopCenter)
+                        .statusBarsPadding()
+                        .padding(top = 84.dp)
+                        .bentoSurface(shape = catControlShape(), strong = true)
+                        .padding(horizontal = 8.dp, vertical = 6.dp),
+                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                ) {
+                    PLAYBACK_SPEEDS.forEach { option ->
+                        val selected = abs(playbackSpeed - option) < 0.001f
+                        Text(
+                            formatSpeed(option),
+                            fontSize = 13.sp,
+                            fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Normal,
+                            color = if (selected) p.text else p.text2,
+                            modifier = Modifier
+                                .bentoSurface(shape = catControlShape(), emphasis = selected)
+                                .clickable {
+                                    playbackSpeed = option
+                                    speedMenuVisible = false
+                                    controlsNonce++
+                                    showHud("倍速 ${formatSpeed(option)}")
+                                }
+                                .padding(horizontal = 14.dp, vertical = 8.dp),
+                        )
+                    }
                 }
             }
 
@@ -402,7 +607,34 @@ fun PlayerScreen(
                 }
             }
         }
+
+        // 手势 / 倍速提示：居中玻璃胶囊，长按快进期间常驻
+        val hudText = if (boosting) "2x 倍速播放中" else hud
+        if (hudText != null) {
+            Box(
+                Modifier
+                    .align(Alignment.Center)
+                    .bentoSurface(shape = catControlShape(), strong = true)
+                    .padding(horizontal = 16.dp, vertical = 10.dp),
+            ) {
+                Text(hudText, color = p.text, fontSize = 14.sp, fontWeight = FontWeight.Medium)
+            }
+        }
     }
+}
+
+/** 播放倍速档位 */
+private val PLAYBACK_SPEEDS = listOf(1.0f, 1.25f, 1.5f, 2.0f)
+
+/** 横向滑动的粗定位跨度：约整段时长的 1/4，限制在 60 秒 ~ 10 分钟 */
+private fun playerSeekSpanMs(durationMs: Long): Long =
+    (durationMs / 4).coerceIn(60_000L, 600_000L)
+
+private fun formatSpeed(speed: Float): String = when (speed) {
+    1.25f -> "1.25x"
+    1.5f -> "1.5x"
+    2.0f -> "2.0x"
+    else -> "1.0x"
 }
 
 /** 玻璃控制条里的 48dp 图标热区按钮 */
