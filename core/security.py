@@ -23,18 +23,18 @@ _PEEK_TIMEOUT = 10
 
 def is_safe_url(url):
     """SSRF 防护：校验 URL 是否安全（仅允许 http/https，禁止指向内网/回环地址）"""
-    # 关闭 SSRF 防护时，放行所有 URL（适用于纯内网/Docker 环境）
-    if not cfg.ssrf_protection:
-        return True
-
     try:
         parsed = urllib.parse.urlparse(url)
     except Exception:
         return False
 
-    # 仅允许 http/https 协议
+    # 仅允许 http/https 协议（不随 SSRF 开关放宽，防 file:// 等读取本地文件）
     if parsed.scheme not in ('http', 'https'):
         return False
+
+    # 关闭 SSRF 防护时，放行其余 http/https URL（适用于纯内网/Docker 环境）
+    if not cfg.ssrf_protection:
+        return True
 
     hostname = parsed.hostname
     if not hostname:
@@ -130,18 +130,22 @@ def check_redirect_chain(url):
         current = urllib.parse.urljoin(current, loc)
         if urllib.parse.urlparse(current).scheme not in ('http', 'https'):
             return False, current
-    return False, current
+    # 达到跳数上限：仍需校验最后一跳落点，避免正常 CDN 被误拒
+    return is_safe_url(current), current
 
 
 def sanitize_url_for_log(url):
-    """日志脱敏：移除 URL 中的敏感查询参数（token/sign/key 等）"""
+    """日志脱敏：遮蔽 URL 中的 userinfo 与敏感查询参数（token/sign/key 等）"""
     try:
         parsed = urllib.parse.urlparse(url)
         query = urllib.parse.parse_qs(parsed.query, keep_blank_values=True)
         sanitized = {k: ('***' if k.lower() in cfg._SENSITIVE_URL_PARAMS else v)
                      for k, v in query.items()}
         new_query = urllib.parse.urlencode(sanitized, doseq=True)
-        return urllib.parse.urlunparse(parsed._replace(query=new_query))
+        netloc = parsed.netloc
+        if '@' in netloc:
+            netloc = '***@' + netloc.rsplit('@', 1)[1]
+        return urllib.parse.urlunparse(parsed._replace(netloc=netloc, query=new_query))
     except Exception:
         return url
 

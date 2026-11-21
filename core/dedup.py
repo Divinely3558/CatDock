@@ -6,6 +6,7 @@ note_log_entry() 写日志后增量更新，避免每次下载检查都遍历日
 用户删除后调用 drop_user_cache() 释放内存。
 """
 import os
+import re
 import json
 import threading
 
@@ -17,6 +18,9 @@ from security import sanitize_url_for_log
 #                          'success_names': [], 'failure_names': []}
 _dedup_lock = threading.Lock()
 _caches = {}
+
+# .copy 变体后缀：精确匹配 ".copy" 或 ".copy.N"，避免 "a.copycat" 被误判
+_COPY_SUFFIX_RE = re.compile(r'\.copy(?:\.\d+)?$', re.IGNORECASE)
 
 
 def _empty_cache():
@@ -137,10 +141,10 @@ def is_filename_downloaded(save_name, user=None, check_failure=True):
                 if entry_save_name == save_name:
                     debug_print(f"[去重] 文件名命中{('成功' if status == 'success' else '失败')}日志（用户={user}）: {save_name}")
                     return True, status
-                # .copy 变体匹配：仅匹配 ".copy" 或 ".copy.N" 形式，避免误伤不同视频
-                # 例如 "episode1" 不应匹配 "episode1_extra"
-                entry_base = entry_save_name.split('.copy')[0] if '.copy' in entry_save_name else entry_save_name
-                save_base = save_name.split('.copy')[0] if '.copy' in save_name else save_name
+                # .copy 变体匹配：仅匹配 ".copy" 或 ".copy.N" 后缀，避免误伤不同视频
+                # 例如 "a.copycat" 与 "a.copycat2" 不应被判为同一基础名
+                entry_base = _COPY_SUFFIX_RE.sub('', entry_save_name)
+                save_base = _COPY_SUFFIX_RE.sub('', save_name)
                 if entry_base == save_base and entry_base != entry_save_name and save_base != save_name:
                     # 两者都是同一基础名的 .copy 变体
                     debug_print(f"[去重] 文件名命中{('成功' if status == 'success' else '失败')}日志（用户={user}）: {save_name}")

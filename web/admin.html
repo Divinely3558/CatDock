@@ -2033,7 +2033,7 @@
           "&end=" +
           encodeURIComponent(end);
         fetch(url, {
-          headers: { Authorization: token ? "Bearer " + token : "" },
+          headers: { Authorization: "Bearer " + CD.getToken() },
         })
           .then(function (resp) {
             if (resp.status === 403 || resp.status === 401) {

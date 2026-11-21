@@ -186,7 +186,9 @@ def _trim_to_limit():
     total = sum(counts.values())
     removed = 0
     for path in files[:-1]:
-        if total <= MAX_MESSAGES // 2:
+        # 仅当总量仍超上限时才整档删除；阈值写成 MAX//2 时，多日档接近
+        # 1000 条会连续删档，把 2001 条直接削到只剩十几条
+        if total <= MAX_MESSAGES:
             break
         try:
             os.unlink(path)

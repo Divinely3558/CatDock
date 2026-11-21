@@ -56,13 +56,16 @@ class FiltersModel(private val repo: AppRepository, private val isAdmin: Boolean
     val config = MutableStateFlow(FilterConfig())
     val loading = MutableStateFlow(true)
     val error = MutableStateFlow<String?>(null)
+    // 鉴权失效：禁用保存，避免把服务端已有规则覆盖成默认空值
+    val authExpired = MutableStateFlow(false)
 
     init {
         scope.launch {
             try {
                 config.value = repo.filters(isAdmin)
             } catch (e: AuthExpiredException) {
-                error.value = null
+                authExpired.value = true
+                error.value = e.message ?: "登录已过期"
             } catch (e: Exception) {
                 error.value = e.message ?: "加载失败"
             } finally {
@@ -103,7 +106,12 @@ fun FiltersEditor(
     val cfg by vm.config.collectAsState()
     val loading by vm.loading.collectAsState()
     val error by vm.error.collectAsState()
+    val authExpired by vm.authExpired.collectAsState()
     var notice by remember { mutableStateOf<String?>(null) }
+
+    LaunchedEffect(authExpired) {
+        if (authExpired) onAuthExpired(error ?: "登录已过期")
+    }
 
     LaunchedEffect(cfg) { notice = null }
 
@@ -227,6 +235,7 @@ fun FiltersEditor(
             "保存过滤规则",
             onClick = { vm.save(onDone = { notice = it }, onExpired = onAuthExpired) },
             modifier = Modifier.fillMaxWidth(),
+            enabled = !authExpired,
         )
     }
 }

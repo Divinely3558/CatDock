@@ -64,6 +64,7 @@ def save_tasks(force=False):
                         users_to_write.add(username)
 
             for user in users_to_write:
+                temp_file = None
                 try:
                     tasks_data = grouped.get(user, [])
                     tasks_file = cfg.user_tasks_file(user)
@@ -79,9 +80,9 @@ def save_tasks(force=False):
                 except Exception as e:
                     # 单用户写盘失败不影响其他用户
                     log_error(f"保存用户 {user} 任务失败: {e}")
-                    # 清理残留临时文件
+                    # 清理残留临时文件（temp_file 可能尚未赋值）
                     try:
-                        if os.path.exists(temp_file):
+                        if temp_file and os.path.exists(temp_file):
                             os.remove(temp_file)
                     except OSError:
                         pass

@@ -5,6 +5,17 @@ plugins {
     alias(libs.plugins.kotlin.serialization)
 }
 
+import java.util.Properties
+
+// 签名凭据来自 gitignore 的 Android/keystore.properties（storeFile/storePassword/keyAlias/keyPassword）。
+// 文件缺失时 release 仍可构建为 unsigned，不破坏 CI 与源码阅读。
+val keystorePropsFile = rootProject.file("keystore.properties")
+val keystoreProps = Properties().apply {
+    if (keystorePropsFile.exists()) {
+        keystorePropsFile.inputStream().use { load(it) }
+    }
+}
+
 android {
     namespace = "com.catdock.app"
     compileSdk = 35
@@ -13,8 +24,20 @@ android {
         applicationId = "com.catdock.app"
         minSdk = 24
         targetSdk = 35
-        versionCode = 11
-        versionName = "1.2.1"
+        versionCode = 12
+        versionName = "1.2.2"
+    }
+
+    signingConfigs {
+        create("release") {
+            val storeFilePath = keystoreProps.getProperty("storeFile")
+            if (storeFilePath != null) {
+                storeFile = rootProject.file(storeFilePath)
+                storePassword = keystoreProps.getProperty("storePassword")
+                keyAlias = keystoreProps.getProperty("keyAlias")
+                keyPassword = keystoreProps.getProperty("keyPassword")
+            }
+        }
     }
 
     buildTypes {
@@ -24,6 +47,9 @@ android {
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro"
             )
+            if (keystorePropsFile.exists()) {
+                signingConfig = signingConfigs.getByName("release")
+            }
         }
     }
 

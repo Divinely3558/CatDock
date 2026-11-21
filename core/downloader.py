@@ -11,6 +11,7 @@
 """
 import os
 import re
+import errno
 import json
 import time
 import shutil
@@ -73,26 +74,33 @@ STAGING_DIRNAME = '.staging'
 _STAGING_MARKERS = ('.ignore', '.plexignore', '.nomedia')
 
 
-def get_staging_root(download_dir=None, temp_dir=None):
-    """暂存区根目录：优先 <缓存目录>/.staging，避免出现在下载目录列表里。
+_staging_root_logged = False
 
-    缓存目录与下载目录通常位于同一挂载卷（docker-compose 里同为 /youdir
-    的子目录），跨目录 os.replace 仍是原子操作；仅当二者确实位于不同
-    文件系统时，才回退到 <下载目录>/.staging，保证原子发布不失效。
+
+def get_staging_root(download_dir=None, temp_dir=None):
+    """暂存区根目录：固定为 <缓存目录>/.staging，绝不出现在下载目录里。
+
+    与下载目录同一文件系统时成品可直接 os.replace 原子发布；若二者位于
+    不同文件系统（挂载卷不同），发布时先复制到下载目录内的隐藏临时文件
+    再改名（见 _publish_to_download），保证下载目录里不会出现 .staging
+    文件夹。启动时记录一次实际位置，便于确认部署配置。
     """
+    global _staging_root_logged
     download_dir = download_dir or get_download_dir()
     temp_dir = temp_dir or get_temp_dir()
-    try:
-        temp_dev = os.stat(temp_dir).st_dev
-    except OSError:
-        temp_dev = None
-    try:
-        download_dev = os.stat(download_dir).st_dev
-    except OSError:
-        download_dev = None
-    if temp_dev is None or download_dev is None or temp_dev == download_dev:
-        return os.path.join(temp_dir, STAGING_DIRNAME)
-    return os.path.join(download_dir, STAGING_DIRNAME)
+    root = os.path.join(temp_dir, STAGING_DIRNAME)
+    if not _staging_root_logged:
+        _staging_root_logged = True
+        try:
+            same_dev = os.stat(temp_dir).st_dev == os.stat(download_dir).st_dev
+        except OSError:
+            same_dev = True
+        if same_dev:
+            log_info(f"下载暂存区: {root}（与下载目录同一文件系统，原子发布）")
+        else:
+            log_warning(f"下载暂存区: {root}（与下载目录不在同一文件系统，"
+                        f"发布时先复制再改名；建议把 temp 与 downloads 挂到同一卷）")
+    return root
 
 
 def get_staging_dir(base_name, download_dir=None, temp_dir=None):
@@ -150,6 +158,41 @@ def _cleanup_staging_dir(staging_dir, preserve_source):
             log_error(f"清理暂存残留失败: {item} - {e}")
 
 
+def _publish_to_download(src, dst):
+    """把暂存区成品发布到下载目录：优先原子 rename，跨文件系统时复制后改名。
+
+    暂存区固定在缓存目录；与下载目录不同文件系统时 os.replace 会抛 EXDEV。
+    此时先复制到下载目录内的隐藏临时文件（与成品同目录，可原子改名），
+    再 os.replace 成成品名，避免在下载目录里重建 .staging 目录，
+    也不会提前暴露未校验的成品名。返回是否成功。
+    """
+    try:
+        os.replace(src, dst)
+        return True
+    except OSError as e:
+        if getattr(e, 'errno', None) != errno.EXDEV:
+            log_error(f"发布成品失败: {src} -> {dst} - {e}")
+            return False
+    tmp_dst = os.path.join(os.path.dirname(dst),
+                           f".cd-{uuid.uuid4().hex[:12]}.tmp")
+    try:
+        shutil.copyfile(src, tmp_dst)
+        os.replace(tmp_dst, dst)
+        try:
+            os.remove(src)
+        except OSError:
+            pass
+        debug_print(f"[后处理] 跨文件系统发布完成: {dst}")
+        return True
+    except Exception as e:
+        log_error(f"跨文件系统发布失败: {src} -> {dst} - {e}")
+        try:
+            os.remove(tmp_dst)
+        except OSError:
+            pass
+        return False
+
+
 def _remove_empty_legacy_staging_root(download_dir=None):
     """旧版 <下载目录>/.staging 为空时删除，让下载目录里不再出现该文件夹"""
     root = os.path.join(download_dir or get_download_dir(), STAGING_DIRNAME)
@@ -186,7 +229,9 @@ def _migrate_legacy_staging():
                 continue
             try:
                 os.makedirs(os.path.dirname(dst), exist_ok=True)
-                os.replace(src, dst)
+                # shutil.move：同文件系统等价 rename；跨卷时自动复制后删除，
+                # 保证旧 version 的 downloads/.staging 能被彻底清走
+                shutil.move(src, dst)
                 debug_print(f"[迁移] 旧暂存目录已迁移: {src} -> {dst}")
             except OSError as e:
                 log_error(f"迁移旧暂存目录失败: {src} - {e}")
@@ -423,6 +468,9 @@ def _launch_task(task_id):
             task = cfg.tasks.get(task_id)
             if task is None:
                 return
+            # 代次标记：每拉起一个新 worker 递增一次，旧 worker 据此自行退出
+            task['_gen'] = task.get('_gen', 0) + 1
+            gen = task['_gen']
             plan = dict(task.get('_plan') or {})
         if not plan:
             plan = _build_plan_from_task(task)
@@ -441,7 +489,7 @@ def _launch_task(task_id):
 
             def delayed_start():
                 time.sleep(1)
-                _run_same_video_group_worker(task_id, base_name, fmt)
+                _run_same_video_group_worker(task_id, base_name, fmt, gen=gen)
 
             threading.Thread(target=delayed_start, daemon=True).start()
         elif kind == 'direct':
@@ -449,6 +497,7 @@ def _launch_task(task_id):
                 target=_run_direct_download_worker,
                 args=(task_id, plan['url'], plan['curl_target'], referer, cookie,
                       user_agent, plan.get('retry_count', 0)),
+                kwargs={'gen': gen},
                 daemon=True
             ).start()
         else:
@@ -464,6 +513,7 @@ def _launch_task(task_id):
                 target=_run_worker,
                 args=(task_id, cmd, plan['base_name'], plan['output_file'],
                       plan.get('target_format'), plan.get('retry_count', 0)),
+                kwargs={'gen': gen},
                 daemon=True
             ).start()
     except Exception as e:
@@ -1150,7 +1200,7 @@ def _load_preview_meta(seg_dir):
     try:
         with open(meta_path, 'r', encoding='utf-8-sig') as f:
             data = json.load(f)
-        if isinstance(data, list) and data:
+        if isinstance(data, list) and data and isinstance(data[0], dict):
             kept_indices = set()
             for part in (data[0].get('Playlist') or {}).get('MediaParts', []):
                 for seg in (part.get('MediaSegments') or []):
@@ -1162,7 +1212,7 @@ def _load_preview_meta(seg_dir):
                             durations[idx] = float(dur)
             if not kept_indices:
                 kept_indices = None
-    except (OSError, ValueError, TypeError, KeyError):
+    except (OSError, ValueError, TypeError, KeyError, AttributeError, IndexError):
         pass
     return durations, kept_indices
 
@@ -1302,6 +1352,20 @@ def _get_task_status(task_id):
         return t['status'] if t else None
 
 
+def _is_current_generation(task_id, gen):
+    """worker 代次校验：任务已删除或已被新 worker 接替时返回 False。
+
+    暂停后立即恢复会拉起新 worker，而旧 worker 可能仍在退避 sleep 中；
+    旧 worker 在每个检查点用本函数发现代次已过期，自行退出，避免两个
+    worker 同时写同一个 .part 并互相覆盖 _proc。
+    """
+    if gen is None:
+        return True
+    with cfg.tasks_lock:
+        t = cfg.tasks.get(task_id)
+        return t is not None and t.get('_gen', 0) == gen
+
+
 def _terminate_proc(process, graceful=True):
     """终止下载进程：默认 SIGINT 让 N_m3u8DL-RE 保存进度 / curl 保留断点文件"""
     if process is None:
@@ -1313,10 +1377,14 @@ def _terminate_proc(process, graceful=True):
         debug_print(f"[下载] 终止下载进程失败: {e}")
 
 
-def _run_download_with_retry(cmd, task_id, max_retries=5, initial_retry_count=0, base_name=""):
+def _run_download_with_retry(cmd, task_id, max_retries=5, initial_retry_count=0, base_name="", gen=None):
     """返回: True 下载成功 / False 重试耗尽 / 'paused' 任务被暂停 / 'deleted' 任务被删除"""
     retry_count = initial_retry_count
     while retry_count < max_retries:
+        # 代次检查：已被新 worker 接替（暂停后立即恢复）时旧 worker 必须退出
+        if not _is_current_generation(task_id, gen):
+            debug_print(f"[下载] 旧 worker 已过期，退出: {base_name} (ID: {task_id})")
+            return 'deleted'
         # 循环顶响应暂停/删除（覆盖退避等待、网络检查期间收到的请求）
         status = _get_task_status(task_id)
         if status is None:
@@ -1367,11 +1435,8 @@ def _run_download_with_retry(cmd, task_id, max_retries=5, initial_retry_count=0,
             debug_print(f"[下载] 命令执行成功: {base_name}")
             return True
 
-        existing_file = find_existing_source_file(base_name)
-        if existing_file:
-            debug_print(f"[下载] 返回非零码 {return_code}，但检测到可用输出文件: {existing_file}")
-            return True
-
+        # 严格完整性判定：非零退出码下即使暂存区存在源文件也不判成功，
+        # 否则中断产生的残片会被当作成品发布并计入去重，永久漏下载。
         debug_print(f"[下载] 失败，返回码 {return_code}: {base_name}")
 
         with cfg.tasks_lock:
@@ -1624,9 +1689,10 @@ def _finalize_download_outputs(base_name, output_file, target_format, task_id=No
         cleanup_residue(base_name, preserve_source=True)
         return False, None
 
-    # (C) 有 source_file → 转封装到暂存区 .part，校验后原子发布
+    # (C) 有 source_file → 转封装到暂存区 .part，校验后发布
     _conversion_done = False
-    # .part 放暂存区：与成品同一文件系统，rename 原子；且不会出现在被监听目录
+    # .part 放暂存区（下载目录里不可见）；发布用 _publish_to_download，
+    # 同文件系统走原子 rename，跨文件系统则复制到隐藏临时文件再改名
     part_file = os.path.join(staging_dir, os.path.basename(output_file) + '.part')
     if source_file.endswith('.ts') or source_file.lower().endswith('.mux.mp4'):
         # 下载已结束、进入转封装阶段：打上 stage=muxing，前端据此显示「合成中」
@@ -1648,22 +1714,15 @@ def _finalize_download_outputs(base_name, output_file, target_format, task_id=No
                         pass
                     time.sleep(2)
                     continue
-                try:
-                    os.replace(part_file, output_file)
+                if _publish_to_download(part_file, output_file):
                     _conversion_done = True
                     debug_print(f"[后处理] 已原子发布成品: {output_file}")
                     break
-                except OSError as e:
-                    log_error(f"原子发布失败: {part_file} -> {output_file} - {e}")
-                    time.sleep(2)
+                time.sleep(2)
         finally:
             _set_task_stage(task_id, None)
     elif os.path.abspath(source_file) != os.path.abspath(output_file):
-        try:
-            os.replace(source_file, output_file)
-            _conversion_done = True
-        except Exception:
-            _conversion_done = False
+        _conversion_done = _publish_to_download(source_file, output_file)
 
     # 转换失败且 .ts/.mux 源仍在：此时 output_file 只能是上次合成中断留下的
     # 残缺成品（ts 与成品共存 ⇒ 成品残缺），绝不能误判为成功——明确删除残缺
@@ -1690,14 +1749,13 @@ def _finalize_download_outputs(base_name, output_file, target_format, task_id=No
             source_size = os.path.getsize(source_file)
             if source_size >= cfg.MIN_FILE_SIZE:
                 debug_print(f"[后处理] 输出文件太小，使用源文件代替: {source_file}")
-                try:
-                    os.replace(source_file, output_file)
-                except Exception:
-                    pass
-                if os.path.exists(output_file) or os.path.exists(source_file):
-                    final = output_file if os.path.exists(output_file) else source_file
-                    cleanup_residue(base_name, exclude_file=final, preserve_source=False)
-                    return True, final
+                if not _publish_to_download(source_file, output_file):
+                    # 发布失败（跨盘复制失败/磁盘满/权限）不能谎报成功，
+                    # 保留源文件供下次恢复重试
+                    cleanup_residue(base_name, exclude_file=source_file, preserve_source=True)
+                    return False, None
+                cleanup_residue(base_name, exclude_file=output_file, preserve_source=False)
+                return True, output_file
         cleanup_residue(base_name, preserve_source=True)
         return False, None
 
@@ -1706,13 +1764,12 @@ def _finalize_download_outputs(base_name, output_file, target_format, task_id=No
         source_size = os.path.getsize(source_file)
         if source_size >= cfg.MIN_FILE_SIZE:
             debug_print(f"[后处理] 转换未生成输出，使用源文件作最终输出: {source_file}")
-            try:
-                os.replace(source_file, output_file)
-            except Exception:
-                pass
-            final = output_file if os.path.exists(output_file) else source_file
-            cleanup_residue(base_name, exclude_file=final, preserve_source=False)
-            return True, final
+            if not _publish_to_download(source_file, output_file):
+                # 发布失败时保留源文件，避免成品丢失却记成功
+                cleanup_residue(base_name, exclude_file=source_file, preserve_source=True)
+                return False, None
+            cleanup_residue(base_name, exclude_file=output_file, preserve_source=False)
+            return True, output_file
         cleanup_residue(base_name, exclude_file=source_file, preserve_source=True)
         return False, None
 
@@ -1853,20 +1910,25 @@ def cleanup_copy_files(base_name):
                     debug_print(f"[清理] 删除重复文件失败: {item_path} - {e}")
 
 
-def _finish_task(task_id, success, write_log=True):
+def _finish_task(task_id, success, write_log=True, gen=None):
     """任务结束处理：写成功/失败日志 → 从内存删除任务 → 持久化。
 
     write_log=False 用于重启恢复时“URL 已存在于日志”的清理分支：
     该任务在历史上已写过日志（is_url_downloaded 命中即证明），
     无需重复追加一条记录，只需把残留的任务记录从列表/磁盘清除。
+
+    gen 非 None 时做代次校验：已被新 worker 接替的旧 worker 不得结束任务。
     """
     task_data = None
     with cfg.tasks_lock:
-        if task_id in cfg.tasks:
-            task_data = cfg.tasks[task_id].copy()
-        else:
+        current = cfg.tasks.get(task_id)
+        if current is None:
             log_error(f"任务 {task_id} 已不存在于任务列表中")
             return
+        if gen is not None and current.get('_gen', 0) != gen:
+            log_error(f"忽略过期 worker 的任务结束回调: {task_id}")
+            return
+        task_data = current.copy()
 
     # 同视频模式兜底：从视频组补充全部 URL，确保日志记录所有链接
     save_name = task_data.get('save_name', '')
@@ -1911,7 +1973,7 @@ def _finish_task(task_id, success, write_log=True):
     _pump_queue()
 
 
-def _run_same_video_group_worker(task_id, base_name, output_format=None):
+def _run_same_video_group_worker(task_id, base_name, output_format=None, gen=None):
     """多链接调度 Worker: 按顺序轮流尝试同一个视频的所有链接。
 
     策略：
@@ -1932,7 +1994,7 @@ def _run_same_video_group_worker(task_id, base_name, output_format=None):
         group = cfg.video_groups.get(base_name)
         if group is None:
             debug_print(f"[调度器] 找不到视频组 {base_name}，任务结束")
-            _finish_task(task_id, False)
+            _finish_task(task_id, False, gen=gen)
             return
         group['status'] = 'running'
         task_url_for_log = group['urls'][0][0] if group['urls'] else ''
@@ -1951,13 +2013,18 @@ def _run_same_video_group_worker(task_id, base_name, output_format=None):
                 cfg.tasks[task_id]['url'] = task_url_for_log
                 cfg.tasks[task_id]['save_name'] = base_name
         cleanup_copy_files(base_name)
-        _finish_task(task_id, True)
+        _finish_task(task_id, True, gen=gen)
         return
 
     total_urls_count_ever = 0
+    urls_snapshot = []
 
     try:
         while True:
+            # 代次检查：已被新 worker 接替时旧调度器退出
+            if not _is_current_generation(task_id, gen):
+                debug_print(f"[调度器] 旧 worker 已过期，退出: {base_name}")
+                return
             with cfg.video_groups_lock:
                 group = cfg.video_groups.get(base_name)
                 if group is None:
@@ -2058,7 +2125,7 @@ def _run_same_video_group_worker(task_id, base_name, output_format=None):
                         cfg.tasks[task_id]['save_name'] = base_name
                         cfg.tasks[task_id]['progress'] = 100
                 cleanup_copy_files(base_name)
-                _finish_task(task_id, True)
+                _finish_task(task_id, True, gen=gen)
                 return
 
             # 一整圈失败，回合数 + 1，移动起始索引（从下一个链接开始新一轮，达到"轮流"效果）
@@ -2081,7 +2148,7 @@ def _run_same_video_group_worker(task_id, base_name, output_format=None):
                 if urls_snapshot:
                     cfg.tasks[task_id]['url'] = urls_snapshot[0][0]
         cleanup_copy_files(base_name)
-        _finish_task(task_id, False)
+        _finish_task(task_id, False, gen=gen)
 
     except Exception as e:
         debug_print(f"[调度器] 异常: {e}")
@@ -2093,11 +2160,11 @@ def _run_same_video_group_worker(task_id, base_name, output_format=None):
             if task_id in cfg.tasks:
                 cfg.tasks[task_id]['save_name'] = base_name
         cleanup_copy_files(base_name)
-        _finish_task(task_id, False)
+        _finish_task(task_id, False, gen=gen)
 
 
 def _run_direct_download_worker(task_id, url, output_file, referer, cookie, user_agent,
-                                initial_retry_count=0):
+                                initial_retry_count=0, gen=None):
     """直链下载 worker（curl + 断点续传）。
 
     curl 写入 <output_file>.part，下载达标后 os.replace 原子改名为成品，
@@ -2123,6 +2190,10 @@ def _run_direct_download_worker(task_id, url, output_file, referer, cookie, user
         dl_url = url
         seen_urls = {url}
         while retry_count < max_retries:
+            # 代次检查：已被新 worker 接替时旧 worker 必须退出，避免双写 .part
+            if not _is_current_generation(task_id, gen):
+                debug_print(f"[下载] 旧 worker 已过期，退出: {base_name} (ID: {task_id})")
+                return
             # 循环顶响应暂停/删除（覆盖退避等待、网络检查期间收到的请求）
             status = _get_task_status(task_id)
             if status is None:
@@ -2169,19 +2240,24 @@ def _run_direct_download_worker(task_id, url, output_file, referer, cookie, user
 
             if os.path.exists(part_file):
                 file_size = os.path.getsize(part_file)
-                if file_size >= cfg.MIN_FILE_SIZE:
+                if return_code == 33:
+                    # curl 33：服务器不支持 Range，当前 .part 无法继续续传，
+                    # 删除残片后从头重下，绝不能把截断残片当成品发布
+                    debug_print(f"[下载] 服务器不支持断点续传，删除残片后重试: {base_name}")
+                    try:
+                        os.remove(part_file)
+                    except OSError:
+                        pass
+                elif return_code == 0 and file_size >= cfg.MIN_FILE_SIZE:
                     try:
                         os.replace(part_file, output_file)
                     except OSError as e:
                         log_error(f"原子发布失败: {part_file} -> {output_file} - {e}")
                     else:
-                        if return_code != 0:
-                            debug_print(f"[下载] 返回非零码 {return_code}，但检测到有效输出文件 "
-                                        f"(大小 {file_size} bytes): {base_name}")
                         debug_print(f"[下载] 直链下载成功并原子发布: {output_file}")
-                        _finish_task(task_id, True)
+                        _finish_task(task_id, True, gen=gen)
                         return
-                else:
+                elif return_code == 0:
                     debug_print(f"[下载] 下载文件太小 ({file_size} bytes)，可能是错误页面: {base_name}")
                     # 小文件可能是 CDN 调度 JSON（如爱奇艺 pcw-data 返回 {"l": "真实地址"}）
                     resolved = _extract_dispatch_url(part_file)
@@ -2222,14 +2298,14 @@ def _run_direct_download_worker(task_id, url, output_file, referer, cookie, user
 
         debug_print(f"[下载] 直链下载已重试 {max_retries} 次仍失败: {base_name}")
         # 保留不完整文件：curl -C - 可在下次重试时断点续传，删除则前功尽弃
-        _finish_task(task_id, False)
+        _finish_task(task_id, False, gen=gen)
     except Exception as e:
         log_error(f"直接下载线程异常: {e}")
         # 保留不完整文件供后续断点续传
-        _finish_task(task_id, False)
+        _finish_task(task_id, False, gen=gen)
 
 
-def _run_worker(task_id, cmd, base_name, output_file, target_format, initial_retry_count=0):
+def _run_worker(task_id, cmd, base_name, output_file, target_format, initial_retry_count=0, gen=None):
     # 继承 per-user 上下文（后台线程 thread-local 默认为空）
     _inherit_task_context(task_id)
     # 清理上次中断残留的合成阶段标记（重新下载应显示「下载中」）
@@ -2239,18 +2315,25 @@ def _run_worker(task_id, cmd, base_name, output_file, target_format, initial_ret
         if find_pending_merge_source(base_name):
             debug_print(f"[下载] 发现未合成完的源文件，直接重新合成（无需重新下载）: {base_name}")
             if _finalize_download_outputs(base_name, output_file, target_format, task_id=task_id)[0]:
-                _finish_task(task_id, True)
+                _finish_task(task_id, True, gen=gen)
                 return
-        dl_result = _run_download_with_retry(cmd, task_id, max_retries=5, initial_retry_count=initial_retry_count, base_name=base_name)
+        dl_result = _run_download_with_retry(cmd, task_id, max_retries=5, initial_retry_count=initial_retry_count,
+                                             base_name=base_name, gen=gen)
         if dl_result in ('paused', 'deleted'):
             # 任务已暂停/已删除：保留部分下载文件（暂停续传），不写日志、不移除任务
             return
         if not dl_result:
             cleanup_residue(base_name, preserve_source=True)
-            _finish_task(task_id, False)
+            _finish_task(task_id, False, gen=gen)
             return
 
         time.sleep(1)
+
+        # 合成/发布前校验任务状态：暂停或删除后不再继续合成
+        status = _get_task_status(task_id)
+        if status in (None, 'paused') or not _is_current_generation(task_id, gen):
+            debug_print(f"[下载] 任务已{'删除' if status is None else '暂停'}，跳过合成: {base_name}")
+            return
 
         # 在转格式阶段把进度更新到 90%（与原逻辑保持一致）
         source_file = find_existing_source_file(base_name)
@@ -2260,14 +2343,29 @@ def _run_worker(task_id, cmd, base_name, output_file, target_format, initial_ret
                     cfg.tasks[task_id]['progress'] = 90
             save_tasks()
 
-        ok, _final = _finalize_download_outputs(base_name, output_file, target_format, task_id=task_id)
-        _finish_task(task_id, ok)
+        pre_existing = os.path.exists(output_file)
+        ok, final = _finalize_download_outputs(base_name, output_file, target_format, task_id=task_id)
+
+        # 合成期间任务可能被暂停/删除：不得把已删除任务记成功，也不得覆盖暂停状态
+        status = _get_task_status(task_id)
+        if status is None:
+            if final and not pre_existing and os.path.exists(final):
+                try:
+                    os.remove(final)
+                    debug_print(f"[下载] 任务已删除，撤销刚发布的成品: {final}")
+                except OSError as e:
+                    log_error(f"撤销成品失败: {final} - {e}")
+            return
+        if status == 'paused':
+            debug_print(f"[下载] 任务已暂停，保留合成结果但不写成功日志: {base_name}")
+            return
+        _finish_task(task_id, ok, gen=gen)
 
     except Exception as e:
         log_error(f"工作线程异常: {e}")
         # 异常时尝试共享后处理：若 output_file/source_file 还在，直接视为成功
         ok, _ = _finalize_download_outputs(base_name, output_file, target_format, task_id=task_id)
-        _finish_task(task_id, ok)
+        _finish_task(task_id, ok, gen=gen)
 
 
 def resume_tasks():
@@ -2836,6 +2934,23 @@ def run_download(url, save_name=None, referer=None, cookie=None, user_agent=None
     }
 
     with cfg.tasks_lock:
+        # 锁内二次查重：上面的查重与 classify_video_url 网络探测（最长约 25 秒）
+        # 之间没有同步，并发提交同一 URL 或不同 URL 使用同一 saveName 时，
+        # 会生成两个任务同时写同一个成品文件。插入前在 tasks_lock 内复查。
+        for _tid, _t in cfg.tasks.items():
+            if _t.get('user') != user:
+                continue
+            if _t['url'].strip().rstrip('/') == normalized_url:
+                dup_name = _t.get('save_name') or _tid
+                debug_print(f"[去重] 重复链接（并发提交），复用任务: {dup_name} (ID: {_tid})")
+                return _tid, True
+            _plan = _t.get('_plan') or {}
+            _other_output = _plan.get('output_file')
+            if _other_output and \
+                    os.path.abspath(_other_output) == os.path.abspath(output_file):
+                debug_print(f"[去重] 目标成品被进行中任务占用，跳过: {output_file} (ID: {_tid})")
+                log_info(f"[{user}] 跳过下载: {base_name}（目标文件已被进行中任务占用）")
+                return None, False
         cfg.tasks[task_id] = {
             'id': task_id,
             'url': url,

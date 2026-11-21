@@ -119,8 +119,9 @@ fun LoginScreen(
         val pathStart = url.indexOf('/', schemeEnd)
         val host = if (pathStart == -1) url else url.substring(0, pathStart)
         val prefix = if (pathStart == -1) "" else url.substring(pathStart + 1).trim('/')
-        if (host.isBlank() || prefix.isBlank()) {
-            error = "请输入带 URL 前缀的完整链接，例如 http://192.168.1.10:8080/qj52lajx"
+        // 服务端 URL_PREFIX 可为空，前缀不是必填项；只要求主机地址有效
+        if (host.isBlank()) {
+            error = "请输入服务器地址，例如 http://192.168.1.10:8080/qj52lajx"
             return
         }
         loading = true

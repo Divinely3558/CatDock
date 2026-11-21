@@ -19,6 +19,7 @@ import socket
 import shutil
 import signal
 import ipaddress
+import threading
 import urllib.parse
 import http.server
 
@@ -329,24 +330,33 @@ class DownloadHandler(http.server.BaseHTTPRequestHandler):
         end_date = _dt.date.today()
         start_date = end_date - _dt.timedelta(days=6)
 
-        # 逐日期读取聊天存档并合并（无记录的日期跳过）
+        # 通过 chat.read_messages 读取，叠加该用户的「清除聊天记录」水位，
+        # 导出内容与页面聊天记录保持一致
+        messages, _ = chat.read_messages(0, user=self.authenticated_user)
+        by_day = {}
+        for m in messages:
+            day = str(m.get('time', ''))[:10]
+            if day:
+                by_day.setdefault(day, []).append(m)
+
+        # 逐日期合并（无记录的日期跳过）
         lines = []
         exported_days = 0
         cur = start_date
         while cur <= end_date:
-            day_path = os.path.join(chat.CHAT_DIR, cur.isoformat() + '.log')
-            if os.path.isfile(day_path):
-                try:
-                    with open(day_path, 'r', encoding='utf-8') as f:
-                        content = f.read()
-                    if content.strip():
-                        lines.append(f"===== {cur.isoformat()} =====\n")
-                        if not content.endswith('\n'):
-                            content += '\n'
-                        lines.append(content)
-                        exported_days += 1
-                except OSError as e:
-                    debug_print(f"[聊天导出] 读取 {day_path} 失败: {e}")
+            day = cur.isoformat()
+            day_messages = by_day.get(day)
+            if day_messages:
+                lines.append(f"===== {day} =====\n")
+                for m in day_messages:
+                    payload = {'user': m.get('user', ''),
+                               'time': m.get('time', ''),
+                               'msg': m.get('msg', '')}
+                    if isinstance(m.get('id'), int):
+                        payload['id'] = m['id']
+                    lines.append(json.dumps(payload, ensure_ascii=False,
+                                            separators=(',', ':')) + '\n')
+                exported_days += 1
             cur += _dt.timedelta(days=1)
 
         if exported_days == 0:
@@ -1678,12 +1688,17 @@ def start_server(port):
 def stop_server(_signum=None, _frame=None):
     log_info("系统关闭: 收到停止信号，正在停止服务")
 
-    if cfg.server_instance:
-        cfg.server_instance.shutdown()
-        cfg.server_instance.server_close()
-        log_info("系统关闭完成")
+    # serve_forever 运行在主线程，信号处理函数也在主线程执行；直接调用
+    # shutdown() 会等待主线程从 serve_forever 返回，而主线程正卡在信号处理
+    # 函数里，形成死锁。改为另起线程执行真正的关闭流程。
+    def _shutdown():
+        if cfg.server_instance:
+            cfg.server_instance.shutdown()
+            cfg.server_instance.server_close()
+            log_info("系统关闭完成")
+        sys.exit(0)
 
-    sys.exit(0)
+    threading.Thread(target=_shutdown, daemon=True).start()
 
 
 def _set_debug_mode(enabled):

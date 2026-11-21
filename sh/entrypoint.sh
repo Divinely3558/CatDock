@@ -87,4 +87,6 @@ curl -s --connect-timeout 5 --max-time 10 -o /dev/null -w "网络延迟: %{time_
 sleep 3
 
 # 启动服务
-PYTHONUNBUFFERED=1 python3 -u /home/downloader/main.py
+# exec 让 python 成为 PID 1，docker stop 的 SIGTERM 才能直达服务进程，
+# 否则 bash 不转发信号，只能等超时后 SIGKILL，丢失最后的任务进度
+exec env PYTHONUNBUFFERED=1 python3 -u /home/downloader/main.py

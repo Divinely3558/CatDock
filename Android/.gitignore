@@ -18,3 +18,4 @@ local.properties
 # 本地签名文件
 *.jks
 *.keystore
+keystore.properties

@@ -73,7 +73,9 @@ import com.catdock.app.ui.components.rememberCatToastState
 import com.catdock.app.ui.theme.LocalPalette
 import com.catdock.app.ui.theme.LocalSpec
 import com.catdock.app.ui.theme.catControlShape
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharedFlow
@@ -96,13 +98,12 @@ class TasksModel(private val repo: AppRepository) : ScreenModel() {
     private val _authError = MutableSharedFlow<String>(extraBufferCapacity = 1)
     val authError: SharedFlow<String> = _authError
 
-    private var polling = false
+    private var pollJob: Job? = null
 
     fun startPolling() {
-        if (polling) return
-        polling = true
-        scope.launch {
-            while (polling) {
+        if (pollJob?.isActive == true) return
+        pollJob = scope.launch {
+            while (isActive) {
                 refresh()
                 delay(4000)
             }
@@ -110,7 +111,10 @@ class TasksModel(private val repo: AppRepository) : ScreenModel() {
     }
 
     fun stopPolling() {
-        polling = false
+        // 必须取消协程：仅置布尔标志时，旧协程在 delay 结束后会继续跑，
+        // 快速切换 Tab 会叠加多个轮询循环
+        pollJob?.cancel()
+        pollJob = null
     }
 
     suspend fun refresh() {

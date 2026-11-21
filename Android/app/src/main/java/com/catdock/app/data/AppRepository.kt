@@ -31,7 +31,7 @@ class AppRepository(
      * Retrofit 对非 2xx 直接抛 HttpException，只留下 "HTTP 403 Forbidden" 这类状态行；
      * 服务端真正的拒绝理由（密钥不正确 / 用户不存在 / 账号锁定…）在响应体里，必须透出，
      * 否则用户只能盲重试，而密钥与用户名错误是会计入 IP 封禁阶梯的。
-     * 已鉴权请求的 401/403 转 AuthExpiredException（登录请求本身除外）。
+     * 已鉴权请求的 401 与鉴权类 403 转 AuthExpiredException（登录请求本身除外）。
      */
     private suspend fun <T> unwrap(loginCall: Boolean = false, block: suspend () -> T): T =
         try {
@@ -39,11 +39,23 @@ class AppRepository(
         } catch (e: HttpException) {
             val body = runCatching { e.response()?.errorBody()?.string() }.getOrNull()
             val message = body?.let { jsonMessage.find(it)?.groupValues?.get(1) }
-            if (!loginCall && (e.code() == 401 || e.code() == 403)) {
+            // 401 一律视为登录失效；403 需再区分：服务端对「需要管理员权限」
+            // 「目标用户不存在」等业务拒绝也返回 403，不能一律登出
+            if (!loginCall && isAuthFailure(e.code(), message)) {
                 throw AuthExpiredException(message ?: "登录已过期，请重新登录")
             }
             throw ApiException(message ?: "服务返回 HTTP ${e.code()}")
         }
+
+    private fun isAuthFailure(code: Int, message: String?): Boolean {
+        if (code == 401) return true
+        if (code != 403) return false
+        if (message == null) return true
+        if (message.contains("目标")) return false
+        return message.contains("登录") || message.contains("过期") ||
+            message.contains("认证失败") || message.contains("封禁") ||
+            message.contains("禁用") || message.contains("请联系管理员")
+    }
 
     private suspend fun <T> call(block: suspend CatdockApi.() -> ApiResp<T>): T =
         withContext(Dispatchers.IO) {

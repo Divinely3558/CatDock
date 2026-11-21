@@ -469,11 +469,9 @@
     // 检查是否有新令牌（服务端在令牌即将过期时自动续期）
     var newToken = resp.headers.get('X-New-Token');
     if (newToken) {
+      // 续期只写 localStorage；所有请求都经 authHeaders() 实时读取，
+      // 页面内存里不再缓存令牌副本
       localStorage.setItem(TOKEN_KEY, newToken);
-      // 同步更新内存中的凭证（user.html 的 creds 对象）
-      if (typeof creds !== 'undefined' && creds) {
-        creds.token = newToken;
-      }
     }
     
     return resp
@@ -490,9 +488,13 @@
           throw err;
         }
         if (!resp.ok || data.success === false) {
-          throw new Error(
+          var err = new Error(
             data.message || "请求失败 (HTTP " + resp.status + ")",
           );
+          err.status = resp.status;
+          // 挂业务字段：调用方可据 err.data.blocked 等区分提示样式
+          err.data = data;
+          throw err;
         }
         return data;
       });
@@ -503,6 +505,12 @@
     var token = localStorage.getItem(TOKEN_KEY);
     if (token) h["Authorization"] = "Bearer " + token;
     return h;
+  }
+
+  // 供页面在 fetch/hls xhrSetup 等非 CD.api* 场景实时取令牌
+  // （令牌续期只写 localStorage，页面不能缓存旧副本）
+  function getToken() {
+    return localStorage.getItem(TOKEN_KEY) || "";
   }
 
   function apiGet(path) {
@@ -1127,6 +1135,7 @@
     popconfirm: popconfirm,
     apiGet: apiGet,
     apiPost: apiPost,
+    getToken: getToken,
     initFilterEditor: initFilterEditor,
     onUnauthorized: null,
   };

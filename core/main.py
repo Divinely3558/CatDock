@@ -35,7 +35,7 @@ def main():
     data_db.init_db()
     # 首启初始化管理员：无 role='admin' 时创建默认 admin（14 位随机密码）
     _admin_created, _admin_pw = data_db.ensure_default_admin()
-    _user_count = data_db.user_count()
+    _user_count = data_db.download_user_count()
     cleanup_all_copy_files()
 
     # 启动时清空各用户的失败日志，允许重新下载之前失败的 URL

@@ -143,6 +143,8 @@ fun MainScreen(
     val healthVm = rememberScreenModel(session.accountKey) { HealthModel(repository) }
 
     val health by healthVm.state.collectAsState()
+    // 主界面存活期间持续轮询聊天：未读红点不依赖用户先打开聊天 Tab
+    LaunchedEffect(chatVm) { chatVm.start() }
     val chatLast by chatVm.latestId.collectAsState()
     var chatSeen by remember(session.accountKey) { mutableStateOf(0L) }
     LaunchedEffect(session.accountKey) {

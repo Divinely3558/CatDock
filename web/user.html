@@ -1909,7 +1909,6 @@
             // 用户名单独包一层：手机端媒体查询只隐藏文字、保留头像图标
             '<span class="chip-name">' + CD.esc(creds.user) + "</span>";
           startPolling();
-          refreshTasks();
         }
 
         function tryLogin() {
@@ -2185,18 +2184,19 @@
           CD.apiPost("download", body)
             .then(function (data) {
               var msg = data.message || "下载任务已添加";
-              if (data.blocked) {
-                showDlAlert(msg, false, "block");
-              } else {
-                showDlAlert(
-                  msg + (data.taskId ? "（任务 ID: " + data.taskId + "）" : ""),
-                  true,
-                );
-                $("fUrl").value = "";
-                refreshTasks();
-              }
+              showDlAlert(
+                msg + (data.taskId ? "（任务 ID: " + data.taskId + "）" : ""),
+                true,
+              );
+              $("fUrl").value = "";
+              refreshTasks();
             })
             .catch(function (err) {
+              // 广告拦截等业务拒绝会带上 data.blocked，用专用配色提示
+              if (err.data && err.data.blocked) {
+                showDlAlert(err.data.message || err.message, false, "block");
+                return;
+              }
               showDlAlert(err.message, false);
             })
             .finally(function () {
@@ -2461,12 +2461,13 @@
 
         // 保存播放位置到服务器（持久化）
         function saveResumeTime(taskId, time) {
-          if (!taskId || !creds.token) return;
+          var token = CD.getToken();
+          if (!taskId || !token) return;
           fetch(BASE + "task/resume_time", {
             method: "POST",
             headers: {
               "Content-Type": "application/json",
-              Authorization: "Bearer " + creds.token,
+              Authorization: "Bearer " + token,
             },
             body: JSON.stringify({ taskId: taskId, resumeTime: time }),
           }).catch(function () {}); // 静默失败，不影响播放
@@ -2504,7 +2505,7 @@
             xhrSetup: function (xhr) {
               xhr.setRequestHeader(
                 "Authorization",
-                "Bearer " + creds.token,
+                "Bearer " + CD.getToken(),
               );
             },
           });

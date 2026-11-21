@@ -129,7 +129,7 @@ class ChatModel(
         }
     }
 
-    fun send(text: String) {
+    fun send(text: String, onSent: () -> Unit = {}) {
         val msg = text.trim()
         if (msg.isEmpty() || msg.length > 500) {
             _toasts.tryEmit(
@@ -143,8 +143,11 @@ class ChatModel(
         scope.launch {
             try {
                 val item = repo.sendChat(msg)
-                _messages.value = _messages.value + item
-                item.id.takeIf { it > _latestId.value }?.let { _latestId.value = it }
+                // 不抬高轮询水位：服务端 id 单调递增，用自己消息的 id 抬高后，
+                // 轮询尚未拉到、id 更小的他人消息会被永久跳过。
+                // 下一个轮询周期按原水位补拉本条，merge 按 id 去重。
+                merge(listOf(item))
+                onSent()
             } catch (e: AuthExpiredException) {
                 _authError.tryEmit(e.message ?: "登录已过期")
             } catch (e: ApiException) {
@@ -216,7 +219,12 @@ fun ChatScreen(
     // 打开聊天即视为已读（网页端 chatSeen_<user> 水位）
     LaunchedEffect(latestId) { if (latestId > 0) onSeen(latestId) }
     LaunchedEffect(msgs.size) {
-        if (msgs.isNotEmpty()) listState.animateScrollToItem(msgs.size - 1)
+        if (msgs.isEmpty()) return@LaunchedEffect
+        // 用户上翻回看历史时不强行拽回底部；仅在接近底部时跟随新消息
+        val lastVisible = listState.layoutInfo.visibleItemsInfo.lastOrNull()?.index ?: -1
+        if (lastVisible >= msgs.size - 2) {
+            listState.animateScrollToItem(msgs.size - 1)
+        }
     }
 
     Box(Modifier.fillMaxSize()) {
@@ -333,8 +341,8 @@ fun ChatScreen(
                 CatButton(
                     text = "发送",
                     onClick = {
-                        vm.send(input)
-                        input = ""
+                        // 仅在发送成功后清空输入，失败时保留内容供重试
+                        vm.send(input) { input = "" }
                     },
                     enabled = input.isNotBlank(),
                     icon = Icons.AutoMirrored.Filled.Send,

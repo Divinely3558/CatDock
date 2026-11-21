@@ -52,8 +52,13 @@ data class Session(
 ) {
     val isLoggedIn: Boolean get() = token.isNotEmpty()
     val isAdmin: Boolean get() = role == "admin"
-    /** API 基地址：{serverUrl}/{prefix}/（Retrofit 要求以 / 结尾） */
-    val baseUrl: String get() = "${serverUrl.trimEnd('/')}/${urlPrefix.trim('/')}/"
+    /** API 基地址：{serverUrl}/{prefix}/（Retrofit 要求以 / 结尾；前缀为空时不产生双斜杠） */
+    val baseUrl: String
+        get() {
+            val host = serverUrl.trimEnd('/')
+            val prefix = urlPrefix.trim('/')
+            return if (prefix.isEmpty()) "$host/" else "$host/$prefix/"
+        }
     fun previewUrl(taskId: String) = "${baseUrl}tasks/$taskId/preview.m3u8"
 
     companion object {
@@ -94,14 +99,35 @@ class SessionStore(private val context: Context) {
 
     private val json = Json { ignoreUnknownKeys = true }
 
+    // 令牌与凭据同一安全基线：落盘前用 Keystore AES-GCM 加密。
+    // 旧版本明文令牌解密会失败（JWT 不含 ':'，open 返回 null），按原值返回，
+    // 下一次写入时即完成加密迁移；加密失败则写空令牌（不落明文，用户重登即可）。
     private fun decodeAccounts(raw: String?): List<SavedAccount> =
         raw?.let { r ->
             runCatching { json.decodeFromString(ListSerializer(SavedAccount.serializer()), r) }
                 .getOrDefault(emptyList())
+                .map { acc ->
+                    if (acc.token.isEmpty()) {
+                        acc
+                    } else {
+                        // 含 ':' 即视为密文：解不开说明密钥失效（卸载重装等），
+                        // 按未登录处理；不含 ':' 是旧版明文令牌，原样返回并等下次写入加密
+                        val plain = SecureCredentials.open(acc.token)
+                        acc.copy(
+                            token = plain ?: if (acc.token.contains(':')) "" else acc.token,
+                        )
+                    }
+                }
         } ?: emptyList()
 
     private fun encodeAccounts(list: List<SavedAccount>): String =
-        json.encodeToString(ListSerializer(SavedAccount.serializer()), list)
+        json.encodeToString(
+            ListSerializer(SavedAccount.serializer()),
+            list.map { acc ->
+                if (acc.token.isEmpty()) acc
+                else acc.copy(token = SecureCredentials.seal(acc.token) ?: "")
+            },
+        )
 
     private data class StoreState(val list: List<SavedAccount>, val activeKey: String?)
 

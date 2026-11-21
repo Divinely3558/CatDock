@@ -58,6 +58,10 @@ import androidx.compose.ui.viewinterop.AndroidView
 import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsCompat
 import androidx.core.view.WindowInsetsControllerCompat
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
+import androidx.lifecycle.compose.LocalLifecycleOwner
+import androidx.media3.common.AudioAttributes
 import androidx.media3.common.MediaItem
 import androidx.media3.common.PlaybackException
 import androidx.media3.common.Player
@@ -181,8 +185,22 @@ fun PlayerScreen(
     }
 
     val exoPlayer = remember(session.accountKey, taskId) {
-        ExoPlayer.Builder(context).build().apply { playWhenReady = true }
+        ExoPlayer.Builder(context).build().apply {
+            // handleAudioFocus=true：来电/其他应用抢占音频时自动暂停并在恢复后继续
+            setAudioAttributes(AudioAttributes.DEFAULT, true)
+            playWhenReady = true
+        }
     }
+    // 进入后台（切走/锁屏）暂停播放，避免离开界面后声音继续
+    val lifecycleOwner = LocalLifecycleOwner.current
+    DisposableEffect(lifecycleOwner, exoPlayer) {
+        val observer = LifecycleEventObserver { _, event ->
+            if (event == Lifecycle.Event.ON_STOP) exoPlayer.pause()
+        }
+        lifecycleOwner.lifecycle.addObserver(observer)
+        onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
+    }
+
     val httpFactory = remember(session.accountKey) {
         DefaultHttpDataSource.Factory()
             .setAllowCrossProtocolRedirects(true)
@@ -219,7 +237,10 @@ fun PlayerScreen(
             }
         })
         onDispose {
-            vm.saveResumeTime(exoPlayer.currentPosition)
+            // 播放到结尾时不把 duration 当断点存下来，否则下次进入直接停在片尾
+            val pos = exoPlayer.currentPosition
+            val duration = exoPlayer.duration
+            if (duration <= 0L || pos < duration - 3000L) vm.saveResumeTime(pos)
             exoPlayer.stop()
             exoPlayer.release()
         }

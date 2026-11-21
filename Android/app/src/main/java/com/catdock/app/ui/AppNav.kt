@@ -65,11 +65,15 @@ fun AppNav(session: Session, repository: AppRepository, sessionStore: SessionSto
         nav.navigate(target) { popUpTo(0) { inclusive = true } }
     }
 
+    // 回调可能在切号后才到达（旧账号在途请求返回 403）：只有当前激活账号仍是
+    // 发起请求的账号时才登出，避免清掉新账号令牌
+    val callbackAccountKey = session.accountKey
     val onAuthExpired: (String) -> Unit = { _ ->
-        // 403 后清掉本账号的失效令牌（保留账号条目与加密凭据，账号列表里可直接重登）
-        val accountKey = session.accountKey
         scope.launch {
-            sessionStore.invalidate(accountKey)
+            val currentKey = sessionStore.current().accountKey
+            if (currentKey != callbackAccountKey) return@launch
+            // 403 后清掉本账号的失效令牌（保留账号条目与加密凭据，账号列表里可直接重登）
+            sessionStore.invalidate(currentKey)
             backToAccountList()
         }
     }

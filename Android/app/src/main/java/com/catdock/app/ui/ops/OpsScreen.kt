@@ -599,7 +599,8 @@ private fun LogsSection(model: OpsModel, context: Context) {
                 label = "开始日期",
                 modifier = Modifier.weight(1f),
                 helper = "yyyy-MM-dd",
-                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                // 日期含 '-'，数字键盘多数输入法打不出来，用默认文本键盘
+                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Text),
             )
             CatField(
                 value = end,
@@ -607,7 +608,7 @@ private fun LogsSection(model: OpsModel, context: Context) {
                 label = "结束日期",
                 modifier = Modifier.weight(1f),
                 helper = "yyyy-MM-dd",
-                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Text),
             )
         }
         localErr?.let { Text(it, fontSize = 12.sp, color = p.red) }

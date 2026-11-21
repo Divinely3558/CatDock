@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  明文流量策略集中在此声明。服务器地址由用户在登录页自行填写（多为局域网
+  http://192.168.x.x:port），Android 的 domain-config 只支持固定域名/IP 字面量，
+  无法对运行期输入的主机做白名单，因此这里必须允许明文；若将来改为只支持
+  https 或固定主机，把 base-config 的 cleartextTrafficPermitted 改为 false，
+  再按主机添加 domain-config 即可，无需改动其他代码。
+-->
+<network-security-config>
+    <base-config cleartextTrafficPermitted="true">
+        <trust-anchors>
+            <certificates src="system" />
+        </trust-anchors>
+    </base-config>
+</network-security-config>

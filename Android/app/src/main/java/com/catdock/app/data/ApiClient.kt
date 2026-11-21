@@ -1,6 +1,7 @@
 package com.catdock.app.data
 
 import android.util.Log
+import com.catdock.app.BuildConfig
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -150,12 +151,21 @@ class ApiClient(private val sessionStore: SessionStore) {
                 }
             })
             // 请求/响应全量日志（tag=CatdockNet），便于 adb logcat 诊断。
-            // 凭证一律脱敏：logcat 可读，POST /login 的 body 里有 AUTH_KEY 与密码
+            // 凭证一律脱敏：logcat 可读，POST /login 的 body 里有 AUTH_KEY 与密码；
+            // X-New-Token 响应头携带新令牌，同样必须遮蔽。
             .addInterceptor(
                 HttpLoggingInterceptor { msg ->
-                    Log.d("CatdockNet", msg.replace(Regex("Bearer [^\\s\"}]+"), "Bearer ***")
-                        .replace(credJson, "$1\"***\""))
-                }.apply { level = HttpLoggingInterceptor.Level.BODY },
+                    Log.d(
+                        "CatdockNet",
+                        msg.replace(Regex("Bearer [^\\s\"}]+"), "Bearer ***")
+                            .replace(Regex("(X-New-Token:\\s*)\\S+", RegexOption.IGNORE_CASE), "$1***")
+                            .replace(credJson, "$1\"***\""),
+                    )
+                }.apply {
+                    // release 只记 BASIC（不打印请求/响应体），避免内容进 logcat
+                    level = if (BuildConfig.DEBUG) HttpLoggingInterceptor.Level.BODY
+                    else HttpLoggingInterceptor.Level.BASIC
+                },
             )
 
         if (trustAllCerts && baseUrl.startsWith("https")) {
