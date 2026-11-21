@@ -783,16 +783,45 @@ def match_base_name(name, base):
     return False
 
 
+# 主流 Linux 文件系统（ext4/xfs/btrfs 等）单目录项名字上限为 255 字节。
+# 暂存区半成品会在任务名后追加 '.webm.part'（最长 10 字节），超限会抛
+# ENAMETOOLONG 导致任务失败，因此任务名统一预留后缀空间后按字节截断。
+_NAME_MAX_BYTES = 255
+_NAME_SUFFIX_RESERVE = 10
+_MAX_BASE_NAME_BYTES = _NAME_MAX_BYTES - _NAME_SUFFIX_RESERVE
+
+
+def _truncate_utf8(name, max_bytes):
+    """按 UTF-8 字节数截断字符串，不切断多字节字符。"""
+    if len(name.encode('utf-8')) <= max_bytes:
+        return name
+    out = []
+    used = 0
+    for ch in name:
+        ch_bytes = len(ch.encode('utf-8'))
+        if used + ch_bytes > max_bytes:
+            break
+        out.append(ch)
+        used += ch_bytes
+    return ''.join(out)
+
+
 def sanitize_base_name(name, fallback=''):
-    """任务名兜底净化：去首尾空白与半角点。
+    """任务名兜底净化：去首尾空白与半角点，并按文件系统字节上限缩短。
 
     站点标题自带全角句号'。'且插件追加的扩展名被用户过滤词删除后，
     任务名会残留尾点（如 'X。.'）；N_m3u8DL-RE 保存时会剥掉尾点，
     产物与任务名错位导致误判失败。提交入口统一剥点，保证命名一致。
+    任务名同时也是暂存目录名和半成品文件名前缀，超过文件系统单目录项
+    上限（255 字节）会让任务直接失败；这里统一按 _MAX_BASE_NAME_BYTES
+    截断，避免超长标题下载失败。
     净化后为空（仅由点/空白组成或被过滤词删空）时回退到 fallback，
     避免产出 '<dir>/.mp4' 隐藏路径及 match_base_name 空前缀误匹配。
     """
-    return (name or '').strip().strip('.') or fallback
+    name = (name or '').strip().strip('.')
+    # 截断后可能重新露出尾点/空白，再剥一次保证命名一致
+    name = _truncate_utf8(name, _MAX_BASE_NAME_BYTES).strip().strip('.')
+    return name or fallback
 
 
 def find_existing_output_file(base_name):
