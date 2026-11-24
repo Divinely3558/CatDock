@@ -7,6 +7,7 @@ import android.content.ContextWrapper
 import android.content.pm.ActivityInfo
 import android.media.AudioManager
 import android.os.Build
+import android.os.SystemClock
 import android.provider.Settings
 import android.util.Rational
 import android.view.WindowManager
@@ -96,6 +97,7 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -410,6 +412,9 @@ fun PlayerScreen(
                 .pointerInput(fullscreen) {
                     coroutineScope {
                         val gestureScope = this
+                        // 双击判定：记录上次轻点时间；单击的显隐延后到双击超时后执行
+                        var lastTapTime = 0L
+                        var singleTapJob: Job? = null
                         awaitEachGesture {
                             val down = awaitFirstDown(requireUnconsumed = false)
                             val isLeft = down.position.x < size.width / 2f
@@ -509,12 +514,27 @@ fun PlayerScreen(
                                 showHud("已跳转 ${formatPlayerTime(seekTargetMs)}")
                                 controlsNonce++
                             } else if (!sliding) {
-                                if (menuNow) {
-                                    speedMenuVisible = false
+                                val now = SystemClock.uptimeMillis()
+                                if (lastTapTime != 0L &&
+                                    now - lastTapTime <= viewConfiguration.doubleTapTimeoutMillis
+                                ) {
+                                    // 双击：暂停 / 继续播放，并撤销待执行的单击
+                                    singleTapJob?.cancel()
+                                    singleTapJob = null
+                                    lastTapTime = 0L
+                                    if (playingNow) exoPlayer.pause() else exoPlayer.play()
                                 } else {
-                                    controlsVisible = !controlsVisible
+                                    lastTapTime = now
+                                    singleTapJob = gestureScope.launch {
+                                        delay(viewConfiguration.doubleTapTimeoutMillis.toLong())
+                                        if (menuNow) {
+                                            speedMenuVisible = false
+                                        } else {
+                                            controlsVisible = !controlsVisible
+                                        }
+                                        controlsNonce++
+                                    }
                                 }
-                                controlsNonce++
                             }
                         }
                     }

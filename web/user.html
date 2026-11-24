@@ -197,6 +197,12 @@
         position: relative;
         margin-bottom: 16px;
       }
+      /* 展开时提升所属卡片层级。卡片悬浮 transform 会创建层叠上下文，
+         仅提高面板 z-index 仍可能被后方的服务信息卡盖住 */
+      .card:has(> form#dlForm):has(.adv.open) {
+        position: relative;
+        z-index: 1;
+      }
       .adv-trigger {
         width: 100%;
         display: flex;
@@ -1996,7 +2002,7 @@
     <div class="mask" id="playerMask">
       <div class="modal player-modal">
         <button type="button" class="modal-close" id="playerClose" title="关闭" aria-label="关闭">
-          <svg aria-hidden="true" viewBox="0 0 1024 1024"><use href="#ic-modal-close"></use></svg>
+          <svg aria-hidden="true" viewBox="0 0 1024 1024" width="20" height="20" fill="currentColor"><use href="#ic-modal-close"></use></svg>
         </button>
         <h3 id="playerTitle">边下边看预览</h3>
         <div class="custom-player" id="customPlayer">
@@ -2097,7 +2103,7 @@
     <div class="mask" id="mask">
       <div class="modal">
         <button type="button" class="modal-close" id="modalCancel" title="取消" aria-label="取消">
-          <svg aria-hidden="true" viewBox="0 0 1024 1024"><use href="#ic-modal-close"></use></svg>
+          <svg aria-hidden="true" viewBox="0 0 1024 1024" width="20" height="20" fill="currentColor"><use href="#ic-modal-close"></use></svg>
         </button>
         <h3 id="modalTitle"></h3>
         <div class="msg" id="modalMsg"></div>
@@ -2118,7 +2124,7 @@
       >
         <h3>我的过滤规则</h3>
         <button type="button" class="modal-close" id="filterCancel" title="取消" aria-label="取消">
-          <svg aria-hidden="true" viewBox="0 0 1024 1024"><use href="#ic-modal-close"></use></svg>
+          <svg aria-hidden="true" viewBox="0 0 1024 1024" width="20" height="20" fill="currentColor"><use href="#ic-modal-close"></use></svg>
         </button>
         <div class="msg">仅对自己的下载任务生效</div>
         <div class="filter-editor">
@@ -2194,7 +2200,7 @@
       >
         <h3 id="filterMoreTitle">更多关键字</h3>
         <button type="button" class="modal-close" id="filterMoreClose" title="关闭" aria-label="关闭">
-          <svg aria-hidden="true" viewBox="0 0 1024 1024"><use href="#ic-modal-close"></use></svg>
+          <svg aria-hidden="true" viewBox="0 0 1024 1024" width="20" height="20" fill="currentColor"><use href="#ic-modal-close"></use></svg>
         </button>
         <div class="msg" id="filterMoreSub"></div>
         <div class="filter-editor">
@@ -2210,7 +2216,7 @@
     <div class="mask" id="chatMask">
       <div class="modal" style="max-width: 560px">
         <button type="button" class="modal-close" id="chatCancel" title="取消" aria-label="取消">
-          <svg aria-hidden="true" viewBox="0 0 1024 1024"><use href="#ic-modal-close"></use></svg>
+          <svg aria-hidden="true" viewBox="0 0 1024 1024" width="20" height="20" fill="currentColor"><use href="#ic-modal-close"></use></svg>
         </button>
         <h3>聊天室</h3>
         <div class="chat-box" id="chatBox"></div>
