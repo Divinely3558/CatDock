@@ -1,13 +1,17 @@
 package com.catdock.app.ui.player
 
 import android.app.Activity
+import android.app.PictureInPictureParams
 import android.content.Context
 import android.content.ContextWrapper
 import android.content.pm.ActivityInfo
 import android.media.AudioManager
+import android.os.Build
 import android.provider.Settings
+import android.util.Rational
 import android.view.WindowManager
 import androidx.activity.compose.BackHandler
+import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.awaitEachGesture
@@ -47,8 +51,12 @@ import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.geometry.CornerRadius
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
@@ -73,6 +81,7 @@ import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.exoplayer.hls.HlsMediaSource
 import androidx.media3.ui.AspectRatioFrameLayout
 import androidx.media3.ui.PlayerView
+import com.catdock.app.PipState
 import com.catdock.app.data.AppRepository
 import com.catdock.app.data.AuthExpiredException
 import com.catdock.app.data.Session
@@ -175,6 +184,9 @@ fun PlayerScreen(
     var hudNonce by remember { mutableStateOf(0) }
     // 提示落位：0 顶部居中，1 左边缘（亮度），2 右边缘（音量）
     var hudSide by remember { mutableStateOf(0) }
+    // 画中画（悬浮窗）播放：进入后隐藏自绘控制层，只留视频画面
+    val inPip by PipState.inPip.collectAsState()
+    val pipSupported = Build.VERSION.SDK_INT >= Build.VERSION_CODES.O
     // 手势协程不随重组重建，用 updatedState 读取最新值，避免闭包拿到旧状态
     val playingNow by rememberUpdatedState(playing)
     val speedNow by rememberUpdatedState(playbackSpeed)
@@ -184,6 +196,19 @@ fun PlayerScreen(
         hud = text
         hudSide = side
         hudNonce++
+    }
+
+    // 进入画中画悬浮窗（Android 8.0+）
+    fun enterPip() {
+        val act = activity ?: return
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) return
+        runCatching {
+            act.enterPictureInPictureMode(
+                PictureInPictureParams.Builder()
+                    .setAspectRatio(Rational(16, 9))
+                    .build(),
+            )
+        }
     }
 
     val exoPlayer = remember(session.accountKey, taskId) {
@@ -197,10 +222,20 @@ fun PlayerScreen(
     val lifecycleOwner = LocalLifecycleOwner.current
     DisposableEffect(lifecycleOwner, exoPlayer) {
         val observer = LifecycleEventObserver { _, event ->
-            if (event == Lifecycle.Event.ON_STOP) exoPlayer.pause()
+            if (event == Lifecycle.Event.ON_STOP && !inPip) exoPlayer.pause()
         }
         lifecycleOwner.lifecycle.addObserver(observer)
         onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
+    }
+
+    // 画中画状态变化：收起控制层与提示，并确保小窗里继续播放
+    LaunchedEffect(inPip) {
+        if (inPip) {
+            controlsVisible = false
+            speedMenuVisible = false
+            hud = null
+            exoPlayer.play()
+        }
     }
 
     val httpFactory = remember(session.accountKey) {
@@ -486,7 +521,7 @@ fun PlayerScreen(
                 },
         )
 
-        if (buffering && message == null) {
+        if (buffering && message == null && !inPip) {
             CircularProgressIndicator(
                 modifier = Modifier.align(Alignment.Center).size(40.dp),
                 color = p.primary,
@@ -494,7 +529,7 @@ fun PlayerScreen(
             )
         }
 
-        if (controlsVisible) {
+        if (controlsVisible && !inPip) {
             // 顶栏：无底板，黑色渐变遮罩 + 悬浮图标，尽量少压画面
             Column(
                 Modifier
@@ -532,6 +567,17 @@ fun PlayerScreen(
                                 fontSize = 10.sp,
                                 color = Color.White.copy(alpha = 0.65f),
                             )
+                        }
+                    }
+                    // 右上角：悬浮窗（画中画）播放
+                    if (pipSupported) {
+                        Box(
+                            Modifier
+                                .size(44.dp)
+                                .clickable { enterPip() },
+                            contentAlignment = Alignment.Center,
+                        ) {
+                            PipGlyph()
                         }
                     }
                 }
@@ -668,7 +714,7 @@ fun PlayerScreen(
         }
 
         // 长按 3x：右上角小徽标，不占画面中心
-        if (boosting) {
+        if (boosting && !inPip) {
             Box(
                 Modifier
                     .align(Alignment.TopEnd)
@@ -682,7 +728,7 @@ fun PlayerScreen(
         }
 
         // 操作反馈：顶部居中；亮度贴左边缘、音量贴右边缘
-        hud?.let { text ->
+        hud?.takeIf { !inPip }?.let { text ->
             val hudAlign = when (hudSide) {
                 1 -> Alignment.CenterStart
                 2 -> Alignment.CenterEnd
@@ -728,6 +774,30 @@ private fun formatSpeed(speed: Float): String = when (speed) {
     1.75f -> "1.75x"
     2.0f -> "2.0x"
     else -> "1.0x"
+}
+
+/** 画中画图标：外框 + 右下小窗，避免引入 material-icons-extended */
+@Composable
+private fun PipGlyph() {
+    Canvas(Modifier.size(20.dp)) {
+        val stroke = 1.4.dp.toPx()
+        drawRoundRect(
+            color = Color.White,
+            topLeft = Offset(stroke / 2f, stroke / 2f),
+            size = Size(size.width - stroke, size.height - stroke),
+            cornerRadius = CornerRadius(2.5.dp.toPx()),
+            style = Stroke(stroke),
+        )
+        val smallW = size.width * 0.42f
+        val smallH = size.height * 0.32f
+        drawRoundRect(
+            color = Color.White,
+            topLeft = Offset(size.width - smallW - 2.dp.toPx(), size.height - smallH - 2.dp.toPx()),
+            size = Size(smallW, smallH),
+            cornerRadius = CornerRadius(1.2.dp.toPx()),
+            style = Stroke(stroke),
+        )
+    }
 }
 
 /** 44dp 图标热区按钮（播放页悬浮控制层用） */

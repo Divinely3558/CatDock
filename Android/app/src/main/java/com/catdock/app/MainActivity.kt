@@ -3,6 +3,7 @@ package com.catdock.app
 import android.content.ClipData
 import android.content.ClipboardManager
 import android.content.Context
+import android.content.res.Configuration
 import android.os.Bundle
 import android.widget.Toast
 import androidx.activity.ComponentActivity
@@ -37,8 +38,22 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.catdock.app.data.Session
 import com.catdock.app.ui.AppNav
 import com.catdock.app.ui.theme.CatdockTheme
+import kotlinx.coroutines.flow.MutableStateFlow
+
+/** 画中画状态：Activity 回调写入，播放页订阅后隐藏控制层 */
+object PipState {
+    val inPip = MutableStateFlow(false)
+}
 
 class MainActivity : ComponentActivity() {
+    override fun onPictureInPictureModeChanged(
+        isInPictureInPictureMode: Boolean,
+        newConfig: Configuration,
+    ) {
+        super.onPictureInPictureModeChanged(isInPictureInPictureMode, newConfig)
+        PipState.inPip.value = isInPictureInPictureMode
+    }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()

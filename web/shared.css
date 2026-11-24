@@ -1220,6 +1220,59 @@ select {
   display: flex;
 }
 
+/* 弹窗取消/关闭统一为右上角叉号；原底部空间由剩余操作重新排布 */
+.mask .modal {
+  position: relative;
+}
+.mask .modal > h3,
+.mask .modal > .modal-head {
+  padding-right: 40px;
+}
+.modal-close {
+  position: absolute;
+  top: 12px;
+  right: 12px;
+  z-index: 2;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  padding: 6px;
+  border: 0;
+  border-radius: 50%;
+  background: transparent;
+  color: var(--text-3);
+  cursor: pointer;
+  -webkit-appearance: none;
+  appearance: none;
+  transition:
+    color 0.15s,
+    background 0.15s;
+}
+.modal-close svg {
+  width: 20px;
+  height: 20px;
+  display: block;
+  flex-shrink: 0;
+}
+.modal-close:hover {
+  color: var(--red);
+  background: var(--red-soft);
+}
+.modal-close:focus-visible {
+  outline: 2px solid var(--primary);
+  outline-offset: 2px;
+}
+
+/* 聊天室发送按钮占据工具行右侧；窄屏空间不足时允许自然换行 */
+.chat-tools {
+  flex-wrap: wrap;
+}
+.chat-tools #chatSend {
+  margin-left: auto;
+}
+
 /* Toast：顶部居中 + 半透明毛玻璃，5 秒自消（JS 计时），不占布局；
    pixel/retro 主题在各自装饰段覆盖回不透明实底（硬边风格不用毛玻璃） */
 .toast {
@@ -1392,7 +1445,7 @@ select {
   margin-top: 8px;
 }
 
-/* 保存 / 取消并排：各占一半，取消在右（相邻按钮固定 8px 间隙） */
+/* 取消移至右上角后，保存按钮独占整行 */
 .filter-actions {
   display: flex;
   gap: 8px;

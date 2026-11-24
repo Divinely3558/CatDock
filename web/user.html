@@ -719,7 +719,7 @@
         margin-bottom: 8px;
       }
       .chat-input-row {
-        margin-bottom: 16px;
+        margin-bottom: 0;
       }
 
       /* ---- 像素风：方角 + 粗描边 + 像素阴影 ---- */
@@ -1743,6 +1743,9 @@
       <symbol id="ic-player-exit-fullscreen" viewBox="0 0 24 24">
         <path d="M3 8h5V3m13 5h-5V3M3 16h5v5m13-5h-5v5" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" />
       </symbol>
+      <symbol id="ic-modal-close" viewBox="0 0 1024 1024">
+        <path fill="currentColor" d="M512 32C251.4285715625 32 32 251.4285715625 32 512s219.4285715625 480 480 480 480-219.4285715625 480-480-219.4285715625-480-480-480z m205.7142853125 617.142856875c20.5714284375 20.5714284375 20.5714284375 48 0 61.714286249999994-20.5714284375 20.5714284375-48 20.5714284375-61.714285312499996 0l-137.142856875-137.1428578125L374.857143125 717.7142853125c-20.5714284375 20.5714284375-48 20.5714284375-68.5714284375 0s-20.5714284375-54.857143125 0-68.5714284375l144-144-137.1428578125-137.142856875c-20.5714284375-13.714285312500001-20.5714284375-41.142856875 0-61.714285312499996 20.5714284375-20.5714284375 48-20.5714284375 61.714286249999994 0l137.142856875 137.142856875 144-144c20.5714284375-20.5714284375 48-20.5714284375 68.5714284375 0 20.5714284375 20.5714284375 20.5714284375 48 0 68.5714284375L580.5714284375 512l137.142856875 137.142856875z"/>
+      </symbol>
       <symbol id="ic-check" viewBox="0 0 1024 1024">
         <path fill="currentColor" d="M997.888 70.144C686.592 261.12 460.8 502.272 358.912 623.104l-248.832-195.072-110.08 88.576 429.568 437.248c73.728-189.44 308.224-559.616 594.432-822.784l-26.112-60.928z"/>
       </symbol>
@@ -1992,6 +1995,9 @@
     <!-- ================= m3u8 边下边看预览弹窗（自定义播放器，不使用浏览器原生控制条） ================= -->
     <div class="mask" id="playerMask">
       <div class="modal player-modal">
+        <button type="button" class="modal-close" id="playerClose" title="关闭" aria-label="关闭">
+          <svg aria-hidden="true" viewBox="0 0 1024 1024"><use href="#ic-modal-close"></use></svg>
+        </button>
         <h3 id="playerTitle">边下边看预览</h3>
         <div class="custom-player" id="customPlayer">
           <video id="previewVideo" autoplay playsinline></video>
@@ -2084,20 +2090,19 @@
             </button>
           </div>
         </div>
-        <div class="btns">
-          <button class="btn btn-ghost" id="playerClose">关闭</button>
-        </div>
       </div>
     </div>
 
     <!-- 通用弹层（表单/确认，结构与逻辑与管理端 admin.html 完全一致） -->
     <div class="mask" id="mask">
       <div class="modal">
+        <button type="button" class="modal-close" id="modalCancel" title="取消" aria-label="取消">
+          <svg aria-hidden="true" viewBox="0 0 1024 1024"><use href="#ic-modal-close"></use></svg>
+        </button>
         <h3 id="modalTitle"></h3>
         <div class="msg" id="modalMsg"></div>
         <div id="modalForm" style="margin-bottom: 16px"></div>
         <div class="btns">
-          <button class="btn btn-ghost" id="modalCancel">取消</button>
           <button class="btn btn-primary" id="modalOk">确定</button>
         </div>
       </div>
@@ -2112,6 +2117,9 @@
         style="max-width: 560px; max-height: 85vh; overflow-y: auto"
       >
         <h3>我的过滤规则</h3>
+        <button type="button" class="modal-close" id="filterCancel" title="取消" aria-label="取消">
+          <svg aria-hidden="true" viewBox="0 0 1024 1024"><use href="#ic-modal-close"></use></svg>
+        </button>
         <div class="msg">仅对自己的下载任务生效</div>
         <div class="filter-editor">
           <div class="fe-section">
@@ -2172,9 +2180,6 @@
             <button class="btn btn-primary" id="filterSave">
               保存过滤规则
             </button>
-            <button type="button" class="btn btn-ghost" id="filterCancel">
-              取消
-            </button>
           </div>
           <div class="alert" id="filterAlert"></div>
         </div>
@@ -2188,16 +2193,14 @@
         style="max-width: 480px; max-height: 80vh; overflow-y: auto"
       >
         <h3 id="filterMoreTitle">更多关键字</h3>
+        <button type="button" class="modal-close" id="filterMoreClose" title="关闭" aria-label="关闭">
+          <svg aria-hidden="true" viewBox="0 0 1024 1024"><use href="#ic-modal-close"></use></svg>
+        </button>
         <div class="msg" id="filterMoreSub"></div>
         <div class="filter-editor">
           <div class="fe-section">
             <div class="chips" id="filterMoreChips"></div>
             <div id="filterMoreRules"></div>
-          </div>
-          <div class="filter-actions">
-            <button type="button" class="btn btn-ghost" id="filterMoreClose">
-              关闭
-            </button>
           </div>
         </div>
       </div>
@@ -2206,6 +2209,9 @@
     <!-- ================= 状态灯彩蛋：聊天室弹窗（结构与管理控制台一致） ================= -->
     <div class="mask" id="chatMask">
       <div class="modal" style="max-width: 560px">
+        <button type="button" class="modal-close" id="chatCancel" title="取消" aria-label="取消">
+          <svg aria-hidden="true" viewBox="0 0 1024 1024"><use href="#ic-modal-close"></use></svg>
+        </button>
         <h3>聊天室</h3>
         <div class="chat-box" id="chatBox"></div>
         <div class="chat-tools">
@@ -2215,6 +2221,7 @@
           <button type="button" class="btn btn-ghost" id="chatExport">
             导出聊天记录
           </button>
+          <button class="btn btn-primary" id="chatSend">发送</button>
         </div>
         <div class="chat-input-row">
           <input
@@ -2224,10 +2231,6 @@
             autocomplete="off"
             maxlength="500"
           />
-        </div>
-        <div class="btns">
-          <button class="btn btn-primary" id="chatSend">发送</button>
-          <button class="btn btn-ghost" id="chatCancel">取消</button>
         </div>
       </div>
     </div>
