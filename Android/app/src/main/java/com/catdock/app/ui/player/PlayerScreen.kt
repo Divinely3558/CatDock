@@ -25,6 +25,7 @@ import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
@@ -77,9 +78,7 @@ import com.catdock.app.data.AuthExpiredException
 import com.catdock.app.data.Session
 import com.catdock.app.data.Task
 import com.catdock.app.ui.ScreenModel
-import com.catdock.app.ui.components.bentoSurface
 import com.catdock.app.ui.components.catNumeric
-import com.catdock.app.ui.components.glassHalo
 import com.catdock.app.ui.rememberScreenModel
 import com.catdock.app.ui.theme.LocalPalette
 import com.catdock.app.ui.theme.LocalSpec
@@ -168,19 +167,22 @@ fun PlayerScreen(
     var durMs by remember { mutableStateOf(0L) }
     var controlsVisible by remember { mutableStateOf(true) }
     var controlsNonce by remember { mutableStateOf(0) }
-    // 倍速 / 长按快进 / 手势 HUD：speed 为用户选择值，boosting 为长按临时 2x 状态
+    // 倍速 / 长按快进 / 手势 HUD：speed 为用户选择值，boosting 为长按临时 3x 状态
     var playbackSpeed by remember { mutableStateOf(1.0f) }
     var speedMenuVisible by remember { mutableStateOf(false) }
     var boosting by remember { mutableStateOf(false) }
     var hud by remember { mutableStateOf<String?>(null) }
     var hudNonce by remember { mutableStateOf(0) }
+    // 提示落位：0 顶部居中，1 左边缘（亮度），2 右边缘（音量）
+    var hudSide by remember { mutableStateOf(0) }
     // 手势协程不随重组重建，用 updatedState 读取最新值，避免闭包拿到旧状态
     val playingNow by rememberUpdatedState(playing)
     val speedNow by rememberUpdatedState(playbackSpeed)
     val menuNow by rememberUpdatedState(speedMenuVisible)
 
-    fun showHud(text: String) {
+    fun showHud(text: String, side: Int = 0) {
         hud = text
+        hudSide = side
         hudNonce++
     }
 
@@ -256,9 +258,9 @@ fun PlayerScreen(
         }
     }
 
-    // 倍速：长按临时 2x，松开恢复用户选择值
+    // 倍速：长按临时 3x，松开恢复用户选择值
     LaunchedEffect(exoPlayer, playbackSpeed, boosting) {
-        exoPlayer.setPlaybackSpeed(if (boosting) 2.0f else playbackSpeed)
+        exoPlayer.setPlaybackSpeed(if (boosting) 3.0f else playbackSpeed)
     }
 
     // 手势 HUD 短暂展示后自动消失（长按快进状态另有常驻提示）
@@ -365,7 +367,7 @@ fun PlayerScreen(
             )
         }
 
-        // 整屏手势热区：点按显隐控制层，长按 2x 快进，
+        // 整屏手势热区：点按显隐控制层，长按 3x 快进，
         // 左半屏上下滑调亮度、右半屏上下滑调音量（上滑增大）
         Box(
             Modifier
@@ -384,7 +386,7 @@ fun PlayerScreen(
                             var seekStartMs = 0L
                             var seekTargetMs = 0L
                             var seekSpanMs = 0L
-                            // 按住 350ms 未滑动 → 临时 2x；一旦滑动或抬手立即取消计时
+                            // 按住 350ms 未滑动 → 临时 3x；一旦滑动或抬手立即取消计时
                             val boostTimer = gestureScope.launch {
                                 delay(350)
                                 if (!sliding && !horizontal && playingNow) {
@@ -432,7 +434,7 @@ fun PlayerScreen(
                                         seekTargetMs = (seekStartMs + deltaMs.toLong()).coerceIn(0L, durMs)
                                         val diff = seekTargetMs - seekStartMs
                                         val sign = if (diff >= 0) "+" else "-"
-                                        showHud("目标 ${formatPlayerTime(seekTargetMs)}（$sign${formatPlayerTime(abs(diff))}）")
+                                        showHud("${formatPlayerTime(seekTargetMs)}  $sign${formatPlayerTime(abs(diff))}")
                                         change.consume()
                                     } else if (sliding) {
                                         slideValue = (slideValue - dy / size.height).coerceIn(0f, 1f)
@@ -442,7 +444,7 @@ fun PlayerScreen(
                                                 lp.screenBrightness = slideValue.coerceAtLeast(0.02f)
                                                 win.attributes = lp
                                             }
-                                            showHud("亮度 ${(slideValue * 100).roundToInt()}%")
+                                            showHud("${(slideValue * 100).roundToInt()}%", side = 1)
                                         } else {
                                             val max = audioManager.getStreamMaxVolume(AudioManager.STREAM_MUSIC)
                                             runCatching {
@@ -452,7 +454,7 @@ fun PlayerScreen(
                                                     0,
                                                 )
                                             }
-                                            showHud("音量 ${(slideValue * 100).roundToInt()}%")
+                                            showHud("${(slideValue * 100).roundToInt()}%", side = 2)
                                         }
                                         change.consume()
                                     } else if (boostingHere) {
@@ -493,159 +495,228 @@ fun PlayerScreen(
         }
 
         if (controlsVisible) {
-            // 上控制条：返回 + 标题/下载进度 + 全屏开关
-            Row(
+            // 顶栏：无底板，黑色渐变遮罩 + 悬浮图标，尽量少压画面
+            Column(
                 Modifier
                     .align(Alignment.TopCenter)
                     .fillMaxWidth()
+                    .background(
+                        Brush.verticalGradient(
+                            0f to Color.Black.copy(alpha = 0.62f),
+                            1f to Color.Transparent,
+                        ),
+                    )
                     .statusBarsPadding()
-                    .padding(horizontal = spec.screenPadding.dp, vertical = 10.dp)
-                    .bentoSurface(shape = catControlShape(), strong = true)
-                    .padding(horizontal = 6.dp, vertical = 4.dp),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(4.dp),
+                    .padding(horizontal = spec.screenPadding.dp, vertical = 8.dp),
             ) {
-                ControlIcon(Icons.AutoMirrored.Filled.ArrowBack, "返回") {
-                    if (fullscreen) fullscreen = false else onBack()
-                }
-                Column(Modifier.weight(1f).padding(start = 4.dp)) {
-                    Text(
-                        task?.saveName ?: taskId,
-                        fontSize = 14.sp,
-                        fontWeight = FontWeight.SemiBold,
-                        color = p.text,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis,
-                    )
-                    task?.let { Text("下载进度 ${it.progress.toInt()}%", fontSize = 11.sp, color = p.text3) }
-                }
-                // 倍速入口：点按展开 1.0x / 1.25x / 1.5x / 2.0x
-                Box(
-                    Modifier
-                        .size(44.dp)
-                        .clickable {
-                            speedMenuVisible = !speedMenuVisible
-                            controlsNonce++
-                        },
-                    contentAlignment = Alignment.Center,
+                Row(
+                    Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(2.dp),
                 ) {
-                    Text(
-                        formatSpeed(playbackSpeed),
-                        fontSize = 12.sp,
-                        fontWeight = FontWeight.SemiBold,
-                        color = p.text,
-                    )
-                }
-                ControlIcon(
-                    if (fullscreen) Icons.Filled.FullscreenExit else Icons.Filled.Fullscreen,
-                    if (fullscreen) "退出全屏" else "全屏",
-                ) {
-                    fullscreen = !fullscreen
-                    controlsNonce++
+                    ControlIcon(Icons.AutoMirrored.Filled.ArrowBack, "返回", tint = Color.White) {
+                        if (fullscreen) fullscreen = false else onBack()
+                    }
+                    Column(Modifier.weight(1f).padding(start = 2.dp)) {
+                        Text(
+                            task?.saveName ?: taskId,
+                            fontSize = 13.sp,
+                            fontWeight = FontWeight.SemiBold,
+                            color = Color.White,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                        )
+                        task?.let {
+                            Text(
+                                "下载进度 ${it.progress.toInt()}%",
+                                fontSize = 10.sp,
+                                color = Color.White.copy(alpha = 0.65f),
+                            )
+                        }
+                    }
                 }
             }
 
-            // 倍速选项：展开在顶栏下方，选中项高亮
+            // 倍速选项：从底部升起竖排列表，选中项带勾
             if (speedMenuVisible) {
-                Row(
+                Column(
                     Modifier
-                        .align(Alignment.TopCenter)
-                        .statusBarsPadding()
-                        .padding(top = 84.dp)
-                        .bentoSurface(shape = catControlShape(), strong = true)
-                        .padding(horizontal = 8.dp, vertical = 6.dp),
-                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                        .align(Alignment.BottomEnd)
+                        .navigationBarsPadding()
+                        .padding(end = spec.screenPadding.dp, bottom = 92.dp)
+                        .background(Color.Black.copy(alpha = 0.72f), catControlShape())
+                        .padding(vertical = 6.dp, horizontal = 4.dp),
                 ) {
                     PLAYBACK_SPEEDS.forEach { option ->
                         val selected = abs(playbackSpeed - option) < 0.001f
-                        Text(
-                            formatSpeed(option),
-                            fontSize = 13.sp,
-                            fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Normal,
-                            color = if (selected) p.text else p.text2,
-                            modifier = Modifier
-                                .bentoSurface(shape = catControlShape(), emphasis = selected)
+                        Row(
+                            Modifier
+                                .width(108.dp)
                                 .clickable {
                                     playbackSpeed = option
                                     speedMenuVisible = false
                                     controlsNonce++
                                     showHud("倍速 ${formatSpeed(option)}")
                                 }
-                                .padding(horizontal = 14.dp, vertical = 8.dp),
-                        )
+                                .padding(horizontal = 10.dp, vertical = 9.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            Text(
+                                if (selected) "✓" else "",
+                                color = Color.White,
+                                fontSize = 13.sp,
+                                modifier = Modifier.width(20.dp),
+                            )
+                            Text(
+                                formatSpeed(option),
+                                fontSize = 14.sp,
+                                fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Normal,
+                                color = if (selected) Color.White else Color.White.copy(alpha = 0.7f),
+                            )
+                        }
                     }
                 }
             }
 
-            // 下控制条：56dp 渐变播放钮 + 44dp 触控进度条 + 时间
-            Row(
+            // 底栏：无底板，黑色渐变 + 44dp 播放键 + 细进度条 + 时间
+            Column(
                 Modifier
                     .align(Alignment.BottomCenter)
                     .fillMaxWidth()
+                    .background(
+                        Brush.verticalGradient(
+                            0f to Color.Transparent,
+                            1f to Color.Black.copy(alpha = 0.7f),
+                        ),
+                    )
                     .navigationBarsPadding()
-                    .padding(horizontal = spec.screenPadding.dp, vertical = 10.dp)
-                    .bentoSurface(shape = catControlShape(), strong = true)
-                    .padding(horizontal = 12.dp, vertical = 10.dp),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(12.dp),
+                    .padding(horizontal = spec.screenPadding.dp, vertical = 8.dp),
             ) {
-                // 56dp 极光渐变圆形播放钮 + 光晕（aurora CTA 规范）
-                Box(
-                    Modifier
-                        .size(56.dp)
-                        .glassHalo(spec.glowRadius.dp, p.glow, CircleShape)
-                        .background(Brush.linearGradient(p.primaryGradient), CircleShape)
-                        .clickable {
-                            if (playing) exoPlayer.pause() else exoPlayer.play()
-                            controlsNonce++
-                        },
-                    contentAlignment = Alignment.Center,
+                Row(
+                    Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(10.dp),
                 ) {
-                    Icon(
-                        if (playing) Icons.Filled.Pause else Icons.Filled.PlayArrow,
-                        contentDescription = if (playing) "暂停" else "播放",
+                    Box(
+                        Modifier
+                            .size(44.dp)
+                            .background(Brush.linearGradient(p.primaryGradient), CircleShape)
+                            .clickable {
+                                if (playing) exoPlayer.pause() else exoPlayer.play()
+                                controlsNonce++
+                            },
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        Icon(
+                            if (playing) Icons.Filled.Pause else Icons.Filled.PlayArrow,
+                            contentDescription = if (playing) "暂停" else "播放",
+                            tint = Color.White,
+                            modifier = Modifier.size(22.dp),
+                        )
+                    }
+                    Column(Modifier.weight(1f)) {
+                        PlayerSeekBar(
+                            fraction = if (durMs > 0) (posMs.toFloat() / durMs).coerceIn(0f, 1f) else 0f,
+                            onSeek = { f ->
+                                if (durMs > 0) {
+                                    val target = (f * durMs).toLong()
+                                    exoPlayer.seekTo(target)
+                                    posMs = target
+                                }
+                                controlsNonce++
+                            },
+                            modifier = Modifier.fillMaxWidth(),
+                        )
+                        Row(Modifier.fillMaxWidth()) {
+                            Text(
+                                formatPlayerTime(posMs),
+                                style = catNumeric(11, Color.White.copy(alpha = 0.82f)),
+                            )
+                            Text(
+                                " / ${formatPlayerTime(durMs)}",
+                                style = catNumeric(11, Color.White.copy(alpha = 0.55f)),
+                            )
+                        }
+                    }
+                    // 倍速入口：点按展开竖排档位
+                    Box(
+                        Modifier
+                            .size(44.dp)
+                            .clickable {
+                                speedMenuVisible = !speedMenuVisible
+                                controlsNonce++
+                            },
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        Text(
+                            formatSpeed(playbackSpeed),
+                            fontSize = 12.sp,
+                            fontWeight = FontWeight.SemiBold,
+                            color = Color.White,
+                        )
+                    }
+                    ControlIcon(
+                        if (fullscreen) Icons.Filled.FullscreenExit else Icons.Filled.Fullscreen,
+                        if (fullscreen) "退出全屏" else "全屏",
                         tint = Color.White,
-                        modifier = Modifier.size(28.dp),
-                    )
-                }
-                Column(Modifier.weight(1f)) {
-                    PlayerSeekBar(
-                        fraction = if (durMs > 0) (posMs.toFloat() / durMs).coerceIn(0f, 1f) else 0f,
-                        onSeek = { f ->
-                            if (durMs > 0) {
-                                val target = (f * durMs).toLong()
-                                exoPlayer.seekTo(target)
-                                posMs = target
-                            }
-                            controlsNonce++
-                        },
-                        modifier = Modifier.fillMaxWidth(),
-                    )
-                    Row(Modifier.fillMaxWidth()) {
-                        Text(formatPlayerTime(posMs), style = catNumeric(11, p.text2))
-                        Text(" / ${formatPlayerTime(durMs)}", style = catNumeric(11, p.text3))
+                    ) {
+                        fullscreen = !fullscreen
+                        controlsNonce++
                     }
                 }
             }
         }
 
-        // 手势 / 倍速提示：居中玻璃胶囊，长按快进期间常驻
-        val hudText = if (boosting) "2x 倍速播放中" else hud
-        if (hudText != null) {
+        // 长按 3x：右上角小徽标，不占画面中心
+        if (boosting) {
             Box(
                 Modifier
-                    .align(Alignment.Center)
-                    .bentoSurface(shape = catControlShape(), strong = true)
-                    .padding(horizontal = 16.dp, vertical = 10.dp),
+                    .align(Alignment.TopEnd)
+                    .statusBarsPadding()
+                    .padding(top = 64.dp, end = spec.screenPadding.dp)
+                    .background(Color.Black.copy(alpha = 0.6f), CircleShape)
+                    .padding(horizontal = 10.dp, vertical = 5.dp),
             ) {
-                Text(hudText, color = p.text, fontSize = 14.sp, fontWeight = FontWeight.Medium)
+                Text("3x", color = Color.White, fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
+            }
+        }
+
+        // 操作反馈：顶部居中；亮度贴左边缘、音量贴右边缘
+        hud?.let { text ->
+            val hudAlign = when (hudSide) {
+                1 -> Alignment.CenterStart
+                2 -> Alignment.CenterEnd
+                else -> Alignment.TopCenter
+            }
+            Column(
+                Modifier
+                    .align(hudAlign)
+                    .then(
+                        when (hudSide) {
+                            1 -> Modifier.padding(start = 10.dp)
+                            2 -> Modifier.padding(end = 10.dp)
+                            else -> Modifier.statusBarsPadding().padding(top = 68.dp)
+                        },
+                    )
+                    .background(Color.Black.copy(alpha = 0.62f), catControlShape())
+                    .padding(horizontal = 14.dp, vertical = 8.dp),
+                horizontalAlignment = Alignment.CenterHorizontally,
+            ) {
+                if (hudSide != 0) {
+                    Text(
+                        if (hudSide == 1) "亮度" else "音量",
+                        color = Color.White.copy(alpha = 0.6f),
+                        fontSize = 10.sp,
+                    )
+                }
+                Text(text, color = Color.White, fontSize = 14.sp, fontWeight = FontWeight.Medium)
             }
         }
     }
 }
 
 /** 播放倍速档位 */
-private val PLAYBACK_SPEEDS = listOf(1.0f, 1.25f, 1.5f, 2.0f)
+private val PLAYBACK_SPEEDS = listOf(1.0f, 1.25f, 1.5f, 1.75f, 2.0f)
 
 /** 横向滑动的粗定位跨度：约整段时长的 1/4，限制在 60 秒 ~ 10 分钟 */
 private fun playerSeekSpanMs(durationMs: Long): Long =
@@ -654,15 +725,17 @@ private fun playerSeekSpanMs(durationMs: Long): Long =
 private fun formatSpeed(speed: Float): String = when (speed) {
     1.25f -> "1.25x"
     1.5f -> "1.5x"
+    1.75f -> "1.75x"
     2.0f -> "2.0x"
     else -> "1.0x"
 }
 
-/** 玻璃控制条里的 48dp 图标热区按钮 */
+/** 44dp 图标热区按钮（播放页悬浮控制层用） */
 @Composable
 private fun ControlIcon(
     icon: androidx.compose.ui.graphics.vector.ImageVector,
     desc: String,
+    tint: Color = LocalPalette.current.text,
     onClick: () -> Unit,
 ) {
     Box(
@@ -671,7 +744,7 @@ private fun ControlIcon(
             .clickable(onClick = onClick),
         contentAlignment = Alignment.Center,
     ) {
-        Icon(icon, contentDescription = desc, tint = LocalPalette.current.text, modifier = Modifier.size(20.dp))
+        Icon(icon, contentDescription = desc, tint = tint, modifier = Modifier.size(20.dp))
     }
 }
 
