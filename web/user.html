@@ -2043,7 +2043,7 @@
                 <button class="player-speed-option" type="button" data-rate="0.5" aria-pressed="false"><svg class="player-speed-check" aria-hidden="true"><use href="#ic-check"></use></svg><span>0.5x</span></button>
                 <button class="player-speed-option" type="button" data-rate="0.75" aria-pressed="false"><svg class="player-speed-check" aria-hidden="true"><use href="#ic-check"></use></svg><span>0.75x</span></button>
                 <button class="player-speed-option selected" type="button" data-rate="1" aria-pressed="true"><svg class="player-speed-check" aria-hidden="true"><use href="#ic-check"></use></svg><span>1x</span></button>
-                <button class="player-speed-option selected" type="button" data-rate="1.25" aria-pressed="false"><svg class="player-speed-check" aria-hidden="true"><use href="#ic-check"></use></svg><span>1.25x</span></button>
+                <button class="player-speed-option" type="button" data-rate="1.25" aria-pressed="false"><svg class="player-speed-check" aria-hidden="true"><use href="#ic-check"></use></svg><span>1.25x</span></button>
                 <button class="player-speed-option" type="button" data-rate="1.75" aria-pressed="false"><svg class="player-speed-check" aria-hidden="true"><use href="#ic-check"></use></svg><span>1.75x</span></button>
                 <button class="player-speed-option" type="button" data-rate="2" aria-pressed="false"><svg class="player-speed-check" aria-hidden="true"><use href="#ic-check"></use></svg><span>2x</span></button>
               </div>
@@ -2053,8 +2053,8 @@
                 class="player-control"
                 id="playerMute"
                 type="button"
-                title="静音"
-                aria-label="静音"
+                title="音量"
+                aria-label="音量"
                 aria-expanded="false"
                 aria-controls="playerVolumePanel"
               >
@@ -2917,9 +2917,8 @@
             "playerVolumeIcon",
             volume === 0 ? "#ic-player-muted" : "#ic-player-volume",
           );
-          var action = volume === 0 ? "取消静音" : "静音";
-          $("playerMute").title = action;
-          $("playerMute").setAttribute("aria-label", action);
+          $("playerMute").title = "音量";
+          $("playerMute").setAttribute("aria-label", "音量");
         }
 
         function closePlayerPopovers() {
@@ -3005,12 +3004,6 @@
           });
         });
         $("playerMute").addEventListener("click", function () {
-          if (previewVideo.muted || previewVideo.volume === 0) {
-            previewVideo.muted = false;
-            if (previewVideo.volume === 0) previewVideo.volume = 1;
-          } else {
-            previewVideo.muted = true;
-          }
           updatePlayerVolume();
           togglePlayerPopover("playerVolumePanel", "playerMute");
         });
@@ -3147,9 +3140,21 @@
             previewHls = null;
           }
           var video = $("previewVideo");
+          closePlayerPopovers();
+          previewSeeking = false;
+          if (document.pictureInPictureElement === video) {
+            document.exitPictureInPicture().catch(function () {});
+          }
+          if (document.fullscreenElement === $("customPlayer")) {
+            document.exitFullscreen().catch(function () {});
+          }
           video.pause();
           video.removeAttribute("src");
+          video.load();
           $("playerMask").classList.remove("show");
+          updatePlayerPlay();
+          updatePlayerProgress();
+          updatePlayerRate();
         }
 
         $("playerClose").addEventListener("click", function () {
